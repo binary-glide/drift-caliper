@@ -4,14 +4,18 @@ Feature: Judge adapter with required pinned model version
   So that I can trust that score changes reflect my agent's behaviour
   and not silent model updates
 
-  # -- Open decision (pending system-architect) --
-  # Whether a missing or invalid model version causes judge creation to
-  # FAIL (error) or merely WARN is pending ratification.
+  # -- Ratified decision (product owner, 2026-09-08) --
+  # A missing or invalid model version causes judge creation to FAIL
+  # loudly. It does NOT merely warn.
   #
-  # These scenarios follow the PRD recommendation: creation fails.
-  # See PRD open question: "A missing model version should cause judge
-  # creation to fail (error), not merely warn."
-  # Owner: system-architect -- confirm enforcement mechanism in ADR.
+  # Rationale: an unpinned judge model silently invalidates every
+  # statistical claim downstream, and the cost is asymmetric -- relaxing
+  # an error to a warning later is non-breaking, whereas tightening a
+  # warning to an error is a breaking change.
+  #
+  # The scenarios below encode that decision. What remains open for
+  # system-architect is the enforcement MECHANISM only -- exception type
+  # and message content -- not whether it fails.
 
   # --- Happy path (BR-1 happy, BR-2 happy) ---
 
