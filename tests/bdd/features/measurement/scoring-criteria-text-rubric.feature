@@ -4,19 +4,22 @@ Feature: Scoring criteria as a text rubric
   So that my quality scores measure what matters to my specific use case
   rather than an opaque LLM default
 
-  # -- Pending decision (OQ-1) --
-  # Whether missing or invalid scoring criteria should cause
-  # configuration to FAIL or merely WARN has not been ratified.
+  # -- Ratified decision (OQ-1, product owner, 2026-09-08) --
+  # Invalid or missing scoring criteria RAISE. They do not warn.
   #
-  # The PRD recommends an error (at scoring time at the latest),
-  # because unanchored scores produce baselines nobody can explain.
-  # However, the case is weaker than BIN-57's model-pinning
-  # fail-loudly decision: missing criteria undermine interpretability,
-  # not statistical integrity directly.
+  # Settled by a general library principle rather than a ruling on this
+  # story: where Caliper cannot do its job it raises, and the consuming
+  # application decides whether to abort, retry, degrade or log. A
+  # library does not set failure policy for its caller.
   #
-  # The scenarios below follow the PRD recommendation (invalid criteria
-  # are rejected). system-architect owns the final enforcement mechanism
-  # and timing.
+  # Note the route matters. This lands on the same answer as BIN-57's
+  # model-pinning decision, but NOT by the same argument -- the
+  # statistical-integrity case is genuinely weaker here, since missing
+  # criteria undermine interpretability rather than invalidating the
+  # control limits. Do not treat that weaker argument as strengthened.
+  #
+  # system-architect owns the enforcement mechanism and timing only,
+  # not whether it raises.
 
   # -- Pending decision (OQ-3) --
   # Whether criteria are configured at judge creation, at monitoring
