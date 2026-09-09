@@ -2,18 +2,15 @@
 
 See ``docs/domain-model.md`` (Judge -- immutable configured adapter) and
 ADR-002 for the error contract enforced at creation.
-
-Implementation note (BIN-57 domain-implementer): this module currently
-scaffolds the public shape only, so that
-``tests/unit/measurement/test_judge.py`` and
-``tests/bdd/test_judge_adapter_pinned_model_version.py`` can import and run.
-``Judge.create`` raises ``NotImplementedError`` until validation and
-construction land.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from caliper.errors import InvalidParameterError
+
+_MODEL_VERSION_CONSTRAINT = "must be a non-empty string that is not entirely whitespace"
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,9 +19,41 @@ class ModelVersion:
 
     Preserved exactly as provided, including any surrounding whitespace.
     Equality follows the wrapped ``value`` (dataclass value equality).
+
+    Validation lives here, in ``__post_init__``, rather than in any caller
+    (e.g. ``Judge.create``) so the invariant holds for every construction
+    path -- there is no way to build a ``ModelVersion`` that wraps an empty
+    or whitespace-only string.
+
+    Raises:
+        InvalidParameterError: ``value`` is empty or contains only
+            whitespace. ``context["kind"]`` is always ``"invalid"`` here --
+            a value was supplied, just not one that satisfies the
+            constraint. The ``"missing"`` case (no value supplied at all)
+            is a distinct condition handled by callers such as
+            ``Judge.create`` before a ``ModelVersion`` is ever constructed.
     """
 
     value: str
+
+    def __post_init__(self) -> None:
+        """Reject empty or whitespace-only model version strings."""
+        if self.value.strip() == "":
+            raise InvalidParameterError(
+                "model_version must be a non-empty, non-whitespace string",
+                context={
+                    "parameter": "model_version",
+                    "constraint": _MODEL_VERSION_CONSTRAINT,
+                    "kind": "invalid",
+                    "provided": self.value,
+                },
+                recovery_hint=(
+                    "Pass the exact model version string your provider "
+                    "returns for the model you are pinning to, e.g. "
+                    "'claude-sonnet-4-5-20250929'. Whitespace-only strings "
+                    "do not identify a model."
+                ),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +89,25 @@ class Judge:
             A new, immutable ``Judge`` pinned to ``model_version``.
 
         Raises:
-            InvalidParameterError: ``model_version`` was omitted, empty,
-                or whitespace-only.
+            InvalidParameterError: ``model_version`` was omitted (
+                ``context["kind"] == "missing"``), or was supplied but is
+                empty or whitespace-only (``context["kind"] == "invalid"``,
+                raised from ``ModelVersion.__post_init__``).
         """
-        raise NotImplementedError
+        if model_version is None:
+            raise InvalidParameterError(
+                "model_version is required to pin measurement stability",
+                context={
+                    "parameter": "model_version",
+                    "constraint": _MODEL_VERSION_CONSTRAINT,
+                    "kind": "missing",
+                },
+                recovery_hint=(
+                    "Call Judge.create(model_version=...) with the exact "
+                    "model version string your provider returns, e.g. "
+                    "'claude-sonnet-4-5-20250929'. An unpinned judge "
+                    "silently invalidates every statistical claim "
+                    "downstream, so this is a required parameter."
+                ),
+            )
+        return cls(model_version=ModelVersion(value=model_version))
