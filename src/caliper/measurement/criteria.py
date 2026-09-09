@@ -66,8 +66,9 @@ class ScoringCriteria:
                 },
                 recovery_hint=(
                     "Pass a text rubric describing what the judge should "
-                    "evaluate, e.g. 'Evaluate the response for factual "
-                    "accuracy and helpfulness.'. Whitespace-only strings "
-                    "carry no anchoring guarantee for the judge."
+                    "evaluate, for example: 'Evaluate the response for "
+                    "factual accuracy and helpfulness.' Criteria anchor the "
+                    "judge's assessment, so blank text leaves it scoring "
+                    "against an opaque default."
                 ),
             )
