@@ -109,37 +109,52 @@ estimation, not better -- bounded, skewed distributions compress the
 information available in each observation relative to a normal distribution
 with the same variance.
 
-### The sigma estimator efficiency question
+### The sigma estimator and per-chart-type sensitivity
 
-ADR-004 established that the Shewhart I-chart estimates sigma from the average
-moving range (MR) divided by the unbiasing constant d_2, while EWMA and CUSUM
-use the sample standard deviation. These are different quantities.
+~~ADR-004 established that the Shewhart I-chart estimates sigma from the average
+moving range while EWMA and CUSUM use the sample standard deviation.~~ **Corrected
+(2026-09-09):** ADR-004 amendment (2026-09-09) established that **all three chart
+types** use the MR-based sigma estimate (MR-bar / d_2) on individual observations.
+The prior inference that EWMA and CUSUM use the sample standard deviation was not
+established by ADR-004 and is contradicted by standard SPC practice. See ADR-004
+amendment note for the full reasoning and citation status.
 
-The MR-based estimator uses only adjacent pairs of observations, discarding
-information from non-adjacent pairs. It is statistically **less efficient** than
-the sample standard deviation for normally distributed data. The relative
-efficiency is a known quantity in the SPC literature (see Montgomery 2013,
-Chapter 6; Cryer and Ryan 1990). This means the Shewhart chart's sigma
-estimate has higher variance than EWMA/CUSUM's for the same number of
-observations.
+With all three chart types sharing the same sigma estimator, the **estimator
+efficiency asymmetry** described in the original text no longer applies: the MR
+estimator's reduced efficiency (relative to the sample standard deviation) affects
+all chart types equally, not Shewhart alone.
 
-**Does this mean Shewhart needs more observations?** In principle, yes -- a less
-efficient estimator needs more data to achieve the same precision. However:
+**Zwetsloot et al. (2017) remains relevant, but the explanation changes.** Their
+finding -- that the Shewhart chart's conditional ARL has more variability than
+EWMA or CUSUM under estimated parameters -- is not explained by a less efficient
+sigma estimator (all three now use the same estimator). The variability difference
+must arise from other structural properties of the Shewhart chart: EWMA and CUSUM
+smooth or accumulate observations, which dampens the effect of sigma estimation
+error on individual chart decisions; the Shewhart chart compares each raw
+observation against limits directly, with no smoothing buffer. The greater
+conditional ARL variability for Shewhart is consistent with its unsmoothed
+comparison, not with a different estimator.
 
-1. Zwetsloot et al. (2017) showed that under estimated parameters, the
-   *Shewhart* chart's conditional ARL has **more variability** than EWMA or
-   CUSUM, consistent with the less efficient sigma estimator.
-2. The Shewhart chart is used for detecting **large, acute** shifts (ADR-001),
-   not small sustained drift. Its detection power for large shifts is less
-   sensitive to sigma estimation precision than EWMA/CUSUM's detection of
-   small shifts.
-3. The non-normality effect on the MR estimator vs. the sample standard
-   deviation has not been characterised for LLM judge score distributions.
+**Does the per-chart-type deferral still hold?** Yes, and it is strengthened.
+The original case rested partly on the MR estimator being less efficient than the
+sample standard deviation for Shewhart alone. That asymmetry is gone. What remains
+is the Zwetsloot finding (greater conditional ARL variability for Shewhart) and
+the structural argument (unsmoothed comparison amplifies estimation error). These
+are still reasons a per-chart-type default *might* be warranted, but they are
+weaker than the original case because the estimator efficiency difference is no
+longer a factor. The case for per-chart-type defaults now rests entirely on
+empirical evidence from the simulation study, not on a theoretical efficiency
+gap. The BIN-64 mechanism already supports per-chart-type thresholds (BR-5).
 
-Setting per-chart-type defaults now would add UX complexity without empirical
-validation. The mechanism already supports per-chart-type thresholds (BIN-64
-BR-5). Per-chart-type defaults should follow from the simulation study
-recommended below, not from theoretical efficiency ratios alone.
+**Does the default of 100 still stand?** Yes. The 100-observation default was
+justified from the Phase I estimation literature (Quesenberry 1993; Jones,
+Champ & Rigdon 2001) which addresses the sample size needed for reliable
+parameter estimates. That literature concerns Phase I sample size, not the choice
+of estimator. The MR estimator's lower efficiency means each observation
+contributes slightly less information to the sigma estimate than the sample
+standard deviation would, but this effect is shared equally across all chart types
+and does not change the order-of-magnitude guidance from the literature. The
+default of 100 remains the minimum defensible threshold for all chart types.
 
 ### Sentry context
 
@@ -229,16 +244,15 @@ mechanism is in place. Per-chart-type defaults are **deferred** to the
 simulation study described below. Until that study runs, all chart types share
 the 100-observation default.
 
-The theoretical case for a higher Shewhart default (less efficient MR-based
-sigma estimator) is noted but not acted upon, because:
-
-- The efficiency difference is known only for normally distributed data.
-- The Shewhart chart's primary role (detecting large acute shifts) is less
-  sensitive to sigma estimation precision than EWMA/CUSUM's detection of
-  small sustained shifts.
-- Introducing per-chart-type defaults adds UX complexity. The complexity
-  should be justified by empirical evidence, not theoretical efficiency
-  ratios.
+~~The theoretical case for a higher Shewhart default (less efficient MR-based
+sigma estimator) is noted but not acted upon.~~ **Corrected (2026-09-09):** All
+three chart types now use the same MR-based sigma estimator (ADR-004 amendment,
+2026-09-09), so the estimator efficiency asymmetry no longer applies. Zwetsloot
+et al. (2017) still showed greater conditional ARL variability for Shewhart under
+estimated parameters, which may justify a per-chart-type default, but this is
+now attributed to the Shewhart chart's unsmoothed comparison rather than to a
+different estimator. The case for per-chart-type defaults rests on empirical
+evidence from the simulation study, not on a theoretical efficiency gap.
 
 ## Alternatives considered
 
@@ -274,12 +288,15 @@ fewer observations) does not justify the increased risk of unreliable limits.
 
 ### Per-chart-type defaults from the start
 
-**Deferred.** The theoretical case exists (Shewhart's MR-based sigma estimator
-is less efficient), but empirical validation for LLM judge score distributions
-is needed. The BIN-64 mechanism supports per-chart-type thresholds. A
-simulation study should determine whether per-chart-type defaults are
-warranted and what the values should be. Introducing them without empirical
-backing would be false precision.
+**Deferred.** ~~The theoretical case exists (Shewhart's MR-based sigma estimator
+is less efficient).~~ **Corrected (2026-09-09):** all three chart types use the
+same MR-based sigma estimator, so the estimator efficiency asymmetry is gone. The
+remaining case rests on Zwetsloot et al. (2017) showing greater conditional ARL
+variability for Shewhart (attributed to unsmoothed comparison, not estimator
+choice). Empirical validation for LLM judge score distributions is still needed.
+The BIN-64 mechanism supports per-chart-type thresholds. A simulation study should
+determine whether per-chart-type defaults are warranted and what the values should
+be. Introducing them without empirical backing would be false precision.
 
 ### No default (require the engineer to specify)
 
@@ -381,7 +398,10 @@ mechanism.
   (1) from ADR-003's Consequences section, applied to sample size.
 - **ADR-004 (fitted artefact protocol):** Established that the artefact reports
   both requested and achieved ARL_0. This is the engineer's tool for assessing
-  whether their baseline was large enough.
+  whether their baseline was large enough. ADR-004 amendment (2026-09-09)
+  established that all three chart types use MR-based sigma estimation --
+  correcting this ADR's inference that EWMA and CUSUM use the sample standard
+  deviation.
 - **BIN-64 BR-3, BR-4, BR-5:** Configurable threshold, library default, and
   per-chart-type support. All satisfied by this decision.
 
@@ -401,3 +421,51 @@ mechanism.
 |---|---|
 | Exact Jones et al. (2001) table entries for m = 100 | Full-text paywalled; finding confirmed via secondary citations |
 | Relative efficiency of MR/d2 vs sample std dev (specific number) | Not pinned; stated qualitatively as "less efficient" per standard SPC literature |
+
+---
+
+## Amendment (2026-09-09): correct sigma estimator inference
+
+**Trigger:** ADR-004 amendment (2026-09-09) established that all three chart types
+use MR-based sigma estimation on individual observations. This ADR's "sigma
+estimator efficiency question" section had inferred that "EWMA and CUSUM use the
+sample standard deviation" -- an inference ADR-004 never established and which is
+contradicted by standard SPC practice.
+
+### What changed
+
+1. **Section "The sigma estimator efficiency question"** rewritten as "The sigma
+   estimator and per-chart-type sensitivity." The incorrect premise (different
+   estimators per chart type) is struck. The analysis is reframed around the
+   corrected premise (all chart types share the MR estimator).
+
+2. **Zwetsloot et al. (2017) re-attributed.** Their finding of greater conditional
+   ARL variability for Shewhart is no longer explained by a less efficient sigma
+   estimator. It is attributed to the Shewhart chart's unsmoothed comparison --
+   EWMA and CUSUM smooth or accumulate observations, dampening the effect of sigma
+   estimation error on individual chart decisions.
+
+3. **Per-chart-type deferral stands, strengthened.** The original case for per-
+   chart-type defaults rested partly on the estimator efficiency asymmetry, which
+   is gone. The remaining case (Zwetsloot's conditional ARL variability) is weaker
+   and rests entirely on empirical evidence from the simulation study.
+
+4. **Default of 100 stands unchanged.** The default was justified from Phase I
+   estimation literature (Quesenberry; Jones et al.), which concerns sample size
+   for reliable parameter estimates regardless of estimator choice. The MR
+   estimator's lower efficiency affects all chart types equally and does not change
+   the order-of-magnitude guidance.
+
+### What did not change
+
+- The default of 100 observations.
+- The per-chart-type deferral to the simulation study.
+- The normality and estimation error caveats.
+- The BIN-84 sensitivity characterisation recommendation.
+- The simulation study specification.
+- All verified claims remain valid.
+
+### Feature file impact
+
+**No feature files change.** No feature file names a sigma estimator or a per-
+chart-type baseline size. Zero re-review cost.
