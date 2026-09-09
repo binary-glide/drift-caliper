@@ -1,0 +1,44 @@
+# Action versions verified live against the GitHub releases API on 2026-09-09:
+# actions/checkout v7.0.1 (2026-07-20), astral-sh/setup-uv v10.0.1 (2026-08-14).
+name: CI
+
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The support window declared in pyproject's requires-python and
+        # classifiers. All three are tested; none is a smoke run.
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --frozen
+      - run: uv run pytest
