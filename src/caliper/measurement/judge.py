@@ -1,14 +1,25 @@
 """The Judge -- an immutable configured adapter pinned to a model version.
 
-See ``docs/domain-model.md`` (Judge -- immutable configured adapter) and
-ADR-002 for the error contract enforced at creation.
+See ``docs/domain-model.md`` (Judge -- immutable configured adapter),
+ADR-002 for the error contract enforced at creation, and
+``docs/architecture/adr/006-scoring-api-surface-and-judge-provider-port.md``
+for ``provider``, ``criteria`` and ``score()``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from caliper.errors import InvalidParameterError
+from caliper.measurement.criteria import ScoringCriteria
+from caliper.measurement.provider import JudgeProviderPort
+
+if TYPE_CHECKING:
+    # Deferred to avoid a circular import: result.py -> provenance.py ->
+    # judge.py. Safe under `from __future__ import annotations` since the
+    # annotation is never evaluated at runtime.
+    from caliper.measurement.result import ScoringResult
 
 _MODEL_VERSION_CONSTRAINT = "must be a non-empty string that is not entirely whitespace"
 
@@ -65,12 +76,25 @@ class Judge:
     attempting to assign to it raises ``dataclasses.FrozenInstanceError``
     (ADR-002 section 7: immutability violations are not part of the
     ``CaliperError`` taxonomy).
+
+    ``provider`` and ``criteria`` are optional additions (ADR-006 section 2)
+    -- both default to ``None`` and are purely additive over BIN-57's
+    original single-field ``Judge``. Neither is validated at creation
+    beyond what ``ScoringCriteria.__post_init__`` already enforces; their
+    absence at ``score()`` time is what raises ``MissingPrerequisiteError``.
     """
 
     model_version: ModelVersion
+    provider: JudgeProviderPort | None = None
+    criteria: ScoringCriteria | None = None
 
     @classmethod
-    def create(cls, model_version: str | None = None) -> Judge:
+    def create(
+        cls,
+        model_version: str | None = None,
+        provider: JudgeProviderPort | None = None,
+        criteria: str | None = None,
+    ) -> Judge:
         """Create a judge with a required, pinned model version.
 
         ``model_version`` is optional in the Python signature but required
@@ -80,10 +104,21 @@ class Judge:
         optional-with-required-semantics pattern ADR-004 established for
         the fitting API's ``target_arl``.
 
+        ``provider`` and ``criteria`` are both optional (ADR-006 section 2).
+        A missing ``provider`` or missing (judge-level and per-call)
+        ``criteria`` is not an error here -- it only becomes
+        ``MissingPrerequisiteError`` when ``score()`` actually needs it.
+
         Args:
             model_version: The model version string to pin. Must be
                 non-empty and not whitespace-only. Preserved exactly as
                 provided, including surrounding whitespace.
+            provider: The judge provider port used by ``score()``. Optional
+                at creation; required by the time ``score()`` runs.
+            criteria: The judge-level scoring criteria text. Optional at
+                creation; may also be supplied (or overridden) per call to
+                ``score()``. Must be non-empty and not whitespace-only if
+                supplied -- validated by ``ScoringCriteria``.
 
         Returns:
             A new, immutable ``Judge`` pinned to ``model_version``.
@@ -92,7 +127,9 @@ class Judge:
             InvalidParameterError: ``model_version`` was omitted (
                 ``context["kind"] == "missing"``), or was supplied but is
                 empty or whitespace-only (``context["kind"] == "invalid"``,
-                raised from ``ModelVersion.__post_init__``).
+                raised from ``ModelVersion.__post_init__``); or ``criteria``
+                was supplied but is empty or whitespace-only (raised from
+                ``ScoringCriteria.__post_init__``).
         """
         if model_version is None:
             raise InvalidParameterError(
@@ -110,4 +147,64 @@ class Judge:
                     "downstream, so this is a required parameter."
                 ),
             )
-        return cls(model_version=ModelVersion(value=model_version))
+        return cls(
+            model_version=ModelVersion(value=model_version),
+            provider=provider,
+            criteria=ScoringCriteria(value=criteria) if criteria is not None else None,
+        )
+
+    def score(
+        self,
+        agent_output: str,
+        *,
+        agent_input: str | None = None,
+        criteria: str | None = None,
+    ) -> ScoringResult:
+        """Score an agent output and return a structured, provenanced result.
+
+        Not yet implemented -- domain-implementer fills in the
+        orchestration described in ADR-006 section 2:
+
+        1. Raise ``MissingPrerequisiteError`` (``context["prerequisite"] ==
+           "judge_provider"``, ``context["operation"] == "score"``) if
+           ``self.provider`` is ``None``, before doing anything else.
+        2. Resolve effective criteria: ``criteria`` (this call) if given,
+           else ``self.criteria`` (judge-level) if set, else raise
+           ``MissingPrerequisiteError`` (``context["prerequisite"] ==
+           "scoring_criteria"``, ``context["operation"] == "score"``) --
+           in both cases before the provider is ever called.
+        3. Reject an empty or whitespace-only ``agent_output`` with
+           ``InvalidParameterError`` (``context["parameter"] ==
+           "agent_output"``, ``context["kind"] == "invalid"``) -- ADR-006
+           section 6.
+        4. Call ``self.provider.score(...)``, letting ``ProviderError``,
+           ``MalformedResponseError`` and ``JudgeRefusalError`` propagate
+           unchanged.
+        5. Assemble and return a ``ScoringResult`` whose ``provenance`` is
+           built from ``self.model_version`` and the resolved
+           ``ScoringCriteria`` (ADR-006 section 7).
+
+        Args:
+            agent_output: The agent output to score. Required; must be
+                non-empty and not whitespace-only.
+            agent_input: The agent input that produced ``agent_output``,
+                when available. Not validated for emptiness, not carried
+                onto ``Provenance`` or ``ScoringResult`` (ADR-006 section 3).
+            criteria: Criteria to use for this call only, overriding
+                ``self.criteria`` without mutating it (ADR-006 section 2,
+                resolving BIN-58 OQ-3).
+
+        Returns:
+            The structured, immutable scoring result.
+
+        Raises:
+            MissingPrerequisiteError: no provider is configured, or no
+                criteria are resolvable from either this call or the judge.
+            InvalidParameterError: ``agent_output`` is empty or
+                whitespace-only.
+            ProviderError: the provider's call failed.
+            MalformedResponseError: the provider's response could not be
+                interpreted.
+            JudgeRefusalError: the provider declined to score.
+        """
+        raise NotImplementedError
