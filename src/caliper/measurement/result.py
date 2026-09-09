@@ -6,8 +6,10 @@ section 7.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
+from caliper.errors import InvalidParameterError
 from caliper.measurement.provenance import Provenance
 
 
@@ -28,10 +30,24 @@ class ScoringResult:
     def __post_init__(self) -> None:
         """Reject a non-finite score.
 
-        Not yet implemented -- domain-implementer fills this in per ADR-006
-        section 5: raise ``InvalidParameterError`` (``context["parameter"]
-        == "score"``, ``context["kind"] == "invalid"``) when ``score`` is
-        ``NaN`` or positive/negative infinity. No constraint is placed on
-        ``reasoning`` content or on an already-validated ``provenance``.
+        Raises ``InvalidParameterError`` (``context["parameter"] ==
+        "score"``, ``context["kind"] == "invalid"``) when ``score`` is
+        ``NaN`` or positive/negative infinity (ADR-006 section 5). No
+        constraint is placed on ``reasoning`` content or on an
+        already-validated ``provenance``.
         """
-        raise NotImplementedError
+        if not math.isfinite(self.score):
+            raise InvalidParameterError(
+                "score must be a finite number",
+                context={
+                    "parameter": "score",
+                    "constraint": "must be a finite float (not NaN or +/-infinity)",
+                    "kind": "invalid",
+                    "provided": self.score,
+                },
+                recovery_hint=(
+                    "Ensure the judge provider returns a real, finite "
+                    "numeric score. A NaN or infinite value cannot be "
+                    "recorded as a measurement."
+                ),
+            )

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from caliper.errors import InvalidParameterError
+from caliper.errors import InvalidParameterError, MissingPrerequisiteError
 from caliper.measurement.criteria import ScoringCriteria
 from caliper.measurement.provider import JudgeProviderPort
 
@@ -162,8 +162,7 @@ class Judge:
     ) -> ScoringResult:
         """Score an agent output and return a structured, provenanced result.
 
-        Not yet implemented -- domain-implementer fills in the
-        orchestration described in ADR-006 section 2:
+        Orchestration, per ADR-006 section 2:
 
         1. Raise ``MissingPrerequisiteError`` (``context["prerequisite"] ==
            "judge_provider"``, ``context["operation"] == "score"``) if
@@ -207,4 +206,62 @@ class Judge:
                 interpreted.
             JudgeRefusalError: the provider declined to score.
         """
-        raise NotImplementedError
+        # Deferred imports to avoid a circular import at module load time:
+        # result.py -> provenance.py -> judge.py.
+        from caliper.measurement.provenance import Provenance
+        from caliper.measurement.result import ScoringResult
+
+        if self.provider is None:
+            raise MissingPrerequisiteError(
+                "scoring requires a configured judge provider",
+                context={"prerequisite": "judge_provider", "operation": "score"},
+                recovery_hint="Pass provider=... to Judge.create().",
+            )
+
+        effective_criteria_raw = (
+            criteria
+            if criteria is not None
+            else (self.criteria.value if self.criteria is not None else None)
+        )
+        if effective_criteria_raw is None:
+            raise MissingPrerequisiteError(
+                "scoring requires criteria",
+                context={"prerequisite": "scoring_criteria", "operation": "score"},
+                recovery_hint="Pass criteria=... to Judge.create() or to score().",
+            )
+        effective_criteria = ScoringCriteria(value=effective_criteria_raw)
+
+        if agent_output.strip() == "":
+            raise InvalidParameterError(
+                "agent_output must be a non-empty, non-whitespace string",
+                context={
+                    "parameter": "agent_output",
+                    "constraint": (
+                        "must be a non-empty string that is not entirely whitespace"
+                    ),
+                    "kind": "invalid",
+                    "provided": agent_output,
+                },
+                recovery_hint=(
+                    "Pass the agent's actual output text. If the agent "
+                    "genuinely produced no response, pass a caller-defined "
+                    "sentinel string (e.g. '[no response]') instead of an "
+                    "empty string."
+                ),
+            )
+
+        response = self.provider.score(
+            model_version=self.model_version.value,
+            criteria=effective_criteria.value,
+            agent_output=agent_output,
+            agent_input=agent_input,
+        )
+
+        return ScoringResult(
+            score=response.score,
+            reasoning=response.reasoning,
+            provenance=Provenance(
+                model_version=self.model_version,
+                scoring_criteria=effective_criteria,
+            ),
+        )
