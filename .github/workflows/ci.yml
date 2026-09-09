@@ -1,5 +1,7 @@
 # Action versions verified live against the GitHub releases API on 2026-09-09:
 # actions/checkout v7.0.1 (2026-07-20), astral-sh/setup-uv v10.0.1 (2026-08-14).
+# setup-uv is pinned to the exact tag: it stopped publishing floating major
+# tags after v7.6, so `@v10` does not resolve.
 name: CI
 
 on:
@@ -17,12 +19,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run ty check --error-on-warning
       - run: uv run mypy
 
   test:
@@ -36,7 +39,7 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}

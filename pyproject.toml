@@ -39,6 +39,7 @@ dev = [
   "pytest-bdd>=8.1",
   "hypothesis>=6.168",
   "mypy>=2.3",
+  "ty>=0.0.79",
   "ruff>=0.16",
 ]
 
@@ -97,8 +98,20 @@ convention = "google"
 "tests/**" = ["D"]
 
 # ---------------------------------------------------------------------------
-# mypy -- strict. BIN-85: "Library ships with strict type annotations."
-# Consumers rely on these types; they are part of the public contract.
+# Type checking runs twice, on purpose.
+#
+# `ty` is the house Astral toolchain alongside uv and ruff, and it is fast
+# enough to run on every save. It is the first gate.
+#
+# `mypy --strict` stays as the second gate because Caliper ships `py.typed`:
+# its annotations are a public contract that consumers check against mypy and
+# pyright, not against ty. ty 0.0.79 is 0.0.x beta with no strict mode and no
+# equivalent of `disallow_untyped_defs` / `disallow_any_generics` -- the exact
+# checks that make BIN-85's "ships with strict type annotations" enforceable
+# rather than aspirational. Drop mypy when ty can express that, not before.
+#
+# ty needs no config here: it infers the target version from requires-python
+# and discovers the project from pyproject.toml.
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.11"
