@@ -127,17 +127,24 @@ identified. BIN-59 BR-4's "at minimum" clause explicitly permits extension.
 ### 3. Missing required parameter is subsumed under `invalid_parameter`
 
 A missing required parameter (e.g. omitting false alarm tolerance in BIN-65) is
-classified as `invalid_parameter`, not a separate category. The `context` dict
-distinguishes the sub-case: when a value was provided, `context["provided"]` is
-present; when a required parameter was omitted, it is absent.
+classified as `invalid_parameter`, not a separate category. The sub-case is
+discriminated positively by a **required** `context["reason"]` field:
+
+- `reason = "missing"` -- the parameter was not provided at all.
+- `reason = "invalid"` -- a value was provided but violates the constraint.
+
+When a value was provided, `context["provided"]` carries that value. When the
+parameter was omitted, `context["provided"]` is absent -- but nothing asserts on
+its absence. The discriminator is `reason`, which is always present and
+positively assertable: `assert error.context["reason"] == "missing"`.
 
 **Rationale:** The recovery action is the same -- fix your configuration. The
 distinction between "you didn't pass it" and "you passed a bad value" is captured
-in the structured context without inflating the taxonomy. Python's own
-`TypeError` (missing arg) vs `ValueError` (bad arg) distinction exists at the
-language level; Caliper's domain taxonomy does not need to replicate it because
-the consumer's branching decision is "is this a configuration problem?" not "is
-this a missing-vs-bad-value problem?"
+in the structured context via a positively assertable field, without inflating
+the taxonomy. Python's own `TypeError` (missing arg) vs `ValueError` (bad arg)
+distinction exists at the language level; Caliper's domain taxonomy does not need
+to replicate it because the consumer's branching decision is "is this a
+configuration problem?" not "is this a missing-vs-bad-value problem?"
 
 ### 4. Recovery guidance: structured context fields, not prose
 
@@ -177,7 +184,7 @@ Implementations may add more. Removing a required field is a breaking change.
 
 | Category | Required context keys | Purpose |
 |---|---|---|
-| `invalid_parameter` | `parameter: str`, `constraint: str` | Which parameter is invalid and what constraint it violates. `provided: Any` is present when a value was given; absent when the parameter was omitted. |
+| `invalid_parameter` | `parameter: str`, `constraint: str`, `reason: str` | Which parameter is invalid, what constraint it violates, and whether the parameter was `"missing"` or `"invalid"`. `provided: Any` carries the supplied value when one was given. |
 | `missing_prerequisite` | `prerequisite: str`, `operation: str` | What is missing and what operation it blocks. |
 | `provider_failure` | `provider: str`, `operation: str` | Which provider failed and what operation was attempted. |
 | `malformed_response` | `operation: str`, `expected_shape: str` | What operation produced the response and what shape was expected. |
@@ -274,8 +281,10 @@ serves a different purpose: Python needs to separate "wrong number of arguments"
 (caller used the wrong function signature) from "right number, wrong value."
 Caliper's domain concern is "your configuration is wrong" -- whether the wrongness
 is absence or invalidity, the recovery is the same: read the `parameter` and
-`constraint` context fields, fix it. The sub-case is captured in `context` by the
-presence/absence of the `provided` field.
+`constraint` context fields, fix it. The sub-case is positively discriminated by
+`context["reason"]` (`"missing"` vs `"invalid"`), so a test that needs the
+distinction asserts `error.context["reason"] == "missing"` -- a positive check,
+consistent with every other assertion in this contract.
 
 ## Alternatives considered
 
@@ -328,8 +337,10 @@ A `MissingParameterError` alongside `InvalidParameterError`, following Python's
 `TypeError`/`ValueError` split.
 
 **Rejected.** The recovery action is identical (fix your configuration). The
-sub-case distinction is captured in the `context` dict (`provided` field present
-vs absent). A tenth category for an edge case of an existing category adds
+sub-case distinction is positively discriminated by `context["reason"]`
+(`"missing"` vs `"invalid"`) -- a required field, assertable the same way as
+every other context field in the contract. A tenth category for an edge case
+of an existing category adds
 taxonomy size without proportional clarity. Consumers asking "is this a
 configuration problem?" should not need to catch two types.
 
@@ -375,6 +386,31 @@ dispatch mechanism. Error codes add an indirection layer that duplicates what
 - **No new dependencies.** The error contract uses only Python builtins.
 - **No version-specific features.** Works on Python 3.11, 3.12, and 3.13
   identically.
+
+### Open dependency: missing-parameter expressibility depends on API surface
+
+BIN-65 SC9 asserts that omitting the false alarm tolerance produces an
+`InvalidParameterError` classifiable as `invalid_parameter` with
+`reason = "missing"`. This is only possible if the parameter is
+**optional-with-required-semantics** in the Python signature (e.g. defaulted to
+`None`, or a key absent from a configuration mapping). If the API surface instead
+makes the parameter a genuinely required positional or keyword argument, Python's
+own `TypeError` is raised at the call site before any Caliper code executes --
+no `CaliperError` is produced, and SC9's assertion cannot be written as stated.
+
+Both outcomes are legitimate:
+- **Optional-with-required-semantics:** `InvalidParameterError(reason="missing")`
+  fires from inside Caliper. SC9 is implementable as written.
+- **Genuinely required argument:** Python's `TypeError` fires before Caliper runs.
+  SC9 would need to assert `TypeError` instead of `InvalidParameterError`, or
+  the scenario would need rewording.
+
+This ADR does not design the API surface. The dependency is recorded so that
+`domain-modeller` and `backend-test-writer` confirm SC9's implementability when
+the fitting interface is specified. If the API surface uses genuinely required
+arguments for false alarm tolerance, the missing case belongs to Python's
+`TypeError` and never reaches this taxonomy -- a legitimate outcome that does not
+weaken the contract.
 
 ### Reversibility
 
@@ -807,3 +843,20 @@ re-review.**
 **Re-review cost:** BIN-57 (3 changed scenarios out of 7) and BIN-58 (2 out
 of 7). Both re-reviews are narrowly scoped to the error-handling scenarios;
 the happy-path and edge-case scenarios are unaffected.
+
+**`reason` field impact on migration:** The addition of `context["reason"]` as a
+required field for `invalid_parameter` (amendment, distinguishing `"missing"`
+from `"invalid"`) does not move any scenario from cosmetic to material. BIN-64
+SC11 (zero/negative threshold) and BIN-65 SC7/SC8 (invalid smoothing/tolerance)
+implicitly describe the `"invalid"` sub-case -- the step text references what is
+wrong with the value. BIN-65 SC9 (missing tolerance) implicitly describes the
+`"missing"` sub-case -- the step text says the parameter "is required." The step
+definitions will assert `reason` internally; the Gherkin wording already
+disambiguates the condition without naming the field.
+
+**API-shape dependency (BIN-65 SC9):** Whether a missing false alarm tolerance
+surfaces as `InvalidParameterError(reason="missing")` or as Python's `TypeError`
+depends on the API surface design (not yet made). If the fitting interface uses
+a genuinely required Python argument, `TypeError` fires before Caliper code
+runs and SC9 would need rewording. This must be confirmed when the API surface
+is designed. See the open dependency note in Consequences.
