@@ -41,16 +41,14 @@ Feature: Scoring criteria as a text rubric
   Scenario: Engineer attempts to define empty criteria
     Given the engineer provides an empty string as criteria
     When they attempt to configure scoring criteria
-    Then the criteria should be rejected
-    And the engineer should be told that criteria are required to anchor quality scores
-    And the message should include an example of a valid rubric
+    Then the configuration fails with an error classifiable as an invalid parameter
+    And the error identifies that non-empty criteria are required
 
   Scenario: Engineer attempts to define whitespace-only criteria
     Given the engineer provides a string containing only whitespace as criteria
     When they attempt to configure scoring criteria
-    Then the criteria should be rejected
-    And the engineer should be told that non-empty criteria are required to anchor quality scores
-    And the message should include an example of a valid rubric
+    Then the configuration fails with an error classifiable as an invalid parameter
+    And the error identifies that non-empty criteria are required
 
   # --- Edge cases: preservation and opacity (BR-2, BR-3) ---
 

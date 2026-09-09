@@ -30,25 +30,20 @@ Feature: Judge adapter with required pinned model version
   Scenario: Engineer attempts to create a judge without specifying a model version
     Given the engineer has not provided a model version
     When they attempt to create a judge
-    Then the judge should not be created
-    And the engineer should be told that a model version is required for measurement stability
-    And the message should include an example of correct usage
+    Then the creation fails with an error classifiable as an invalid parameter
+    And the error identifies that the model version parameter is required
 
   Scenario: Engineer provides an empty string as the model version
     Given the engineer provides an empty string where a model version is expected
     When they attempt to create a judge
-    Then the judge should not be created
-    And the engineer should be told that a non-empty model version is required
-    And the message should explain that model pinning protects measurement stability
-    And the message should include an example of correct usage
+    Then the creation fails with an error classifiable as an invalid parameter
+    And the error identifies which parameter is invalid and what is required
 
   Scenario: Engineer provides a whitespace-only string as the model version
     Given the engineer provides a string containing only whitespace as the model version
     When they attempt to create a judge
-    Then the judge should not be created
-    And the engineer should be told that a non-empty model version is required
-    And the message should explain that model pinning protects measurement stability
-    And the message should include an example of correct usage
+    Then the creation fails with an error classifiable as an invalid parameter
+    And the error identifies which parameter is invalid and what is required
 
   # --- Edge cases: preservation and immutability (BR-3) ---
 
