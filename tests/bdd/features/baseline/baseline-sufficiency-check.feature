@@ -64,6 +64,12 @@ Feature: Check whether the baseline has sufficient observations
   # BIN-63 OQ-4: Whether there is a maximum baseline size.
   #   Scenarios do not assert or assume any size limit.
   #
+  # BR-8 (SETTLED): A configured threshold must be positive; zero
+  #   and negative are rejected at configuration time. This is a
+  #   validity constraint, not a statistical sufficiency constraint.
+  #   threshold=1 is valid (though almost certainly too small);
+  #   threshold=0 silently defeats the guard rail. SC11 covers this.
+  #
   # BIN-63 OQ-6: What mechanism compares criteria for equality.
   #   Not relevant to sufficiency checking.
 
@@ -75,6 +81,7 @@ Feature: Check whether the baseline has sufficient observations
     Then the result reports the baseline as sufficient
     And the result reports the current observation count
     And the result reports the minimum threshold that was applied
+    And the result reports that no additional observations are needed
 
   # --- Sad path (BR-1 sad, BR-2) ---
 
@@ -149,7 +156,8 @@ Feature: Check whether the baseline has sufficient observations
     Given the engineer has a Phase I baseline meeting the minimum observation count
     But every observation in the baseline has an identical numeric score
     When they check whether the baseline is sufficient for fitting control limits
-    Then the result indicates a data quality concern
+    Then the result reports that the observation count meets the minimum threshold
+    And the result indicates a data quality concern alongside the count-based determination
     And the concern identifies that the scores show no variation
 
   # --- Per-chart-type threshold (BR-5 happy) ---
@@ -187,3 +195,47 @@ Feature: Check whether the baseline has sufficient observations
     When they check whether the baseline is sufficient for fitting control limits
     Then the result reports the baseline as insufficient
     And the result reports that exactly one more observation is needed
+
+  # --- Invalid threshold configuration (BR-8 sad, BR-3 sad) ---
+
+  # A zero threshold causes the sufficiency check to report every
+  # baseline as sufficient -- including an empty one -- silently
+  # defeating the guard rail. A negative threshold has no meaningful
+  # interpretation. Both are configuration mistakes, not deliberate
+  # opt-outs. The advisory nature of the check (BR-6) already
+  # provides the legitimate opt-out: skip the check or ignore
+  # the result. Configuring the check to always pass is silent
+  # invalidation.
+  #
+  # Note: this constrains the threshold's validity, not its
+  # statistical sufficiency. threshold=1 is valid per BR-8 even
+  # though it is almost certainly too small for reliable parameter
+  # estimation. Validity and sufficiency are different questions.
+
+  Scenario Outline: Engineer configures a threshold that is not positive
+    Given the engineer has configured a minimum observation count that is <invalid value>
+    When they attempt to check whether the baseline is sufficient
+    Then the check rejects the configuration as an invalid threshold
+    And the rejection guides the engineer that the threshold must be a positive value
+
+    Examples:
+      | invalid value    |
+      | zero             |
+      | a negative number |
+
+  # --- Combined: insufficient count and zero variance (m3) ---
+
+  # A baseline can be both below the threshold and degenerate. An
+  # engineer with few identical-score observations benefits from
+  # learning about both problems at once rather than discovering
+  # the zero-variance issue only after collecting enough to pass
+  # the count check.
+
+  Scenario: Baseline that is both insufficient and has zero score variance reports both conditions
+    Given the engineer has a Phase I baseline with fewer observations than the required minimum
+    And every observation in the baseline has an identical numeric score
+    When they check whether the baseline is sufficient for fitting control limits
+    Then the result reports the baseline as insufficient
+    And the result reports how many more observations are needed to reach the minimum
+    And the result indicates a data quality concern
+    And the concern identifies that the scores show no variation
