@@ -5,10 +5,12 @@ Nine leaf exception types under a single :class:`CaliperError` base
 ``context`` mapping -- the testable contract -- plus a human-readable
 ``recovery_hint`` that is deliberately excluded from any test assertion.
 
-Immutability violations (e.g. attempting to reassign a frozen dataclass
-field) are NOT part of this taxonomy -- they raise Python's built-in
-``AttributeError`` / ``dataclasses.FrozenInstanceError`` instead (ADR-002
-section 7).
+Immutability violations (e.g. attempting to reassign a field on a frozen
+Pydantic ``BaseModel``) are NOT part of this taxonomy -- they raise
+Pydantic's ``ValidationError`` instead (ADR-002 section 7, amended
+2026-09-09 under BIN-103 -- verified empirically against pydantic 2.13.5;
+value objects were stdlib frozen dataclasses when section 7 was
+originally written).
 
 See ``docs/architecture/adr/002-error-contract-exception-taxonomy.md``.
 """

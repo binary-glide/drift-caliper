@@ -14,18 +14,20 @@ of this package.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from pydantic import BaseModel, ConfigDict
 
-@dataclass(frozen=True, slots=True)
-class JudgeProviderResponse:
+
+class JudgeProviderResponse(BaseModel):
     """Raw ``(score, reasoning)`` pair returned by a provider.
 
     Internal to ``Judge.score()``'s orchestration -- not exposed to the
     engineer. Provenance is attached by ``Judge.score()`` after this is
     returned; a ``JudgeProviderResponse`` carries no provenance itself.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     score: float
     reasoning: str

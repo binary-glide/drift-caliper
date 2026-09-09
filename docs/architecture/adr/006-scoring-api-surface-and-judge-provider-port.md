@@ -5,6 +5,21 @@
 **Deciders:** system-architect (BIN-102), ratified by product owner
 **Refs:** BIN-102, BIN-59, BIN-58, BIN-57, ADR-001, ADR-002, ADR-004
 
+> **Terminology note (2026-09-09, `BIN-103`):** this ADR's Context and
+> Decision sections describe `Judge`, `ScoringCriteria`, `Provenance` and
+> `ScoringResult` as frozen dataclasses with `__post_init__` validators,
+> which was accurate the day this ADR was written. `BIN-103`'s conformance
+> pass migrated all six value objects to Pydantic `BaseModel` +
+> `ConfigDict(frozen=True)` + `@field_validator` (see
+> `src/caliper/measurement/domain/` and the "Module layout" section of
+> `CLAUDE.md`). The decisions recorded below are unaffected -- this ADR
+> settles API surface and ownership, not implementation mechanics -- so the
+> dataclass/`__post_init__` wording is left as written rather than edited
+> throughout; read it as historical context, not current fact. ADR-002
+> section 7 carries the one place that distinction is safety-relevant
+> (which exception type an immutability violation raises) and has been
+> corrected there directly.
+
 ## Context
 
 `BIN-59` ("Score a single agent output and receive structured results") cannot be

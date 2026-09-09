@@ -8,35 +8,45 @@ for ``provider``, ``criteria`` and ``score()``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
 from caliper.errors import InvalidParameterError, MissingPrerequisiteError
-from caliper.measurement.criteria import ScoringCriteria
-from caliper.measurement.model_version import (
+from caliper.measurement.domain.criteria import ScoringCriteria
+from caliper.measurement.domain.model_version import (
     MODEL_VERSION_CONSTRAINT,
     ModelVersion,
 )
-from caliper.measurement.provenance import Provenance
-from caliper.measurement.provider import JudgeProviderPort
-from caliper.measurement.result import ScoringResult
+from caliper.measurement.domain.provenance import Provenance
+from caliper.measurement.domain.result import ScoringResult
+from caliper.measurement.ports.judge_provider import JudgeProviderPort
+
+# Mirrors MODEL_VERSION_CONSTRAINT's shape for the one caller-facing string
+# constant this module owns outright.
+AGENT_OUTPUT_CONSTRAINT = "must be a non-empty string that is not entirely whitespace"
 
 
-@dataclass(frozen=True, slots=True)
-class Judge:
+class Judge(BaseModel):
     """An immutable configured adapter that scores agent outputs.
 
     A ``Judge`` wraps an LLM provider and holds a model version pinned at
     creation time. The model version cannot change after creation --
-    attempting to assign to it raises ``dataclasses.FrozenInstanceError``
+    attempting to assign to it raises Pydantic's ``ValidationError``
     (ADR-002 section 7: immutability violations are not part of the
     ``CaliperError`` taxonomy).
 
     ``provider`` and ``criteria`` are optional additions (ADR-006 section 2)
     -- both default to ``None`` and are purely additive over BIN-57's
     original single-field ``Judge``. Neither is validated at creation
-    beyond what ``ScoringCriteria.__post_init__`` already enforces; their
+    beyond what ``ScoringCriteria's validator`` already enforces; their
     absence at ``score()`` time is what raises ``MissingPrerequisiteError``.
+
+    ``arbitrary_types_allowed`` is required because ``JudgeProviderPort`` is
+    a ``Protocol``, which Pydantic cannot build a validation schema for. It
+    is ``@runtime_checkable``, so Pydantic still isinstance-checks a supplied
+    provider against the protocol's method set rather than accepting anything.
     """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     model_version: ModelVersion
     provider: JudgeProviderPort | None = None
@@ -81,9 +91,9 @@ class Judge:
             InvalidParameterError: ``model_version`` was omitted (
                 ``context["kind"] == "missing"``), or was supplied but is
                 empty or whitespace-only (``context["kind"] == "invalid"``,
-                raised from ``ModelVersion.__post_init__``); or ``criteria``
-                was supplied but is empty or whitespace-only (raised from
-                ``ScoringCriteria.__post_init__``).
+                raised from ``ModelVersion``'s field validator); or
+                ``criteria`` was supplied but is empty or whitespace-only
+                (raised from ``ScoringCriteria``'s field validator).
         """
         if model_version is None:
             raise InvalidParameterError(
@@ -167,37 +177,8 @@ class Judge:
                 recovery_hint="Pass provider=... to Judge.create().",
             )
 
-        effective_criteria_raw = (
-            criteria
-            if criteria is not None
-            else (self.criteria.value if self.criteria is not None else None)
-        )
-        if effective_criteria_raw is None:
-            raise MissingPrerequisiteError(
-                "scoring requires criteria",
-                context={"prerequisite": "scoring_criteria", "operation": "score"},
-                recovery_hint="Pass criteria=... to Judge.create() or to score().",
-            )
-        effective_criteria = ScoringCriteria(value=effective_criteria_raw)
-
-        if agent_output.strip() == "":
-            raise InvalidParameterError(
-                "agent_output must be a non-empty, non-whitespace string",
-                context={
-                    "parameter": "agent_output",
-                    "constraint": (
-                        "must be a non-empty string that is not entirely whitespace"
-                    ),
-                    "kind": "invalid",
-                    "provided": agent_output,
-                },
-                recovery_hint=(
-                    "Pass the agent's actual output text. If the agent "
-                    "genuinely produced no response, pass a caller-defined "
-                    "sentinel string (e.g. '[no response]') instead of an "
-                    "empty string."
-                ),
-            )
+        effective_criteria = self._resolve_effective_criteria(criteria)
+        _require_non_blank_agent_output(agent_output)
 
         response = self.provider.score(
             model_version=self.model_version.value,
@@ -212,5 +193,67 @@ class Judge:
             provenance=Provenance(
                 model_version=self.model_version,
                 scoring_criteria=effective_criteria,
+            ),
+        )
+
+    # added by domain-implementer BIN-103
+    def _resolve_effective_criteria(self, criteria: str | None) -> ScoringCriteria:
+        """Resolve per-call criteria over judge-level criteria, or raise.
+
+        Extracted from ``score()`` to keep that method under the house
+        style's ~40-line guideline (`coding-standards/references/python.md`
+        Pre-Submit Checklist) -- pure refactor, no behaviour change.
+
+        Args:
+            criteria: Per-call criteria text, or ``None`` to fall back to
+                ``self.criteria``.
+
+        Returns:
+            The resolved, validated ``ScoringCriteria``.
+
+        Raises:
+            MissingPrerequisiteError: neither per-call nor judge-level
+                criteria are available.
+        """
+        effective_criteria_raw = (
+            criteria
+            if criteria is not None
+            else (self.criteria.value if self.criteria is not None else None)
+        )
+        if effective_criteria_raw is None:
+            raise MissingPrerequisiteError(
+                "scoring requires criteria",
+                context={"prerequisite": "scoring_criteria", "operation": "score"},
+                recovery_hint="Pass criteria=... to Judge.create() or to score().",
+            )
+        return ScoringCriteria(value=effective_criteria_raw)
+
+
+# added by domain-implementer BIN-103
+def _require_non_blank_agent_output(agent_output: str) -> None:
+    """Reject an empty or whitespace-only ``agent_output`` (ADR-006 section 6).
+
+    Extracted from ``Judge.score()`` to keep that method under the house
+    style's ~40-line guideline -- pure refactor, no behaviour change. A
+    module-level function, not a method: it does not touch ``self``.
+
+    Raises:
+        InvalidParameterError: ``agent_output`` is empty or
+            whitespace-only.
+    """
+    if agent_output.strip() == "":
+        raise InvalidParameterError(
+            "agent_output must be a non-empty, non-whitespace string",
+            context={
+                "parameter": "agent_output",
+                "constraint": AGENT_OUTPUT_CONSTRAINT,
+                "kind": "invalid",
+                "provided": agent_output,
+            },
+            recovery_hint=(
+                "Pass the agent's actual output text. If the agent "
+                "genuinely produced no response, pass a caller-defined "
+                "sentinel string (e.g. '[no response]') instead of an "
+                "empty string."
             ),
         )

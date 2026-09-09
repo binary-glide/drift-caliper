@@ -251,6 +251,20 @@ read-only properties). These raise Python's built-in `AttributeError` or
 taxonomy because they are not operational failures -- they are programming
 mistakes caught by the type system.
 
+**Amendment (2026-09-09, `BIN-103`):** the value objects this section
+describes are Pydantic `BaseModel` + `ConfigDict(frozen=True)` as of
+`BIN-103`'s conformance pass, not stdlib frozen dataclasses. Verified
+empirically against pydantic 2.13.5: assigning to a field on a frozen
+`BaseModel` raises `pydantic_core.ValidationError` (a `ValueError`
+subclass, message `"Instance is frozen"`), never `AttributeError` or
+`dataclasses.FrozenInstanceError`. The conclusion this section reaches is
+unchanged -- it is still not a `CaliperError`, still not part of the
+domain taxonomy, still a programming mistake caught by the type system --
+only the concrete exception type named above was wrong. Not rewritten in
+place because it was a deliberate, ratified statement at the time it was
+written (the code was dataclasses then); corrected here instead, per this
+vault's convention of annotating rather than rewriting settled decisions.
+
 ## Rationale
 
 ### Why typed exceptions instead of a category field on one type

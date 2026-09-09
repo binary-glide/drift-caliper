@@ -13,7 +13,7 @@ See ADR-002 for the error contract enforced at creation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.errors import InvalidParameterError
 
@@ -23,17 +23,22 @@ from caliper.errors import InvalidParameterError
 MODEL_VERSION_CONSTRAINT = "must be a non-empty string that is not entirely whitespace"
 
 
-@dataclass(frozen=True, slots=True)
-class ModelVersion:
+class ModelVersion(BaseModel):
     """A pinned, non-empty model version string.
 
     Preserved exactly as provided, including any surrounding whitespace.
-    Equality follows the wrapped ``value`` (dataclass value equality).
+    Equality follows the wrapped ``value``.
 
-    Validation lives here, in ``__post_init__``, rather than in any caller
+    Validation lives here, in a ``field_validator``, rather than in any caller
     (e.g. ``Judge.create``) so the invariant holds for every construction
     path -- there is no way to build a ``ModelVersion`` that wraps an empty
-    or whitespace-only string.
+    or whitespace-only ``str``.
+
+    That claim is about *blank* values and is deliberately narrow. A
+    wrong-*typed* argument (``ModelVersion(value=123)``) is rejected by
+    Pydantic's core coercion, which runs *before* this validator, so it
+    surfaces as ``pydantic_core.ValidationError`` rather than a
+    ``CaliperError``. See ``BIN-104``.
 
     Raises:
         InvalidParameterError: ``value`` is empty or contains only
@@ -44,18 +49,31 @@ class ModelVersion:
             ``Judge.create`` before a ``ModelVersion`` is ever constructed.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     value: str
 
-    def __post_init__(self) -> None:
-        """Reject empty or whitespace-only model version strings."""
-        if self.value.strip() == "":
+    @field_validator("value")
+    @classmethod
+    def must_not_be_blank(cls, v: str) -> str:
+        """Reject empty or whitespace-only model version strings.
+
+        Raises ``InvalidParameterError`` directly rather than ``ValueError``.
+        Pydantic wraps ``ValueError`` and ``AssertionError`` in its own
+        ``ValidationError``; any other exception propagates unwrapped, which
+        is what preserves ADR-002's contract for the engineer who called us.
+        ``architecture/references/ddd.md`` translates at a service boundary
+        instead -- Caliper has no service layer, so there is nowhere to do
+        that, and the value object is the boundary.
+        """
+        if v.strip() == "":
             raise InvalidParameterError(
                 "model_version must be a non-empty, non-whitespace string",
                 context={
                     "parameter": "model_version",
                     "constraint": MODEL_VERSION_CONSTRAINT,
                     "kind": "invalid",
-                    "provided": self.value,
+                    "provided": v,
                 },
                 recovery_hint=(
                     "Pass the exact model version string your provider "
@@ -64,3 +82,4 @@ class ModelVersion:
                     "do not identify a model."
                 ),
             )
+        return v
