@@ -54,10 +54,7 @@ class ScoringCriteria:
     value: str
 
     def __post_init__(self) -> None:
-        """Reject empty or whitespace-only scoring criteria.
-
-        # added by domain-implementer BIN-58
-        """
+        """Reject empty or whitespace-only scoring criteria."""
         if self.value.strip() == "":
             raise InvalidParameterError(
                 "scoring_criteria must be a non-empty, non-whitespace string",
