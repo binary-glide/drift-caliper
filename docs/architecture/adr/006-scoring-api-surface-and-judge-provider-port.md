@@ -97,8 +97,8 @@ class JudgeProviderPort(Protocol):
         *,
         model_version: str,
         criteria: str,
-        output: str,
-        input: str | None = None,
+        agent_output: str,
+        agent_input: str | None = None,
     ) -> JudgeProviderResponse: ...
 ```
 
@@ -172,9 +172,9 @@ does not persist beyond the call. If neither is present, scoring fails with
 ```python
 def score(
     self,
-    output: str,
+    agent_output: str,
     *,
-    input: str | None = None,
+    agent_input: str | None = None,
     criteria: str | None = None,
 ) -> ScoringResult:
     if self.provider is None:
@@ -216,20 +216,35 @@ compatible with `BIN-57`'s tests.
 
 ### 3. Scoring signature: agent output required, agent input optional (resolves OQ-6)
 
+> **Naming.** The parameters are `agent_output` and `agent_input`, not `output`
+> and `input`. `input` shadows a Python builtin, which this project's own lint
+> gate rejects -- `ruff` has `flake8-builtins` enabled and `A002` fires on it,
+> verified against the configured ruleset rather than assumed. The `agent_`
+> prefix also matches the ubiquitous language the feature files already use
+> ("agent output", "agent input"), and costs nothing at the common call site
+> because `agent_output` is positional.
+
+
 ```python
-def score(self, output: str, *, input: str | None = None, criteria: str | None = None) -> ScoringResult
+def score(
+    self,
+    agent_output: str,
+    *,
+    agent_input: str | None = None,
+    criteria: str | None = None,
+) -> ScoringResult
 ```
 
-**Decision:** accept both, with `output` required and `input` optional. This
+**Decision:** accept both, with `agent_output` required and `agent_input` optional. This
 adopts the PRD's own recommendation (load-bearing: MEDIUM). Many judge rubrics
 (relevance, instruction-following) are only meaningful with the input in view;
 excluding it would make some criteria unscorable and would make the audit
 trail incomplete for anyone reconstructing what was assessed later from logs
 the caller kept.
 
-**`input` is not part of `Provenance` and is not carried onto `ScoringResult`.**
+**`agent_input` is not part of `Provenance` and is not carried onto `ScoringResult`.**
 Provenance is the *measurement configuration* (model version + criteria) --
-what instrument, calibrated how. `input`/`output` are the *subject being
+what instrument, calibrated how. `agent_input`/`agent_output` are the *subject being
 measured*, and the engineer already holds both values they just passed in;
 echoing them back onto the result is redundant and the feature file's
 scenarios do not assert their presence there. This keeps `ScoringResult` at
@@ -239,7 +254,7 @@ self-describing without the caller's copy of the input (e.g. persisted
 observations, `BIN-63`), that story can add the field additively; it is not
 required now.
 
-`input` is not validated for emptiness -- an agent that legitimately received
+`agent_input` is not validated for emptiness -- an agent that legitimately received
 no input (a proactive/autonomous action) is a valid case, unlike an empty
 `output`, which is the thing under assessment (section 6).
 
@@ -443,7 +458,7 @@ itself.
 output"), but the PRD explicitly recommends including input, load-bearing
 MEDIUM, on the grounds that many rubrics need the input in view and an
 audit trail without the input is weaker. Excluding it is an option to revisit
-only if a real rubric is shown to need output alone -- adding `input` later
+only if a real rubric is shown to need output alone -- adding `agent_input` later
 as optional-keyword is what this ADR already does, so there is nothing left
 to add.
 
@@ -563,7 +578,7 @@ never to add.
   Removing the per-call override (narrowing to judge-only) would be a
   breaking change for any caller using it, but adding a third attachment
   point later (a future `Monitor`) is purely additive.
-- **Scoring signature (section 3):** low cost to reverse. `input` is
+- **Scoring signature (section 3):** low cost to reverse. `agent_input` is
   optional-keyword; removing it later breaks any caller passing it, but nothing
   currently requires this ADR's shape to be final.
 - **Retry (section 4):** low cost to reverse. Adding retry inside a future
