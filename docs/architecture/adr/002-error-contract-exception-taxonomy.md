@@ -128,15 +128,15 @@ identified. BIN-59 BR-4's "at minimum" clause explicitly permits extension.
 
 A missing required parameter (e.g. omitting false alarm tolerance in BIN-65) is
 classified as `invalid_parameter`, not a separate category. The sub-case is
-discriminated positively by a **required** `context["reason"]` field:
+discriminated positively by a **required** `context["kind"]` field:
 
-- `reason = "missing"` -- the parameter was not provided at all.
-- `reason = "invalid"` -- a value was provided but violates the constraint.
+- `kind = "missing"` -- the parameter was not provided at all.
+- `kind = "invalid"` -- a value was provided but violates the constraint.
 
 When a value was provided, `context["provided"]` carries that value. When the
 parameter was omitted, `context["provided"]` is absent -- but nothing asserts on
-its absence. The discriminator is `reason`, which is always present and
-positively assertable: `assert error.context["reason"] == "missing"`.
+its absence. The discriminator is `kind`, which is always present and
+positively assertable: `assert error.context["kind"] == "missing"`.
 
 **Rationale:** The recovery action is the same -- fix your configuration. The
 distinction between "you didn't pass it" and "you passed a bad value" is captured
@@ -184,7 +184,7 @@ Implementations may add more. Removing a required field is a breaking change.
 
 | Category | Required context keys | Purpose |
 |---|---|---|
-| `invalid_parameter` | `parameter: str`, `constraint: str`, `reason: str` | Which parameter is invalid, what constraint it violates, and whether the parameter was `"missing"` or `"invalid"`. `provided: Any` carries the supplied value when one was given. |
+| `invalid_parameter` | `parameter: str`, `constraint: str`, `kind: str` | Which parameter is invalid, what constraint it violates, and whether the parameter was `"missing"` or `"invalid"`. `provided: Any` carries the supplied value when one was given. |
 | `missing_prerequisite` | `prerequisite: str`, `operation: str` | What is missing and what operation it blocks. |
 | `provider_failure` | `provider: str`, `operation: str` | Which provider failed and what operation was attempted. |
 | `malformed_response` | `operation: str`, `expected_shape: str` | What operation produced the response and what shape was expected. |
@@ -193,6 +193,15 @@ Implementations may add more. Removing a required field is a breaking change.
 | `invalid_observation` | `reason: str`, `missing_fields: list[str]` | Why the observation is invalid and which fields are missing. |
 | `insufficient_baseline` | `have: int`, `need: int` | Current observation count and required minimum. |
 | `degenerate_baseline` | `reason: str` | What makes the baseline degenerate (e.g. `"zero_variance"`). |
+
+**Naming convention — `kind` vs `reason`.** These are deliberately different
+keys because they are different kinds of field. `kind` on `invalid_parameter` is
+a **closed discriminator** over a fixed set (`"missing"` / `"invalid"`) telling a
+consumer which sub-case occurred. `reason` on `invalid_observation` and
+`degenerate_baseline` is **descriptive** — it names what went wrong. Reusing one
+key for both would mean a consumer could not interpret it without first
+branching on `category`, and would weaken the distinctness argument below by
+sharing the one field whose semantics vary.
 
 **How distinctness is tested:** For any two errors from different categories:
 - `error_a.category != error_b.category` -- string comparison, deterministic.
@@ -282,8 +291,8 @@ serves a different purpose: Python needs to separate "wrong number of arguments"
 Caliper's domain concern is "your configuration is wrong" -- whether the wrongness
 is absence or invalidity, the recovery is the same: read the `parameter` and
 `constraint` context fields, fix it. The sub-case is positively discriminated by
-`context["reason"]` (`"missing"` vs `"invalid"`), so a test that needs the
-distinction asserts `error.context["reason"] == "missing"` -- a positive check,
+`context["kind"]` (`"missing"` vs `"invalid"`), so a test that needs the
+distinction asserts `error.context["kind"] == "missing"` -- a positive check,
 consistent with every other assertion in this contract.
 
 ## Alternatives considered
@@ -337,7 +346,7 @@ A `MissingParameterError` alongside `InvalidParameterError`, following Python's
 `TypeError`/`ValueError` split.
 
 **Rejected.** The recovery action is identical (fix your configuration). The
-sub-case distinction is positively discriminated by `context["reason"]`
+sub-case distinction is positively discriminated by `context["kind"]`
 (`"missing"` vs `"invalid"`) -- a required field, assertable the same way as
 every other context field in the contract. A tenth category for an edge case
 of an existing category adds
@@ -391,7 +400,7 @@ dispatch mechanism. Error codes add an indirection layer that duplicates what
 
 BIN-65 SC9 asserts that omitting the false alarm tolerance produces an
 `InvalidParameterError` classifiable as `invalid_parameter` with
-`reason = "missing"`. This is only possible if the parameter is
+`kind = "missing"`. This is only possible if the parameter is
 **optional-with-required-semantics** in the Python signature (e.g. defaulted to
 `None`, or a key absent from a configuration mapping). If the API surface instead
 makes the parameter a genuinely required positional or keyword argument, Python's
@@ -399,7 +408,7 @@ own `TypeError` is raised at the call site before any Caliper code executes --
 no `CaliperError` is produced, and SC9's assertion cannot be written as stated.
 
 Both outcomes are legitimate:
-- **Optional-with-required-semantics:** `InvalidParameterError(reason="missing")`
+- **Optional-with-required-semantics:** `InvalidParameterError(kind="missing")`
   fires from inside Caliper. SC9 is implementable as written.
 - **Genuinely required argument:** Python's `TypeError` fires before Caliper runs.
   SC9 would need to assert `TypeError` instead of `InvalidParameterError`, or
@@ -844,18 +853,18 @@ re-review.**
 of 7). Both re-reviews are narrowly scoped to the error-handling scenarios;
 the happy-path and edge-case scenarios are unaffected.
 
-**`reason` field impact on migration:** The addition of `context["reason"]` as a
+**`kind` field impact on migration:** The addition of `context["kind"]` as a
 required field for `invalid_parameter` (amendment, distinguishing `"missing"`
 from `"invalid"`) does not move any scenario from cosmetic to material. BIN-64
 SC11 (zero/negative threshold) and BIN-65 SC7/SC8 (invalid smoothing/tolerance)
 implicitly describe the `"invalid"` sub-case -- the step text references what is
 wrong with the value. BIN-65 SC9 (missing tolerance) implicitly describes the
 `"missing"` sub-case -- the step text says the parameter "is required." The step
-definitions will assert `reason` internally; the Gherkin wording already
+definitions will assert `kind` internally; the Gherkin wording already
 disambiguates the condition without naming the field.
 
 **API-shape dependency (BIN-65 SC9):** Whether a missing false alarm tolerance
-surfaces as `InvalidParameterError(reason="missing")` or as Python's `TypeError`
+surfaces as `InvalidParameterError(kind="missing")` or as Python's `TypeError`
 depends on the API surface design (not yet made). If the fitting interface uses
 a genuinely required Python argument, `TypeError` fires before Caliper code
 runs and SC9 would need rewording. This must be confirmed when the API surface
