@@ -79,7 +79,9 @@ chart type:
 |-------|------|---------|
 | Chart type identifier | `str` | Which chart type this artefact represents. |
 | Baseline mean | `float` | Mean of the Phase I baseline scores. |
-| Baseline spread | `float` | Variance or standard deviation of Phase I scores. Which of the two is domain-modeller's decision; all chart types report the same measure. |
+| Baseline spread | `float` | Sample standard deviation of Phase I scores. A descriptive statistic — total variation including any slow drift within the baseline. NOT the operational sigma used for control limit computation (see sigma estimate). |
+| Sigma estimate | `float` | The operational sigma used to compute detection boundaries. Estimated from the average moving range (MR-bar / d_2) for all chart types on individual observations (n=1). A different quantity from baseline spread — see amendment note (2026-09-09). |
+| Sigma estimation method | `str` | Identifies how the sigma estimate was produced (e.g. `"moving_range"`). Reported for auditability so the artefact is self-documenting about which estimator entered the control limit computation. |
 | Baseline observation count | `int` | Number of observations the limits were fitted from. |
 | Provenance: judge model version | `str` | The judge model version from the baseline (BIN-63). Compared by BIN-68 across the phase boundary. |
 | Provenance: scoring criteria | `str` | The scoring criteria from the baseline (BIN-63). |
@@ -153,18 +155,16 @@ monitoring logic.
 | Chart | Fields |
 |-------|--------|
 | EWMA | Smoothing parameter (lambda), control limits (UCL, LCL, CL) |
-| CUSUM | Reference value (*k*), decision interval (*h*), target value (mu_0), monitored direction, baseline sigma estimate |
-| Shewhart I-chart | Sigma estimate (from moving range), sigma multiplier, sigma estimation method, control limits (UCL, LCL, CL) |
+| CUSUM | Reference value (*k*), decision interval (*h*), target value (mu_0), monitored direction |
+| Shewhart I-chart | Sigma multiplier, control limits (UCL, LCL, CL) |
 
-**Finding: Shewhart artefact carries two spread measures.** The shared core's
-"baseline spread" is the sample variance (or standard deviation) of the baseline
-scores -- a descriptive statistic shared by all chart types. The Shewhart I-chart's
-"sigma estimate" is the moving-range-based estimate, which is a different quantity
-(robust to slow drift within the baseline). The Shewhart artefact carries both:
-the shared core's baseline spread and the chart-specific sigma estimate. The
-review feature file's SC1 references "the spread measure" in the shared core and
-the Shewhart feature file's SC1 references "the sigma estimate" separately. The
-domain-modeller must ensure both are present on the Shewhart concrete type.
+**Finding: all artefacts carry two spread measures.** The shared core's
+"baseline spread" is the sample standard deviation of the baseline scores -- a
+descriptive statistic. The shared core's "sigma estimate" is the moving-range-based
+estimate (MR-bar / d_2), which captures short-term variation only (robust to slow
+drift within the baseline). All artefacts carry both. The review feature file's SC1
+references "the spread measure" in the shared core; the Shewhart feature file's SC2
+references "the sigma estimate" separately. See amendment note (2026-09-09).
 
 ### 4. False alarm tolerance: ARL_0 primary, false alarm rate accepted as convenience
 
@@ -442,16 +442,24 @@ configuration is strictly additive.
   that constrain capability without prescribing mechanism.
 - **No stories need re-review.** Zero scenario changes means zero re-review cost.
 
-### Finding: Shewhart artefact requires both spread measures
+### Finding: all artefacts carry two spread measures (dual-spread)
 
-The Shewhart I-chart artefact must carry two spread-related quantities: the shared
-core's baseline spread (sample variance or standard deviation, same as EWMA and
-CUSUM) and the chart-specific sigma estimate (from the moving-range method). These
-are different quantities: the sample standard deviation captures total variation
-including any slow drift within the baseline; the moving-range-based sigma captures
-short-term variation only (BIN-95 BR-6). Domain-modeller must ensure both are
-present. The Shewhart feature file's SC2 asserts the sigma estimate; the review
-feature file's SC1 asserts the shared "spread measure." Both must be satisfied.
+Every fitted artefact carries two spread-related quantities in the shared core.
+They are different quantities that answer different questions:
+
+- **`baseline_spread`** (shared core): the sample standard deviation of all
+  Phase I scores. Captures **total** variation, including any slow drift within
+  the baseline. A descriptive statistic.
+- **`sigma_estimate`** (shared core): the moving-range-based estimate
+  (MR-bar / d_2). Captures **short-term** variation only, robust to slow drift.
+  The **operational** sigma used by all chart types for control limit computation.
+
+This split applies to **all three chart types**, not only Shewhart. See amendment
+note (2026-09-09) for the reasoning and citation status.
+
+The Shewhart feature file's SC2 asserts "the sigma estimate derived from the
+baseline"; the review feature file's SC1 asserts "the spread measure" (baseline
+spread). Both are present and distinguishable on all artefacts.
 
 ### Reversibility
 
@@ -491,3 +499,82 @@ choice.
   here. Both designs satisfy BR-1. Domain-modeller decides.
 - **BIN-65/94/95 OQ-4 (sufficiency override for testing):** Not resolved here.
   Domain-modeller decides.
+
+---
+
+## Amendment (2026-09-09): sigma estimate moves into the shared core
+
+**Trigger:** domain-modeller (BIN-100, PR #18) verified that MR-based sigma
+estimation is standard practice for **all** chart types on individual observations
+(n=1), not only Shewhart. The original ADR placed the sigma estimate and sigma
+estimation method on the Shewhart artefact only and left the shared core's spread
+field as "variance or standard deviation -- domain-modeller decides." That split
+was incorrect.
+
+### What changed
+
+1. **Shared core gains two fields:** `sigma_estimate` (the operational sigma,
+   MR-bar / d_2) and `sigma_estimation_method` (which estimator produced it).
+   Both appear in the shared core table (section 2).
+
+2. **`baseline_spread` is now specified** as the sample standard deviation -- a
+   descriptive statistic, not the operational sigma. The original "variance or
+   standard deviation -- domain-modeller decides" is resolved.
+
+3. **Chart-specific fields updated:** `baseline sigma estimate` removed from CUSUM
+   chart-specific fields; `sigma estimate`, `sigma estimation method` removed from
+   Shewhart chart-specific fields. These are now shared.
+
+4. **Finding section updated** from "Shewhart artefact requires both spread
+   measures" to "all artefacts carry two spread measures" -- the dual-spread
+   finding applies to all chart types.
+
+### Why -- structural, not conventional
+
+With individual observations (n=1) there are **no within-subgroup replicates**,
+so consecutive differences are the only available estimator of short-term
+variation. This is a fact about the data shape, not a per-chart convention.
+
+The argument is **stronger** for EWMA and CUSUM than for Shewhart. Their purpose
+is detecting sustained small shifts. A sigma inflated by drift already present in
+the baseline produces wider limits and less sensitivity -- desensitising the chart
+against exactly what it exists to catch. That is self-defeating in a way it is not
+for the I-chart, which targets large acute excursions.
+
+The drift-robustness argument the domain model made for Shewhart was never
+Shewhart-specific; it simply had not been followed through.
+
+### ARL tables are unaffected
+
+The Markov-chain (Lucas & Saccucci 1990) and diffusion (Siegmund 1985)
+approximations **take sigma as a parameter -- they assume sigma is known.** The
+estimator choice is upstream of the ARL calculation, not an assumption inside it.
+Published ARL tables remain valid regardless of which estimator is used.
+
+What the estimator affects is how well the estimate approximates the true sigma --
+the parameter-estimation-error problem ADR-005 already addressed (Quesenberry
+1993; Jones, Champ & Rigdon 2001). These are two separable concerns.
+
+### Citation status -- record the gap honestly
+
+Supporting sources are **commercial SPC vendor documentation** (spcforexcel.com,
+analyse-it, SigmaXL). Montgomery Chapter 9 is paywalled and was not accessed
+directly; all secondary sources citing Montgomery confirm MR-based estimation for
+individuals data across all chart types.
+
+The NIST/SEMATECH e-Handbook was independently checked: its EWMA section says
+only "s is the standard deviation calculated from the historical data" without
+addressing n=1, and its CUSUM section covers only m samples of size n. NIST does
+not settle it.
+
+Following ADR-001's precedent for calibration constants: the gap is recorded and
+marked for **primary-source verification at implementation time**, before BIN-84's
+fixtures are written. Vendor documentation is not presented as a primary citation.
+
+### Feature file impact
+
+**No feature files change.** The ten approved feature files on `trunk` do not
+name specific sigma estimators. BIN-66 SC1 references "the spread measure"
+(baseline_spread); BIN-95 SC2 references "the sigma estimate derived from the
+baseline" (sigma_estimate). Both are now in the shared core and remain
+distinguishable. Zero re-review cost.
