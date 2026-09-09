@@ -38,7 +38,12 @@ class ScoringCriteria(BaseModel):
     Validation lives here, in a ``field_validator``, following the same
     placement ``ModelVersion`` (BIN-57) established, so the invariant holds
     for every construction path -- there is no way to build a
-    ``ScoringCriteria`` that wraps an empty or whitespace-only string.
+    ``ScoringCriteria`` that wraps an empty or whitespace-only ``str``.
+
+    As with ``ModelVersion``, that claim covers *blank* values only. A
+    wrong-*typed* argument is rejected by Pydantic's core coercion before
+    this validator runs, and surfaces as ``pydantic_core.ValidationError``
+    rather than a ``CaliperError``. See ``BIN-104``.
 
     Unlike ``ModelVersion``, there is no "missing" case for this value
     object: every scenario in

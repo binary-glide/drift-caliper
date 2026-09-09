@@ -32,7 +32,13 @@ class ModelVersion(BaseModel):
     Validation lives here, in a ``field_validator``, rather than in any caller
     (e.g. ``Judge.create``) so the invariant holds for every construction
     path -- there is no way to build a ``ModelVersion`` that wraps an empty
-    or whitespace-only string.
+    or whitespace-only ``str``.
+
+    That claim is about *blank* values and is deliberately narrow. A
+    wrong-*typed* argument (``ModelVersion(value=123)``) is rejected by
+    Pydantic's core coercion, which runs *before* this validator, so it
+    surfaces as ``pydantic_core.ValidationError`` rather than a
+    ``CaliperError``. See ``BIN-104``.
 
     Raises:
         InvalidParameterError: ``value`` is empty or contains only
