@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from caliper.measurement.criteria import ScoringCriteria
-from caliper.measurement.judge import ModelVersion
+from caliper.measurement.model_version import ModelVersion
 
 
 @dataclass(frozen=True, slots=True)

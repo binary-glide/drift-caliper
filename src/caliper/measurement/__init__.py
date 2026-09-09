@@ -6,7 +6,8 @@ scoring agent outputs to produce structured results with provenance. See
 """
 
 from caliper.measurement.criteria import ScoringCriteria
-from caliper.measurement.judge import Judge, ModelVersion
+from caliper.measurement.judge import Judge
+from caliper.measurement.model_version import ModelVersion
 from caliper.measurement.provenance import Provenance
 from caliper.measurement.provider import JudgeProviderPort, JudgeProviderResponse
 from caliper.measurement.result import ScoringResult

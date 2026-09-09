@@ -9,62 +9,16 @@ for ``provider``, ``criteria`` and ``score()``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from caliper.errors import InvalidParameterError, MissingPrerequisiteError
 from caliper.measurement.criteria import ScoringCriteria
+from caliper.measurement.model_version import (
+    MODEL_VERSION_CONSTRAINT,
+    ModelVersion,
+)
+from caliper.measurement.provenance import Provenance
 from caliper.measurement.provider import JudgeProviderPort
-
-if TYPE_CHECKING:
-    # Deferred to avoid a circular import: result.py -> provenance.py ->
-    # judge.py. Safe under `from __future__ import annotations` since the
-    # annotation is never evaluated at runtime.
-    from caliper.measurement.result import ScoringResult
-
-_MODEL_VERSION_CONSTRAINT = "must be a non-empty string that is not entirely whitespace"
-
-
-@dataclass(frozen=True, slots=True)
-class ModelVersion:
-    """A pinned, non-empty model version string.
-
-    Preserved exactly as provided, including any surrounding whitespace.
-    Equality follows the wrapped ``value`` (dataclass value equality).
-
-    Validation lives here, in ``__post_init__``, rather than in any caller
-    (e.g. ``Judge.create``) so the invariant holds for every construction
-    path -- there is no way to build a ``ModelVersion`` that wraps an empty
-    or whitespace-only string.
-
-    Raises:
-        InvalidParameterError: ``value`` is empty or contains only
-            whitespace. ``context["kind"]`` is always ``"invalid"`` here --
-            a value was supplied, just not one that satisfies the
-            constraint. The ``"missing"`` case (no value supplied at all)
-            is a distinct condition handled by callers such as
-            ``Judge.create`` before a ``ModelVersion`` is ever constructed.
-    """
-
-    value: str
-
-    def __post_init__(self) -> None:
-        """Reject empty or whitespace-only model version strings."""
-        if self.value.strip() == "":
-            raise InvalidParameterError(
-                "model_version must be a non-empty, non-whitespace string",
-                context={
-                    "parameter": "model_version",
-                    "constraint": _MODEL_VERSION_CONSTRAINT,
-                    "kind": "invalid",
-                    "provided": self.value,
-                },
-                recovery_hint=(
-                    "Pass the exact model version string your provider "
-                    "returns for the model you are pinning to, e.g. "
-                    "'claude-sonnet-4-5-20250929'. Whitespace-only strings "
-                    "do not identify a model."
-                ),
-            )
+from caliper.measurement.result import ScoringResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +90,7 @@ class Judge:
                 "model_version is required to pin measurement stability",
                 context={
                     "parameter": "model_version",
-                    "constraint": _MODEL_VERSION_CONSTRAINT,
+                    "constraint": MODEL_VERSION_CONSTRAINT,
                     "kind": "missing",
                 },
                 recovery_hint=(
@@ -206,11 +160,6 @@ class Judge:
                 interpreted.
             JudgeRefusalError: the provider declined to score.
         """
-        # Deferred imports to avoid a circular import at module load time:
-        # result.py -> provenance.py -> judge.py.
-        from caliper.measurement.provenance import Provenance
-        from caliper.measurement.result import ScoringResult
-
         if self.provider is None:
             raise MissingPrerequisiteError(
                 "scoring requires a configured judge provider",
