@@ -215,8 +215,8 @@ Feature: Check whether the baseline has sufficient observations
   Scenario Outline: Engineer configures a threshold that is not positive
     Given the engineer has configured a minimum observation count that is <invalid value>
     When they attempt to check whether the baseline is sufficient
-    Then the check rejects the configuration as an invalid threshold
-    And the rejection guides the engineer that the threshold must be a positive value
+    Then the check fails with an error classifiable as an invalid parameter
+    And the error identifies which parameter is invalid and what the valid range is
 
     Examples:
       | invalid value    |

@@ -87,21 +87,21 @@ Feature: Record observations into a Phase I baseline collection
     Given the engineer has a Phase I baseline containing observations scored by a specific judge model version
     When they attempt to record a scoring result produced by a different judge model version
     Then the recording fails with an error that is programmatically classifiable as a provenance mismatch
-    And the error describes what the engineer should do next
+    And the error carries recovery guidance identifying which provenance dimension differs
     And the baseline is unchanged
 
   Scenario: Recording fails when the scoring result has different scoring criteria than existing observations
     Given the engineer has a Phase I baseline containing observations scored against specific criteria
     When they attempt to record a scoring result produced against different criteria
     Then the recording fails with an error that is programmatically classifiable as a provenance mismatch
-    And the error describes what the engineer should do next
+    And the error carries recovery guidance identifying which provenance dimension differs
     And the baseline is unchanged
 
   Scenario: Recording something that is not a complete scoring result fails before modifying the baseline
     Given the engineer has a Phase I baseline collection
     When they attempt to record something that is not a complete scoring result with score, reasoning, and provenance
     Then the recording fails with an error that is programmatically classifiable as an invalid observation
-    And the error describes what the engineer should do next
+    And the error carries recovery guidance identifying what the input is missing
     And the baseline is unchanged
 
   # --- Boundary: provenance signature establishment (BR-1 boundary) ---

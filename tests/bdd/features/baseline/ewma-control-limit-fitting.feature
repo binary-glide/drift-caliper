@@ -145,7 +145,7 @@ Feature: Fit EWMA control limits from the baseline
     When they attempt to fit EWMA control limits
     Then the fitting fails with an error classifiable as an insufficient baseline
     And the error reports how many observations the baseline has and how many are needed
-    And the error guides the engineer to collect more observations before fitting
+    And the error carries recovery guidance to collect more observations before fitting
 
   # --- Sad path: zero-variance baseline (BR-2 sad) ---
 
@@ -160,7 +160,7 @@ Feature: Fit EWMA control limits from the baseline
     When they attempt to fit EWMA control limits
     Then the fitting fails with an error classifiable as a degenerate baseline
     And the error explains that EWMA control limits require score variation in the baseline
-    And the error guides the engineer on what to do next
+    And the error carries recovery guidance for addressing the zero-variance condition
 
   # --- Sad path: invalid smoothing parameter (BR-5 sad) ---
 
@@ -212,7 +212,8 @@ Feature: Fit EWMA control limits from the baseline
     Given the engineer has a Phase I baseline that passes the sufficiency check
     And the baseline scores show non-zero variance
     When they attempt to fit EWMA control limits without specifying a false alarm tolerance
-    Then the fitting fails with an error indicating that a false alarm tolerance is required
+    Then the fitting fails with an error classifiable as an invalid parameter
+    And the error identifies that a false alarm tolerance parameter is required
     And no control limits are produced
 
   # --- Edge: error distinguishability (BR-11) ---

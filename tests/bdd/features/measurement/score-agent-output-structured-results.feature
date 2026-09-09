@@ -60,14 +60,14 @@ Feature: Score a single agent output and receive structured results
     Given the engineer has a judge configured with criteria
     When they attempt to score an agent output and the judge's provider returns an error
     Then the scoring call fails with an error that is programmatically classifiable as a provider failure
-    And the error describes what the engineer should do next
+    And the error carries recovery guidance identifying the provider and the failed operation
     And no result is returned
 
   Scenario: Malformed judge response fails visibly
     Given the engineer has a judge configured with criteria
     When they attempt to score an agent output and the judge produces a response that cannot be interpreted as a structured result
     Then the scoring call fails with an error that is programmatically classifiable as a malformed response
-    And the error describes what the engineer should do next
+    And the error carries recovery guidance identifying the expected response shape
     And no partial or default result is returned
 
   Scenario: Scoring without criteria fails before reaching the judge
