@@ -67,7 +67,7 @@ def test_raises_invalid_parameter_error_when_criteria_is_whitespace_only() -> No
     assert error.context["constraint"] != ""
 
 
-def test_missing_and_invalid_criteria_share_message_free_context_shape() -> None:
+def test_empty_and_whitespace_only_criteria_share_context_shape() -> None:
     """SC2 vs SC3: both invalid-kind failures, distinguishable only by ``provided``."""
     with pytest.raises(InvalidParameterError) as empty_info:
         ScoringCriteria(value="")
