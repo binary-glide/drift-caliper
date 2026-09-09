@@ -69,7 +69,12 @@ packages = ["src/caliper"]
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/bdd"]
-addopts = "--strict-markers --strict-config -ra"
+# `--cov` is here, not left to be remembered on the command line, so that
+# `uv run pytest` alone -- the gate the test-patterns standard and the repo's
+# own CLAUDE.md name -- actually enforces `[tool.coverage.report] fail_under
+# = 80` below. Without it, `fail_under` was configured but never evaluated:
+# pytest-cov never activated, so the gate was silently a no-op.
+addopts = "--strict-markers --strict-config -ra --cov=src --cov-report=term-missing"
 # BDD feature files live outside the step-definition directories.
 bdd_features_base_dir = "tests/bdd/features"
 markers = [
@@ -91,9 +96,26 @@ exclude_also = [
 ]
 
 [tool.mutmut]
-paths_to_mutate = "src/"
-tests_dir = "tests/unit/"
-runner = "uv run pytest tests/unit/ -x -q"
+# mutmut 3.x rewrote its config schema (copy-on-mutate into `mutants/`, its
+# own git-change detection, dependency tracking) and dropped `runner`
+# entirely -- it drives pytest itself now. The previous `paths_to_mutate`
+# (string, not list) and `tests_dir` keys are the *old* schema; mutmut 3.7
+# accepts them for one release as deprecated aliases, but our values were
+# bare strings where mutmut always iterates/concatenates them as lists, so
+# loading this config crashed with `TypeError: can only concatenate list
+# (not "str") to list` on the very first `mutmut run` -- this had never
+# actually been run before. Fixed to the current keys and correct types;
+# see `mutmut/configuration.py::_load_config`.
+source_paths = ["src"]
+pytest_add_cli_args_test_selection = ["tests/unit/"]
+# `--no-cov` disables pytest-cov for mutmut's own pytest invocations.
+# `addopts` above bakes in `--cov=src ... fail_under=80` so that a plain
+# `uv run pytest` enforces the coverage gate. Without this override, a
+# mutant that happens to drop branch coverage below 80% would make pytest
+# exit non-zero on that ground alone -- reported by mutmut as "killed" even
+# when no assertion actually caught the semantic change, inflating the
+# mutation score with false positives.
+pytest_add_cli_args = ["--no-cov"]
 
 # ---------------------------------------------------------------------------
 # ruff
@@ -106,7 +128,10 @@ src = ["src", "tests"]
 # domain model are ratified records -- a formatter must not silently rewrite
 # them, and an illustrative snippet is not required to be import-sorted. Ruff
 # owns Python source here; prose is out of its scope.
-extend-exclude = ["*.md"]
+# `mutants/` is mutmut's generated mutant source -- 1.9MB of deliberately
+# broken code, regenerated on every run. Linting it is meaningless and it
+# drowns real findings (332 errors on first encounter).
+extend-exclude = ["*.md", "mutants"]
 
 [tool.ruff.lint]
 select = [
@@ -167,7 +192,29 @@ strict = true
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 files = ["src", "tests"]
+exclude = ["^mutants/"]
 
 [[tool.mypy.overrides]]
 module = ["scipy.*"]
 follow_untyped_imports = true
+
+# factory_boy ships a `py.typed` marker but its own `factory/__init__.py`
+# re-exports `Factory`, `Faker`, `Sequence`, `SubFactory`, `LazyFunction`
+# etc. from submodules without `__all__` or explicit `as` re-exports, and
+# without full annotations on the declaration helpers themselves. Under
+# `strict` (which enables `no_implicit_reexport` and
+# `disallow_untyped_calls`) that reads as "attribute not exported" and
+# "call to untyped function" for every factory in tests/factories.py, plus
+# "Class cannot subclass Factory (has type Any)" as a consequence of the
+# first -- a known factory_boy/mypy-strict interaction (`follow_untyped_imports`
+# does not help: the package genuinely ships `py.typed`, it is just an
+# incomplete/non-reexporting one), not a real typing gap in our code.
+# Scoped to the one file that touches factory_boy's API, not the whole
+# `tests` tree.
+[[tool.mypy.overrides]]
+module = ["tests.factories"]
+disable_error_code = ["attr-defined", "no-untyped-call", "misc", "name-defined"]
+
+[tool.ty.src]
+# Same reason as ruff's exclude: mutmut's generated mutants are not source.
+exclude = ["mutants"]

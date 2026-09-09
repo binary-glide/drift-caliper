@@ -205,6 +205,10 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# mutmut -- generated mutant sources, regenerated on every run
+mutants/
+.mutmut-cache
+
 # Ruff stuff:
 .ruff_cache/
 

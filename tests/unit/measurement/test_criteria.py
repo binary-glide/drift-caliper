@@ -30,18 +30,23 @@ from caliper.measurement import ScoringCriteria
 
 def test_accepts_text_rubric_and_reports_it_when_inspected() -> None:
     """SC1: criteria configured with a text rubric report it back."""
+    # Arrange
     rubric = "Evaluate the response for factual accuracy and helpfulness."
 
+    # Act
     criteria = ScoringCriteria(value=rubric)
 
+    # Assert
     assert criteria.value == rubric
 
 
 def test_raises_invalid_parameter_error_when_criteria_is_empty_string() -> None:
     """SC2: empty-string criteria fail as a classifiable invalid parameter."""
+    # Arrange/Act
     with pytest.raises(InvalidParameterError) as exc_info:
         ScoringCriteria(value="")
 
+    # Assert
     error = exc_info.value
     assert error.category == "invalid_parameter"
     assert error.context["parameter"] == "scoring_criteria"
@@ -53,11 +58,14 @@ def test_raises_invalid_parameter_error_when_criteria_is_empty_string() -> None:
 
 def test_raises_invalid_parameter_error_when_criteria_is_whitespace_only() -> None:
     """SC3: whitespace-only criteria fail as a classifiable invalid parameter."""
+    # Arrange
     whitespace_only = "   \t  \n "
 
+    # Act
     with pytest.raises(InvalidParameterError) as exc_info:
         ScoringCriteria(value=whitespace_only)
 
+    # Assert
     error = exc_info.value
     assert error.category == "invalid_parameter"
     assert error.context["parameter"] == "scoring_criteria"
@@ -67,13 +75,15 @@ def test_raises_invalid_parameter_error_when_criteria_is_whitespace_only() -> No
     assert error.context["constraint"] != ""
 
 
-def test_empty_and_whitespace_only_criteria_share_context_shape() -> None:
+def test_differs_by_provided_value_when_criteria_empty_vs_whitespace() -> None:
     """SC2 vs SC3: both invalid-kind failures, distinguishable only by ``provided``."""
+    # Act
     with pytest.raises(InvalidParameterError) as empty_info:
         ScoringCriteria(value="")
     with pytest.raises(InvalidParameterError) as whitespace_info:
         ScoringCriteria(value="   ")
 
+    # Assert
     assert type(empty_info.value) is type(whitespace_info.value)
     assert empty_info.value.context["kind"] == "invalid"
     assert whitespace_info.value.context["kind"] == "invalid"
@@ -84,15 +94,19 @@ def test_empty_and_whitespace_only_criteria_share_context_shape() -> None:
 
 def test_preserves_criteria_with_whitespace_and_punctuation() -> None:
     """SC4: the reported criteria match the original text exactly."""
+    # Arrange
     rubric = "  Score for: (a) tone, (b) correctness -- no exceptions!  "
 
+    # Act
     criteria = ScoringCriteria(value=rubric)
 
+    # Assert
     assert criteria.value == rubric
 
 
 def test_accepts_multiline_rubric_and_preserves_full_text_when_inspected() -> None:
     """SC5: a multi-line rubric with dimensions and anchors is preserved fully."""
+    # Arrange
     rubric = (
         "Evaluate on two dimensions:\n"
         "1. Correctness -- does the answer match the reference?\n"
@@ -101,27 +115,35 @@ def test_accepts_multiline_rubric_and_preserves_full_text_when_inspected() -> No
         "Example of a 1/5 response: incorrect and dismissive."
     )
 
+    # Act
     criteria = ScoringCriteria(value=rubric)
 
+    # Assert
     assert criteria.value == rubric
     assert "\n" in criteria.value
 
 
 def test_accepts_minimal_single_sentence_rubric_and_reports_it_when_inspected() -> None:
     """SC6: a brief single-sentence rubric is accepted and inspectable."""
+    # Arrange
     rubric = "Score how helpful the response is on a scale of 0 to 1."
 
+    # Act
     criteria = ScoringCriteria(value=rubric)
 
+    # Assert
     assert criteria.value == rubric
 
 
 def test_accepts_and_preserves_criteria_with_surrounding_whitespace() -> None:
     """SC7: surrounding whitespace is accepted and preserved, not trimmed."""
+    # Arrange
     padded_rubric = "  Evaluate for helpfulness and correctness.  "
 
+    # Act
     criteria = ScoringCriteria(value=padded_rubric)
 
+    # Assert
     assert criteria.value == padded_rubric
     assert criteria.value != padded_rubric.strip()
 
@@ -129,6 +151,9 @@ def test_accepts_and_preserves_criteria_with_surrounding_whitespace() -> None:
 @given(st.text(min_size=1).filter(lambda s: s.strip() != ""))
 def test_preserves_any_non_blank_criteria_character_for_character(rubric: str) -> None:
     """Property: any string with non-whitespace content round-trips exactly."""
+    # Arrange: `rubric` is supplied by Hypothesis (see the strategy above).
+    # Act
     criteria = ScoringCriteria(value=rubric)
 
+    # Assert
     assert criteria.value == rubric

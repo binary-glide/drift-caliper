@@ -42,49 +42,67 @@ LIBRARY_CATEGORIES: list[tuple[type[CaliperError], str]] = [
 def test_each_library_error_declares_its_stable_category(
     error_type: type[CaliperError], category: str
 ) -> None:
-    assert error_type.category == category
+    # Arrange: error_type and category come from the parametrize table above.
+    # Act
+    declared_category = error_type.category
+
+    # Assert
+    assert declared_category == category
 
 
 @pytest.mark.parametrize(("error_type", "category"), LIBRARY_CATEGORIES)
 def test_every_library_error_is_caught_by_the_base_type(
     error_type: type[CaliperError], category: str
 ) -> None:
+    # Act
     with pytest.raises(CaliperError) as exc_info:
         raise error_type("boom", context={}, recovery_hint="try something else")
 
+    # Assert
     assert exc_info.value.category == category
 
 
 def test_category_strings_are_unique_across_the_taxonomy() -> None:
+    # Arrange
     categories = [category for _, category in LIBRARY_CATEGORIES]
 
+    # Assert
     assert len(set(categories)) == len(categories)
 
 
 def test_context_and_recovery_hint_are_carried_verbatim() -> None:
+    # Arrange
     context = {"parameter": "model_version", "kind": "missing"}
 
+    # Act
     error = InvalidParameterError(
         "boom", context=context, recovery_hint="pin a model version"
     )
 
+    # Assert
     assert error.context == context
     assert error.recovery_hint == "pin a model version"
 
 
 def test_an_extension_may_add_its_own_category() -> None:
-    # ADR-002 section 6: the taxonomy is semi-open. Third-party code extends
-    # it by subclassing, and `except CaliperError` still catches the result.
+    # Arrange: ADR-002 section 6 -- the taxonomy is semi-open. Third-party
+    # code extends it by subclassing, and `except CaliperError` still
+    # catches the result.
     class JudgeTimeoutError(CaliperError):
         category = "judge_timeout"
 
+    # Act
     with pytest.raises(CaliperError) as exc_info:
         raise JudgeTimeoutError("boom", context={}, recovery_hint="raise the timeout")
 
+    # Assert
     assert exc_info.value.category == "judge_timeout"
 
 
 def test_a_subclass_that_omits_its_category_fails_at_definition_time() -> None:
+    # Act/Assert: the class *definition* below is the action under test --
+    # `__init_subclass__` must raise before the class body finishes, so
+    # there is no separate instance to act on afterwards.
     with pytest.raises(TypeError):
 
         class UncategorisedError(CaliperError):
