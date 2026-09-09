@@ -701,14 +701,14 @@ These are the operations the ten feature files establish. They replace the "serv
 ADR-006, alongside E1 shipping. Of the seven still open, six belong to E2
 stories that will settle them as a byproduct of doing that story's design
 work (BIN-63, BIN-64, BIN-65/94/95, BIN-66, BIN-68) — they are not blocked on
-anyone deciding anything today. **OQ-9 is the exception: it is a genuine,
-free-standing product decision, not something an E2 story's design work will
-resolve as a side effect**, because it is asking whether Caliper should offer
-an escape hatch from its own strictest integrity rule (provenance mismatch
-raises, ratified 2026-09-09, BIN-68) — that is a policy call for the product
-owner, not an implementation detail `BIN-68`'s author gets to pick. If this
-document's human gate is only going to produce one decision, it should be
-that one.
+anyone deciding anything today.
+
+**OQ-9 was the exception, and it is now settled: ratified 2026-09-10 —
+there is no escape hatch. A changed judge requires a new baseline.** It was
+the one free-standing product decision here, because it asked whether to
+carve an exception into Caliper's strictest integrity rule rather than how
+to implement a story. All eleven original questions now have an owner and a
+disposition.
 
 | # | Question | Owner | Blocks | Source | Status |
 |---|----------|-------|--------|--------|--------|
@@ -720,9 +720,45 @@ that one.
 | 6 | ~~Scoring input shape. Both agent input and output, or output alone?~~ | — | — | BIN-59 OQ-6 | **SETTLED** — ADR-006 §3: both accepted — `agent_output` required, `agent_input` optional. Neither is echoed onto `Provenance` or `ScoringResult` (they are the subject measured, not the measurement configuration). |
 | 7 | **Serialisable form for audit logging.** Should the artefact provide a `to_dict()` or equivalent? The PRD recommends in-scope for BIN-66. | domain-modeller | `FittedControlLimits` interface | BIN-66 OQ-1 | **Open.** Untouched. Belongs to BIN-66. |
 | 8 | **Observation identity.** Do observations carry a timestamp, sequence index, or neither? The feature files assert ordering without assuming a mechanism. | domain-modeller | `Observation` structure | BIN-63 OQ-3 | **Open.** Untouched. Belongs to BIN-63. Doubles as the recorded trigger for adding `whenever` as a dependency — see CLAUDE.md "Stack Members Not Yet Used" and the Glossary's Observation entry. |
-| 9 | **Explicit override for known provenance change between phases.** Should an engineer who knowingly changed the judge be able to acknowledge and proceed, rather than being forced to refit? | **product** | `compare_provenance()` signature | BIN-68 OQ-3 | **Open — the live product decision.** See Reader's guide above. Not touched by ADR-006/007/008; `ProvenanceMismatchError` raising unconditionally on any provenance change (BIN-68, ratified 2026-09-09) is the current behaviour, and this question is whether that gets a deliberate, explicit escape hatch. |
+| 9 | ~~Explicit override for known provenance change between phases.~~ | — | — | BIN-68 OQ-3 | **SETTLED** — product owner, 2026-09-10: **no override. The engineer refits.** `ProvenanceMismatchError` raises unconditionally; `compare_provenance()` takes no acknowledgement or force parameter. See "Provenance change requires a refit" below. |
 | 10 | ~~Whether scoring accepts empty agent output.~~ | — | — | BIN-59 OQ-5 | **SETTLED** — ADR-006 §6: rejected. Empty or whitespace-only `agent_output` raises `InvalidParameterError` before any provider call. An engineer who wants "no response" scored passes their own sentinel string. |
 | 11 | **Dual mismatch representation.** When both provenance dimensions differ, what shape does the error context take? (String, list, or paired entries.) | system-architect | `ProvenanceMismatchError.context["dimension"]` | BIN-68 OQ-1 | **Open.** Untouched — `BIN-59` never compares two `Provenance` instances, only constructs and reads one (ADR-006, Related decisions). Belongs to BIN-68. |
+
+### Provenance change requires a refit (OQ-9, settled 2026-09-10)
+
+**Decision: there is no acknowledgement path. An engineer who knowingly
+changes the judge model or the scoring criteria must fit a new baseline.**
+`compare_provenance()` gains no `acknowledge=`, `force=` or equivalent
+parameter, and none should be added without reopening this decision.
+
+**Rationale.** An acknowledged mismatch is still a mismatch. Knowing that the
+instrument changed does not make measurements taken with the old instrument
+comparable to measurements taken with the new one — the control limits were
+estimated from a distribution the new judge does not produce, so every
+subsequent ARL₀ claim, every signal and every in-control run is computed
+against a baseline that no longer describes the process. An override would let
+an engineer keep a chart that looks authoritative and reports numbers that mean
+nothing, which is the precise failure Caliper exists to prevent.
+
+Refitting is not a punishment for the engineer; it is the only operation that
+restores the guarantee.
+
+⚠️ **The cost is real and compounds with ADR-005, and should not be
+soft-pedalled.** ADR-005 set the minimum Phase I baseline at **100 individual
+observations** — already a materially larger adoption barrier than the 20–25
+figure `context.md` originally assumed, and Phase I→II conversion is the
+project's OMTM. This decision means a judge-model change resets that cost in
+full: 100 fresh observations before monitoring resumes, with no shortcut.
+
+That is accepted deliberately, not overlooked. The alternative trades a
+one-off cost the engineer can see for a silent, permanent invalidation they
+cannot.
+
+**What this does not foreclose.** Nothing here prevents Caliper from making
+the refit *easier* — carrying forward configuration, warning early when a
+provider version drifts, or offering a helper that begins a new baseline from
+a running stream. Those are ergonomics, and they are additive. What is closed
+is proceeding on the old baseline with the new judge.
 
 ---
 
