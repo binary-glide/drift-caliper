@@ -138,11 +138,31 @@ class FittedControlLimits(Protocol):
     def baseline_spread(self) -> float:
         """Sample standard deviation of Phase I scores.
 
-        This is a descriptive statistic capturing TOTAL variation in the
-        baseline, including any slow drift. All chart types compute and
-        report this same measure. It is NOT the sigma estimate used by
-        the Shewhart I-chart for control limits — see the dual-spread
-        note below.
+        A descriptive statistic capturing TOTAL variation in the baseline,
+        including any slow drift. Useful for characterising the data, but
+        NOT the sigma used for control limit computation — see
+        sigma_estimate below and the dual-spread note.
+        """
+        ...
+
+    @property
+    def sigma_estimate(self) -> float:
+        """Moving-range-based sigma estimate (MR-bar / d_2).
+
+        The OPERATIONAL sigma used by ALL chart types for control limit
+        computation on individual observations. Captures SHORT-TERM
+        variation only, robust to slow drift within the baseline.
+        This is a DIFFERENT quantity from baseline_spread — see the
+        dual-spread note below.
+        """
+        ...
+
+    @property
+    def sigma_estimation_method(self) -> str:
+        """Identifies how sigma_estimate was computed.
+
+        For R1 (individual observations, moving-range span 2):
+        'moving_range' in all cases. Reported for auditability.
         """
         ...
 
@@ -197,39 +217,44 @@ A common representation would misrepresent CUSUM's decision interval as an obser
 
 | Field | Type | Notes |
 |-------|------|-------|
-| *(shared core)* | | All FittedControlLimits properties |
-| `reference_value` | `float` | *k* — shift size to detect, in sigma units |
+| *(shared core)* | | All FittedControlLimits properties (including `sigma_estimate` — the MR-based sigma used for CUSUM standardisation) |
+| `reference_value` | `float` | *k* — shift size to detect, in sigma units (of the shared `sigma_estimate`) |
 | `decision_interval` | `float` | *h* — derived from *k* and target ARL_0 via Siegmund's approximation; the engineer does not specify this directly |
 | `target_value` | `float` | mu_0 — typically the baseline mean |
 | `direction` | `str` | `"two_sided"` (default), `"lower"`, or `"upper"` |
-| `sigma_estimate` | `float` | The sigma used for CUSUM standardisation. Currently the sample standard deviation (same value as `baseline_spread`), listed separately for auditability — the artefact must be self-documenting about which sigma was used in the computation. |
 
 #### FittedShewhart
 
 | Field | Type | Notes |
 |-------|------|-------|
-| *(shared core)* | | All FittedControlLimits properties |
-| `sigma_estimate` | `float` | **Moving-range-based estimate (MR-bar / d_2).** This is a DIFFERENT quantity from `baseline_spread` — see dual-spread note. |
+| *(shared core)* | | All FittedControlLimits properties (including `sigma_estimate` — the MR-based sigma, same as EWMA and CUSUM) |
 | `sigma_multiplier` | `float` | *k* — number of sigma units defining control limits; derived from the false alarm tolerance, not engineer-specified |
-| `sigma_estimation_method` | `str` | Identifies the estimation method (moving-range for R1) |
 | `ucl` | `float` | Upper control limit = `baseline_mean + sigma_multiplier * sigma_estimate` |
 | `lcl` | `float` | Lower control limit = `baseline_mean - sigma_multiplier * sigma_estimate` |
 | `cl` | `float` | Centre line (= baseline mean) |
 
-### The Shewhart Dual-Spread Distinction (ADR-004 finding)
+### The Dual-Spread Distinction — All Charts (corrected from ADR-004 finding)
 
-The Shewhart I-chart artefact carries **two** spread-related quantities. They are different quantities that answer different questions:
+Every fitted artefact carries **two** spread-related quantities in the shared core. They are different quantities that answer different questions:
 
 | Field | Source | What it captures | How it is computed |
 |-------|--------|------------------|--------------------|
 | `baseline_spread` (shared core) | Sample standard deviation of all Phase I scores | **Total** variation, including any slow drift within the baseline | Standard sample std dev formula over all observations |
-| `sigma_estimate` (Shewhart-specific) | Moving-range method: MR-bar / d_2 | **Short-term** variation only, robust to slow drift | Average of absolute consecutive differences, divided by the unbiasing constant d_2 for span 2 |
+| `sigma_estimate` (shared core) | Moving-range method: MR-bar / d_2 | **Short-term** variation only, robust to slow drift | Average of absolute consecutive differences, divided by the unbiasing constant d_2 for span 2 |
 
-**Why both exist:** The sample standard deviation captures ALL variation in the baseline, including slow trends or step changes within the collection period. The moving-range sigma captures only the variation between consecutive observations — the short-term noise. SPC uses the moving-range sigma for I-chart limits precisely because it isolates the variation relevant to individual-observation monitoring. If the baseline contains a slow upward trend, the sample standard deviation is inflated (wider limits, fewer signals), but the MR sigma is unaffected (correct limits for the point-to-point noise).
+**Why both exist:** The sample standard deviation captures ALL variation in the baseline, including slow trends or step changes within the collection period. The moving-range sigma captures only the variation between consecutive observations — the short-term noise. SPC uses the moving-range sigma for control limits on individual observations precisely because it isolates the variation relevant to individual-observation monitoring. If the baseline contains a slow upward trend, the sample standard deviation is inflated (wider limits, fewer signals), but the MR sigma is unaffected (correct limits for the point-to-point noise).
 
-**Why this matters:** Conflating the two silently produces wrong limits. Using `baseline_spread` (sample std dev) as the Shewhart sigma would over-estimate process variation when the baseline contains any drift, producing limits that are too wide and that miss genuine shifts. Using the MR sigma as the EWMA or CUSUM sigma would under-estimate variation when baseline drift is present, producing limits that are too tight and that generate false alarms.
+**Why this matters:** Conflating the two silently produces wrong limits. Using `baseline_spread` (sample std dev) as the operational sigma would over-estimate process variation when the baseline contains any drift, producing limits that are too wide and that miss genuine shifts. This applies equally to EWMA, CUSUM, and Shewhart.
 
-**The review feature file (BIN-66) asserts both:** SC1 references "the spread measure" (shared core's `baseline_spread`); the Shewhart feature file's SC2 separately references "the sigma estimate derived from the baseline." Both must be present and distinguishable.
+**Correction from initial model:** The original model (following an inference in ADR-005) placed the MR-based sigma only on `FittedShewhart`, with EWMA and CUSUM using the sample standard deviation. This was wrong. Standard SPC practice estimates sigma from the moving range for **all** chart types on individual observations (n=1), not just the Shewhart I-chart. The reasoning is the same: individual-observation monitoring requires an estimate of short-term variation, and the moving range provides exactly that.
+
+**Verification (2026-09-09):** SPC for Excel formulas reference (spcforexcel.com) explicitly confirms: "If the subgroup size is 1, sigma is estimated from the moving range for n=2" for both EWMA and CUSUM charts, not just Shewhart. Multiple SPC software implementations (analyse-it, SigmaXL) confirm the same convention. Montgomery's Chapter 9 (*Introduction to Statistical Quality Control*) could not be accessed directly (O'Reilly paywall), but all secondary sources citing Montgomery confirm MR-based estimation for individuals data across all chart types.
+
+**What could not be verified from primary sources:** Whether Lucas and Saccucci (1990) or Siegmund (1985) prescribe a specific sigma estimator, or whether they assume known sigma. Both methods take sigma as a parameter — the ARL calibration works with whatever sigma is supplied. The choice of estimator affects how closely the estimated sigma approximates the true sigma, which in turn affects how closely the achieved ARL matches the nominal ARL_0. **If the published ARL tables assume a particular sigma estimator and the implementation uses a different one, the calibration departs from nominal in a way BIN-84's table comparison would not detect** — the tests would pass while the achieved ARL_0 departed from the published values. This must be verified from the primary papers at implementation time.
+
+**ADR-004 impact:** The shared core gains two fields (`sigma_estimate`, `sigma_estimation_method`) that ADR-004 placed on Shewhart only. ADR-005's statement "EWMA and CUSUM use the sample standard deviation" was an inference not established by ADR-004 and is contradicted by standard SPC practice. ADR-004 should be amended to reflect the corrected shared core. This domain model does not amend ADR-004 directly — it documents the finding for the system-architect to act on.
+
+**The review feature file (BIN-66) asserts both:** SC1 references "the spread measure" (shared core's `baseline_spread`); the Shewhart feature file's SC2 separately references "the sigma estimate derived from the baseline" (shared core's `sigma_estimate`). Both are present and distinguishable on all artefacts.
 
 **Moving-range span:** Fixed at the conventional value (span 2) for R1, per BIN-95 OQ-5 endorsed by ADR-004. The unbiasing constant d_2 is coupled to the span — changing one without the other invalidates the limits.
 
@@ -382,8 +407,8 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 | **Decision interval** (*h*) | The CUSUM threshold. Compared against the accumulating CUSUM statistic *S*, NOT against observations directly. Not on the observation scale. Derived from the reference value and target ARL_0 via Siegmund's approximation — the engineer does not specify it. | Baseline | BIN-94, ADR-004 |
 | **Reference value** (*k*) | The CUSUM shift size parameter, in sigma units. The size of shift the CUSUM is optimised to detect. Has a library default. | Baseline | BIN-94, ADR-004 |
 | **Smoothing parameter** (lambda) | The EWMA weighting parameter controlling sensitivity to recent vs historical observations. Has a library default. | Baseline | BIN-65, ADR-004 |
-| **Baseline spread** | The sample standard deviation of Phase I scores. A shared descriptive statistic on all fitted artefacts (part of the `FittedControlLimits` protocol). Captures TOTAL variation including any slow drift within the baseline. | Baseline | ADR-004 |
-| **Moving-range sigma** / **sigma estimate** (Shewhart) | The short-term variation estimate from consecutive-observation differences: MR-bar / d_2 for span 2. Used exclusively by the Shewhart I-chart for control limits. Captures SHORT-TERM variation only, robust to slow drift. **Different from baseline spread** — see dual-spread note above. | Baseline | BIN-95, ADR-004, ADR-005 |
+| **Baseline spread** | The sample standard deviation of Phase I scores. A shared descriptive statistic on all fitted artefacts (part of the `FittedControlLimits` protocol). Captures TOTAL variation including any slow drift within the baseline. **Not the operational sigma** — see sigma estimate. | Baseline | ADR-004 |
+| **Sigma estimate** / **moving-range sigma** | The short-term variation estimate from consecutive-observation differences: MR-bar / d_2 for span 2. Used by **all three chart types** (EWMA, CUSUM, Shewhart) for control limit computation on individual observations. Part of the shared core. Captures SHORT-TERM variation only, robust to slow drift. **Different from baseline spread** — see dual-spread note above. | Baseline | ADR-004, standard SPC practice (verified) |
 | **Sigma multiplier** | The number of sigma units defining Shewhart control limits. Derived from the false alarm tolerance — not specified by the engineer. | Baseline | BIN-95, ADR-004 |
 | **Calibration method** | The numerical procedure that determined the chart's parameters from the target ARL_0. EWMA: Markov-chain (Lucas and Saccucci 1990). CUSUM: Siegmund's corrected diffusion approximation (1985). Shewhart: direct tail probability. | Baseline | ADR-001, ADR-004 |
 | **Chart type** | One of EWMA, CUSUM, or Shewhart I-chart in R1. Reported on every fitted artefact. | Baseline | ADR-004 |
@@ -394,7 +419,7 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 
 **Consistency notes:**
 - "False alarm tolerance" is used throughout the feature files as a neutral term. ADR-004 resolved this to ARL_0 as the primary representation.
-- "Spread measure" in BIN-66 SC1 refers to `baseline_spread` (shared core sample standard deviation). "Sigma estimate" in BIN-95 SC2 refers to the Shewhart-specific MR-based estimate. These are explicitly different quantities.
+- "Spread measure" in BIN-66 SC1 refers to `baseline_spread` (shared core sample standard deviation). "Sigma estimate" in BIN-95 SC2 refers to `sigma_estimate` (shared core MR-based estimate). These are explicitly different quantities, both in the shared core.
 - "Observation" and "scoring result" are the same data — the term shifts at the context boundary. A "scoring result" becomes an "observation" when recorded into a baseline.
 
 ---
@@ -497,4 +522,5 @@ These are the operations the ten feature files establish. They replace the "serv
 
 ## Changelog
 
+- 2026-09-09 (amendment): Sigma estimator correction — `sigma_estimate` (MR-based) and `sigma_estimation_method` moved from Shewhart chart-specific to the shared core. Standard SPC practice uses MR/d_2 for ALL chart types on individual observations, not just Shewhart. ADR-005's inference that "EWMA and CUSUM use the sample standard deviation" was incorrect. FittedCUSUM and FittedShewhart chart-specific sigma fields removed (now shared). Dual-spread section reframed from "Shewhart-specific" to "all artefacts." ADR-004 shared core affected — flagged for system-architect amendment. Amendment 2 (CUSUM duplication invariant) rendered moot — the fields now hold genuinely different quantities.
 - 2026-09-09: Initial model — BIN-100
