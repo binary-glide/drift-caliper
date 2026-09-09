@@ -384,12 +384,20 @@ whitespace-only; `context["parameter"] == "output"`).
 
 ### 7. `Provenance` and `ScoringResult` value objects
 
-Both are frozen dataclasses with `__post_init__` validation, following the
-pattern `ModelVersion` and `ScoringCriteria` already established -- **not**
-the `Result[...]`-returning factories `docs/domain-model.md` specifies at
-lines 277, 291, 309 and 335, which are wrong (logged on `BIN-100`, contradicts
-ADR-002 and the ratified "errors raise" decision). This ADR does not
-re-litigate that finding; it applies the correct pattern directly.
+Both are frozen dataclasses, following the pattern `ModelVersion` and
+`ScoringCriteria` already established -- **not** the `Result[...]`-returning
+factories `docs/domain-model.md` specifies at lines 277, 291, 309 and 335,
+which are wrong (logged on `BIN-100`, contradicts ADR-002 and the ratified
+"errors raise" decision). This ADR does not re-litigate that finding; it
+applies the correct pattern directly.
+
+**`Provenance` holds `ModelVersion` and `ScoringCriteria`, not raw `str`.**
+An earlier draft of this section typed both fields as `str` without saying
+why, which is a silent departure from `docs/domain-model.md`'s Value Object
+Inventory (*"Carried by: `Judge.model_version`, `Provenance.model_version`"*,
+and the same wording for `ScoringCriteria`). On reflection that wording is
+read literally here -- **the type is carried, not just the concept** -- and
+`str` was the wrong call:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -397,16 +405,13 @@ class Provenance:
     """The measurement configuration that produced a score: model version +
     scoring criteria. Equality by value (both fields)."""
 
-    model_version: str
-    scoring_criteria: str
+    model_version: ModelVersion
+    scoring_criteria: ScoringCriteria
 
-    def __post_init__(self) -> None:
-        # Raises InvalidParameterError(kind="invalid") if either field is
-        # empty or whitespace-only. Constructed only internally by
-        # Judge.score() from already-validated ModelVersion/ScoringCriteria
-        # values, so this is a defensive invariant, not a new engineer-facing
-        # error path.
-        ...
+    # No __post_init__. There is nothing left to validate -- a Provenance
+    # cannot hold a blank or whitespace-only model version or criteria
+    # string, because ModelVersion and ScoringCriteria already cannot. The
+    # invariant is structural, not re-checked.
 
 
 @dataclass(frozen=True, slots=True)
@@ -425,6 +430,51 @@ class ScoringResult:
         # scenario).
         ...
 ```
+
+`Judge.score()` builds `Provenance(model_version=self.model_version,
+scoring_criteria=effective_criteria)` directly from the already-validated
+`ModelVersion`/`ScoringCriteria` it already holds -- no unwrapping to `str`
+and back. Reading a provenance value follows the same `.value` idiom
+`BIN-57`'s merged tests already use for `Judge.model_version`:
+`result.provenance.model_version.value`. Comparing two provenance dimensions
+for equality does not even need `.value` -- `ModelVersion` and
+`ScoringCriteria` are value-equal dataclasses, so
+`result.provenance.model_version == judge.model_version` holds directly.
+
+**Why, weighing both sides named when this was raised for reconsideration:**
+
+1. **It removes duplicated validation rather than defending it.** The
+   previous draft's own comment called the `str`-field version's
+   `__post_init__` check "a defensive invariant, not a new engineer-facing
+   error path" -- i.e. a second, redundant re-implementation of a rule
+   `ModelVersion`/`ScoringCriteria` already enforce. With the VOs, that
+   re-implementation is deleted, not hidden.
+2. **It matches established usage, not just convention-for-its-own-sake.**
+   The `.value` idiom is already how `BIN-57`'s merged tests read
+   `Judge.model_version`; holding raw `str` in `Provenance` would have been
+   the one place in the codebase that broke that idiom.
+3. **The type is public and returned to engineers, and per ADR-004 flows
+   onto fitted artefacts (`BIN-65`/`94`/`95`).** Changing `str` to a value
+   object after code exists that reads `ScoringResult.provenance.model_version`
+   as a string would be a breaking change for every such reader. Deciding it
+   correctly now, while `BIN-59` is still unimplemented, costs nothing;
+   deciding it later costs a migration.
+
+The case for `str` -- serialisation without unwrapping across the Phase I/II
+boundary, and internal consistency with `ScoringResult.score` also having no
+VO -- was considered and is not the deciding factor: a VO-typed `Provenance`
+still serialises trivially via `.value` on each field when `BIN-63`/`68`
+need to persist or compare it, and `score`'s lack of a VO is explained
+independently in section 5 (it is a bare scalar with a single finiteness
+check, not a business concept with its own module elsewhere in the codebase
+the way model version and criteria are). Neither argument outweighs points
+1-3.
+
+**For `BIN-100`:** `docs/domain-model.md`'s "Carried by" wording is confirmed
+correct as literally written -- `Provenance.model_version` carries a
+`ModelVersion`, not a `str`. No correction needed on this point; `BIN-100`'s
+existing scope (the wrong `Result[...]` factories) is the only fix required
+in that document for these two value objects.
 
 **Suggested location:** `src/caliper/measurement/provenance.py` (`Provenance`)
 and `src/caliper/measurement/result.py` (`ScoringResult`), mirroring the
@@ -532,6 +582,21 @@ logged as wrong on `BIN-100`. It contradicts ADR-002 and the ratified
 errors-as-values dependency this project does not have and is instructed
 never to add.
 
+### `Provenance.model_version` / `Provenance.scoring_criteria` typed as raw `str`
+
+**Reconsidered and rejected** (see section 7). Would have matched
+`ScoringResult.score`'s lack of a value object and made serialisation across
+the Phase I/II boundary (`BIN-63`/`68`) marginally more direct. Rejected
+because it silently departs from `docs/domain-model.md`'s "Carried by"
+wording without saying so, reintroduces a validation check
+(non-empty/non-whitespace) that `ModelVersion`/`ScoringCriteria` already
+perform -- duplicating a rule instead of relying on it structurally -- and
+breaks the `.value` idiom `BIN-57`'s merged tests already established for
+reading a judge's model version. `Provenance` holding the value objects
+directly is at least as easy to serialise (`.value` on each field, on
+demand) and is the version that cannot be constructed in an invalid state
+by definition.
+
 ## Consequences
 
 ### What changes
@@ -598,7 +663,11 @@ never to add.
 - **Provenance/ScoringResult shape (section 7):** medium cost to reverse.
   Adding fields (e.g. a timestamp) is additive; removing or renaming the
   existing three `ScoringResult` fields would break every consumer, including
-  the not-yet-written `BIN-63` baseline recording.
+  the not-yet-written `BIN-63` baseline recording. **High cost to reverse
+  `Provenance`'s field types** (`ModelVersion`/`ScoringCriteria` vs. `str`)
+  once any consumer reads them -- this is exactly why it was settled by
+  value object now rather than left as `str` for convenience and revisited
+  after `BIN-63`/`68` exist.
 
 ## Related decisions
 
@@ -643,3 +712,9 @@ never to add.
 - The immutability scenario asserts on Python's `FrozenInstanceError` /
   `AttributeError` when attempting to reassign a `ScoringResult` field --
   not a `CaliperError` (ADR-002 section 7, unchanged).
+- The "provenance values match the judge's configuration exactly" scenario
+  can assert either `result.provenance.model_version == judge.model_version`
+  (VO value-equality, no unwrapping) or `.value == .value` if a plain string
+  comparison reads more clearly in the step definition -- both hold, since
+  `Provenance` holds the same `ModelVersion`/`ScoringCriteria` instances
+  `Judge.score()` already validated (section 7).
