@@ -16,7 +16,7 @@ See ``docs/architecture/adr/002-error-contract-exception-taxonomy.md``.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, ClassVar
 
 
 class CaliperError(Exception):
@@ -25,9 +25,15 @@ class CaliperError(Exception):
     Consumers can catch every Caliper failure with ``except CaliperError``,
     or a specific leaf type below for finer-grained handling.
 
+    The taxonomy is semi-open (ADR-002 section 6): third-party code may
+    extend it by subclassing with a new ``category`` string. Library
+    categories are a stable contract -- removing one is a breaking change,
+    adding one is a minor-version change.
+
     Attributes:
         category: Stable, machine-readable category identifier (e.g.
-            ``"invalid_parameter"``). Part of the tested contract.
+            ``"invalid_parameter"``), declared once per concrete subclass.
+            Part of the tested contract.
         context: Structured fields describing the failure. Required keys
             per category are documented on each leaf type and in ADR-002.
             Part of the tested contract.
@@ -36,18 +42,33 @@ class CaliperError(Exception):
             tests must never assert on its content.
     """
 
-    category: str
+    category: ClassVar[str]
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Require every concrete subclass to declare a ``category``.
+
+        The constructor no longer takes ``category`` as an argument, so
+        nothing else would catch a subclass that forgets to set it -- the
+        omission would surface much later, as an ``AttributeError`` raised
+        while a caller was trying to classify an error it had just caught.
+        Failing at class-definition time instead makes it a typo the author
+        sees immediately, and it holds for third-party extensions too.
+        """
+        super().__init_subclass__(**kwargs)
+        if "category" not in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} must declare a class-level `category` string; "
+                "see ADR-002 section 6 on extending the taxonomy"
+            )
 
     def __init__(
         self,
         message: str,
         *,
-        category: str,
         context: Mapping[str, Any],
         recovery_hint: str,
     ) -> None:
         super().__init__(message)
-        self.category = category
         self.context: Mapping[str, Any] = context
         self.recovery_hint = recovery_hint
 
@@ -60,21 +81,15 @@ class InvalidParameterError(CaliperError):
         constraint: What the parameter must satisfy.
         kind: ``"missing"`` when the parameter was not supplied at all,
             ``"invalid"`` when a value was supplied but violates the
-            constraint. A closed discriminator.
+            constraint. A closed discriminator -- distinct from the
+            descriptive ``reason`` key used by other categories, and
+            deliberately not unified with it.
         provided: The supplied value. Present only when ``kind ==
             "invalid"`` -- absent when ``kind == "missing"``, but nothing
             asserts on that absence (ADR-002 section 3).
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="invalid_parameter",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "invalid_parameter"
 
 
 class MissingPrerequisiteError(CaliperError):
@@ -85,15 +100,7 @@ class MissingPrerequisiteError(CaliperError):
         operation: What operation it blocks.
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="missing_prerequisite",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "missing_prerequisite"
 
 
 class ProviderError(CaliperError):
@@ -104,15 +111,7 @@ class ProviderError(CaliperError):
         operation: What operation was attempted.
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="provider_failure",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "provider_failure"
 
 
 class MalformedResponseError(CaliperError):
@@ -123,15 +122,7 @@ class MalformedResponseError(CaliperError):
         expected_shape: What shape was expected.
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="malformed_response",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "malformed_response"
 
 
 class JudgeRefusalError(CaliperError):
@@ -142,15 +133,7 @@ class JudgeRefusalError(CaliperError):
         operation: What was being scored.
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="judge_refusal",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "judge_refusal"
 
 
 class ProvenanceMismatchError(CaliperError):
@@ -163,34 +146,19 @@ class ProvenanceMismatchError(CaliperError):
         received: The differing value.
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="provenance_mismatch",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "provenance_mismatch"
 
 
 class InvalidObservationError(CaliperError):
     """An input to baseline recording is not a complete scoring result.
 
     Required ``context`` keys:
-        reason: Why the observation is invalid.
+        reason: Why the observation is invalid. Descriptive, not a closed
+            discriminator -- see ``InvalidParameterError.kind``.
         missing_fields: Which fields are missing.
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="invalid_observation",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "invalid_observation"
 
 
 class InsufficientBaselineError(CaliperError):
@@ -201,15 +169,7 @@ class InsufficientBaselineError(CaliperError):
         need: Required minimum.
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="insufficient_baseline",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "insufficient_baseline"
 
 
 class DegenerateBaselineError(CaliperError):
@@ -217,15 +177,8 @@ class DegenerateBaselineError(CaliperError):
 
     Required ``context`` keys:
         reason: What makes the baseline degenerate (e.g.
-            ``"zero_variance"``).
+            ``"zero_variance"``). Descriptive, not a closed discriminator
+            -- see ``InvalidParameterError.kind``.
     """
 
-    def __init__(
-        self, message: str, *, context: Mapping[str, Any], recovery_hint: str
-    ) -> None:
-        super().__init__(
-            message,
-            category="degenerate_baseline",
-            context=context,
-            recovery_hint=recovery_hint,
-        )
+    category = "degenerate_baseline"
