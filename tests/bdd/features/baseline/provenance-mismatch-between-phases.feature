@@ -10,11 +10,15 @@ Feature: Phase II provenance comparison against fitted artefact
   # are not yet settled. These scenarios are written to survive any
   # resolution.
   #
-  # [ASSUMPTION] A2: The comparison should check both provenance
-  #   dimensions (model version and criteria), not only model version.
-  #   Recommended but not ratified. Scenarios cover both dimensions.
-  #   If only model version is checked, criteria scenarios would need
-  #   removal.
+  # [RATIFIED 2026-09-09] A2: The comparison checks BOTH provenance
+  #   dimensions -- model version AND criteria.
+  #   Settled by the product owner. BIN-63's BR-1 already rejects an
+  #   observation whose provenance disagrees with the baseline's, and
+  #   provenance is BOTH dimensions -- so a criteria mismatch already
+  #   raises within Phase I. Checking only model version here would
+  #   mean the same dimension raises inside Phase I and is ignored
+  #   across the boundary, breaking the consistency SC6 enforces.
+  #   Open: the comparison MECHANISM only (OQ-2, exact vs normalised).
   #
   # OQ-1: How the dimension field represents a dual mismatch (both
   #   model version and criteria differ). The dual-mismatch scenario
