@@ -114,7 +114,19 @@ convention = "google"
 # and discovers the project from pyproject.toml.
 # ---------------------------------------------------------------------------
 [tool.mypy]
-python_version = "3.11"
+# Deliberately NOT pinned to the 3.11 floor via `python_version`.
+#
+# numpy's bundled stubs use PEP 695 `type` statements, which mypy rejects as a
+# syntax error whenever the analysis target is below 3.12 -- so `python_version
+# = "3.11"` fails on any 3.12+ interpreter the moment numpy is in the
+# environment, which is every developer machine and the CI lint job. Reproduced
+# on 3.12 and 3.13; passes only on a 3.11 venv, which is the least likely setup
+# anyone actually runs.
+#
+# The 3.11 floor is enforced where it can be enforced honestly: the pytest
+# matrix runs the full suite on 3.11, 3.12 and 3.13, so 3.12-only syntax in
+# `src` fails the 3.11 job at import. Revisit if numpy's stubs stop requiring
+# 3.12+, or if mypy learns to exempt third-party stubs from the target version.
 strict = true
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
