@@ -8,16 +8,16 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from caliper.measurement.criteria import ScoringCriteria
-from caliper.measurement.model_version import ModelVersion
+from caliper.measurement.domain.criteria import ScoringCriteria
+from caliper.measurement.domain.model_version import ModelVersion
 
 
 class Provenance(BaseModel):
     """The model version and scoring criteria that produced a score.
 
-    Equality by value (both fields) -- inherited from the dataclass default,
-    since ``ModelVersion`` and ``ScoringCriteria`` are themselves value-equal
-    models.
+    Equality by value (both fields) -- inherited from Pydantic's default
+    field-wise ``BaseModel`` equality, since ``ModelVersion`` and
+    ``ScoringCriteria`` are themselves value-equal models.
 
     No validator: there is nothing left to validate here. A
     ``Provenance`` cannot hold a blank or whitespace-only model version or

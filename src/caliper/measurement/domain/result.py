@@ -11,7 +11,7 @@ import math
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.errors import InvalidParameterError
-from caliper.measurement.provenance import Provenance
+from caliper.measurement.domain.provenance import Provenance
 
 
 class ScoringResult(BaseModel):

@@ -32,9 +32,10 @@ class ScoringCriteria(BaseModel):
     """A non-empty text rubric that anchors a judge's scoring assessment.
 
     Preserved exactly as provided, including any surrounding whitespace.
-    Equality follows the wrapped ``value`` (dataclass value equality).
+    Equality follows the wrapped ``value`` (Pydantic's default field-wise
+    value equality).
 
-    Validation lives here, in ``__post_init__``, following the same
+    Validation lives here, in a ``field_validator``, following the same
     placement ``ModelVersion`` (BIN-57) established, so the invariant holds
     for every construction path -- there is no way to build a
     ``ScoringCriteria`` that wraps an empty or whitespace-only string.
