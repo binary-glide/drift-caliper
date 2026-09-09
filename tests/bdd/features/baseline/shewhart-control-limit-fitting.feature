@@ -173,16 +173,32 @@ Feature: Fit Shewhart I-chart control limits from the baseline
 
   # BIN-63 BR-2 guarantees insertion order is preserved. This is the
   # first story where that guarantee matters for the arithmetic, not
-  # just for chart sequencing. Reordering the same observations
-  # produces different consecutive differences, a different moving
-  # range, a different sigma estimate, and therefore different limits.
+  # just for chart sequencing. Sigma is estimated from the average of
+  # the CONSECUTIVE differences, so the limits depend on the sequence
+  # of those differences -- not only on which scores are present.
+  #
+  # Stated as a property, deliberately. "Any different order gives
+  # different limits" would be FALSE: reversing the sequence maps
+  # consecutive pairs to consecutive pairs, and |a-b| = |b-a|, so a
+  # reversed baseline yields an identical set of moving ranges, an
+  # identical sigma, and an identical mean -- therefore identical
+  # limits. Only a reordering that CHANGES the consecutive differences
+  # changes the fit.
 
-  Scenario: Observation order in the baseline affects the fitted control limits
+  Scenario: Fitted limits depend on the sequence of consecutive differences
     Given the engineer has a Phase I baseline that passes the sufficiency check
     And the baseline scores show non-zero variance
-    When they fit Shewhart I-chart control limits from the baseline in its original observation order
+    When they fit Shewhart I-chart control limits from the baseline in its recorded observation order
     Then the control limits reflect the consecutive-observation differences in that order
-    And fitting the same scores in a different order would produce different limits
+    And the limits are not determined by the set of scores alone
+
+  Scenario: Reordering the baseline so consecutive differences change alters the fitted limits
+    Given the engineer has a Phase I baseline that passes the sufficiency check
+    And the baseline scores show non-zero variance
+    When they fit Shewhart I-chart control limits from that baseline
+    And they fit again from the same scores reordered so that the consecutive differences change
+    Then the two fits report different sigma estimates
+    And the two fits report different control limits
 
   # --- Sad path: insufficient baseline (BR-1 sad) ---
 
