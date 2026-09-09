@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from caliper.errors import InvalidParameterError
+
 _SCORING_CRITERIA_CONSTRAINT = (
     "must be a non-empty string that is not entirely whitespace"
 )
@@ -54,9 +56,21 @@ class ScoringCriteria:
     def __post_init__(self) -> None:
         """Reject empty or whitespace-only scoring criteria.
 
-        Not yet implemented -- this scaffold exists only so downstream
-        tests can import ``ScoringCriteria`` and run red for the right
-        reason (absent behaviour, not a missing module). No validation
-        logic belongs here yet; ``domain-implementer`` implements it.
+        # added by domain-implementer BIN-58
         """
-        raise NotImplementedError
+        if self.value.strip() == "":
+            raise InvalidParameterError(
+                "scoring_criteria must be a non-empty, non-whitespace string",
+                context={
+                    "parameter": "scoring_criteria",
+                    "constraint": _SCORING_CRITERIA_CONSTRAINT,
+                    "kind": "invalid",
+                    "provided": self.value,
+                },
+                recovery_hint=(
+                    "Pass a text rubric describing what the judge should "
+                    "evaluate, e.g. 'Evaluate the response for factual "
+                    "accuracy and helpfulness.'. Whitespace-only strings "
+                    "carry no anchoring guarantee for the judge."
+                ),
+            )
