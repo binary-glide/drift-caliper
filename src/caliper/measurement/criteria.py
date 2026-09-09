@@ -19,17 +19,16 @@ any other configuration point, so as not to silently settle OQ-3.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.errors import InvalidParameterError
 
-_SCORING_CRITERIA_CONSTRAINT = (
+SCORING_CRITERIA_CONSTRAINT = (
     "must be a non-empty string that is not entirely whitespace"
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ScoringCriteria:
+class ScoringCriteria(BaseModel):
     """A non-empty text rubric that anchors a judge's scoring assessment.
 
     Preserved exactly as provided, including any surrounding whitespace.
@@ -51,18 +50,28 @@ class ScoringCriteria:
             whitespace. ``context["kind"]`` is always ``"invalid"``.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     value: str
 
-    def __post_init__(self) -> None:
-        """Reject empty or whitespace-only scoring criteria."""
-        if self.value.strip() == "":
+    @field_validator("value")
+    @classmethod
+    def must_not_be_blank(cls, v: str) -> str:
+        """Reject empty or whitespace-only scoring criteria.
+
+        Raises ``InvalidParameterError`` directly rather than ``ValueError``:
+        Pydantic wraps ``ValueError``/``AssertionError`` in its own
+        ``ValidationError``, while any other exception propagates unwrapped,
+        which is what preserves ADR-002's contract for the caller.
+        """
+        if v.strip() == "":
             raise InvalidParameterError(
                 "scoring_criteria must be a non-empty, non-whitespace string",
                 context={
                     "parameter": "scoring_criteria",
-                    "constraint": _SCORING_CRITERIA_CONSTRAINT,
+                    "constraint": SCORING_CRITERIA_CONSTRAINT,
                     "kind": "invalid",
-                    "provided": self.value,
+                    "provided": v,
                 },
                 recovery_hint=(
                     "Pass a text rubric describing what the judge should "
@@ -72,3 +81,4 @@ class ScoringCriteria:
                     "against an opaque default."
                 ),
             )
+        return v

@@ -15,9 +15,8 @@ no network call, per ADR-006's note for backend-test-writer.
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
-
 import pytest
+from pydantic import ValidationError
 
 from caliper.errors import (
     InvalidParameterError,
@@ -210,8 +209,8 @@ def test_rejects_attempt_to_modify_score_after_creation() -> None:
     result = judge.score(_AGENT_OUTPUT)
     original_score = result.score
 
-    with pytest.raises(FrozenInstanceError):
-        result.score = 0.1  # type: ignore[misc]  # ty: ignore[invalid-assignment]
+    with pytest.raises(ValidationError):
+        result.score = 0.1  # ty: ignore[invalid-assignment]
 
     assert result.score == original_score
 
@@ -224,8 +223,8 @@ def test_rejects_attempt_to_modify_reasoning_after_creation() -> None:
     result = judge.score(_AGENT_OUTPUT)
     original_reasoning = result.reasoning
 
-    with pytest.raises(FrozenInstanceError):
-        result.reasoning = "tampered"  # type: ignore[misc]  # ty: ignore[invalid-assignment]
+    with pytest.raises(ValidationError):
+        result.reasoning = "tampered"  # ty: ignore[invalid-assignment]
 
     assert result.reasoning == original_reasoning
 
@@ -238,8 +237,8 @@ def test_rejects_attempt_to_modify_provenance_after_creation() -> None:
     result = judge.score(_AGENT_OUTPUT)
     original_provenance = result.provenance
 
-    with pytest.raises(FrozenInstanceError):
-        result.provenance = None  # type: ignore[misc,assignment]  # ty: ignore[invalid-assignment]
+    with pytest.raises(ValidationError):
+        result.provenance = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
     assert result.provenance == original_provenance
 

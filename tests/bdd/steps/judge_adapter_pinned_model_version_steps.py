@@ -9,8 +9,9 @@ message text.
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, dataclass
+from dataclasses import dataclass
 
+from pydantic import ValidationError
 from pytest_bdd import given, then, when
 
 from caliper.errors import CaliperError, InvalidParameterError
@@ -223,10 +224,10 @@ def attempt_to_change_model_version(
     """Attempt to reassign the judge's model version after creation."""
     judge, _ = judge_before_mutation_attempt
     try:
-        judge.model_version = ModelVersion(  # type: ignore[misc]  # ty: ignore[invalid-assignment]
+        judge.model_version = ModelVersion(  # ty: ignore[invalid-assignment]
             value="claude-opus-4-20250514"
         )
-    except (AttributeError, FrozenInstanceError) as exc:
+    except (AttributeError, ValidationError) as exc:
         return MutationAttempt(judge=judge, error=exc)
     return MutationAttempt(judge=judge, error=None)
 
@@ -235,7 +236,7 @@ def attempt_to_change_model_version(
 def change_should_be_rejected(mutation_attempt: MutationAttempt) -> None:
     """The mutation attempt raised, and did not silently succeed."""
     assert mutation_attempt.error is not None
-    assert isinstance(mutation_attempt.error, (AttributeError, FrozenInstanceError))
+    assert isinstance(mutation_attempt.error, (AttributeError, ValidationError))
 
 
 @then("the judge should continue to report its original model version")

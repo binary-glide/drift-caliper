@@ -16,11 +16,10 @@ This is what makes the "model version not provided" scenario reachable as
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
-
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
 from caliper.errors import InvalidParameterError
 from caliper.measurement import Judge, ModelVersion
@@ -104,8 +103,8 @@ def test_rejects_attempt_to_change_model_version_after_creation() -> None:
     original_version = "claude-sonnet-4-5-20250929"
     judge = Judge.create(model_version=original_version)
 
-    with pytest.raises(FrozenInstanceError):
-        judge.model_version = ModelVersion(  # type: ignore[misc]  # ty: ignore[invalid-assignment]
+    with pytest.raises(ValidationError):
+        judge.model_version = ModelVersion(  # ty: ignore[invalid-assignment]
             value="claude-opus-4-20250514"
         )
 

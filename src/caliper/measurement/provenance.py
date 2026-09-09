@@ -6,25 +6,26 @@ section 7.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
 from caliper.measurement.criteria import ScoringCriteria
 from caliper.measurement.model_version import ModelVersion
 
 
-@dataclass(frozen=True, slots=True)
-class Provenance:
+class Provenance(BaseModel):
     """The model version and scoring criteria that produced a score.
 
     Equality by value (both fields) -- inherited from the dataclass default,
     since ``ModelVersion`` and ``ScoringCriteria`` are themselves value-equal
-    dataclasses.
+    models.
 
-    No ``__post_init__``: there is nothing left to validate here. A
+    No validator: there is nothing left to validate here. A
     ``Provenance`` cannot hold a blank or whitespace-only model version or
     criteria string, because ``ModelVersion`` and ``ScoringCriteria``
     already cannot -- the invariant is structural, not re-checked.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     model_version: ModelVersion
     scoring_criteria: ScoringCriteria

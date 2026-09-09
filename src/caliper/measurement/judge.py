@@ -8,7 +8,7 @@ for ``provider``, ``criteria`` and ``score()``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
 from caliper.errors import InvalidParameterError, MissingPrerequisiteError
 from caliper.measurement.criteria import ScoringCriteria
@@ -21,22 +21,28 @@ from caliper.measurement.provider import JudgeProviderPort
 from caliper.measurement.result import ScoringResult
 
 
-@dataclass(frozen=True, slots=True)
-class Judge:
+class Judge(BaseModel):
     """An immutable configured adapter that scores agent outputs.
 
     A ``Judge`` wraps an LLM provider and holds a model version pinned at
     creation time. The model version cannot change after creation --
-    attempting to assign to it raises ``dataclasses.FrozenInstanceError``
+    attempting to assign to it raises Pydantic's ``ValidationError``
     (ADR-002 section 7: immutability violations are not part of the
     ``CaliperError`` taxonomy).
 
     ``provider`` and ``criteria`` are optional additions (ADR-006 section 2)
     -- both default to ``None`` and are purely additive over BIN-57's
     original single-field ``Judge``. Neither is validated at creation
-    beyond what ``ScoringCriteria.__post_init__`` already enforces; their
+    beyond what ``ScoringCriteria's validator`` already enforces; their
     absence at ``score()`` time is what raises ``MissingPrerequisiteError``.
+
+    ``arbitrary_types_allowed`` is required because ``JudgeProviderPort`` is
+    a ``Protocol``, which Pydantic cannot build a validation schema for. It
+    is ``@runtime_checkable``, so Pydantic still isinstance-checks a supplied
+    provider against the protocol's method set rather than accepting anything.
     """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     model_version: ModelVersion
     provider: JudgeProviderPort | None = None
@@ -83,7 +89,7 @@ class Judge:
                 empty or whitespace-only (``context["kind"] == "invalid"``,
                 raised from ``ModelVersion.__post_init__``); or ``criteria``
                 was supplied but is empty or whitespace-only (raised from
-                ``ScoringCriteria.__post_init__``).
+                ``ScoringCriteria's validator``).
         """
         if model_version is None:
             raise InvalidParameterError(

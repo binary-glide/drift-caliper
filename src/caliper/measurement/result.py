@@ -7,27 +7,30 @@ section 7.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.errors import InvalidParameterError
 from caliper.measurement.provenance import Provenance
 
 
-@dataclass(frozen=True, slots=True)
-class ScoringResult:
+class ScoringResult(BaseModel):
     """Returned by ``Judge.score()``. Immutable; equality by value.
 
-    Attempting to reassign any field after creation raises Python's
-    ``dataclasses.FrozenInstanceError`` -- not a ``CaliperError`` (ADR-002
-    section 7; immutability violations are not part of the exception
-    taxonomy).
+    Attempting to reassign any field after creation raises Pydantic's
+    ``ValidationError`` -- not a ``CaliperError`` (ADR-002 section 7;
+    immutability violations are not part of the exception taxonomy).
     """
+
+    model_config = ConfigDict(frozen=True)
 
     score: float
     reasoning: str
     provenance: Provenance
 
-    def __post_init__(self) -> None:
+    @field_validator("score")
+    @classmethod
+    def must_be_finite(cls, v: float) -> float:
         """Reject a non-finite score.
 
         Raises ``InvalidParameterError`` (``context["parameter"] ==
@@ -36,14 +39,14 @@ class ScoringResult:
         constraint is placed on ``reasoning`` content or on an
         already-validated ``provenance``.
         """
-        if not math.isfinite(self.score):
+        if not math.isfinite(v):
             raise InvalidParameterError(
                 "score must be a finite number",
                 context={
                     "parameter": "score",
                     "constraint": "must be a finite float (not NaN or +/-infinity)",
                     "kind": "invalid",
-                    "provided": self.score,
+                    "provided": v,
                 },
                 recovery_hint=(
                     "Ensure the judge provider returns a real, finite "
@@ -51,3 +54,4 @@ class ScoringResult:
                     "recorded as a measurement."
                 ),
             )
+        return v

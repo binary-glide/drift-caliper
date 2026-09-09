@@ -12,8 +12,9 @@ throughout -- no network call, per ADR-006's note for backend-test-writer.
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, dataclass
+from dataclasses import dataclass
 
+from pydantic import ValidationError
 from pytest_bdd import given, then, when
 
 from caliper.errors import (
@@ -354,7 +355,7 @@ def attempt_to_modify_result(scored_result: ScoringResult) -> ResultMutationAtte
     ):
         try:
             setattr(scored_result, attribute, replacement)
-        except (AttributeError, FrozenInstanceError) as exc:
+        except (AttributeError, ValidationError) as exc:
             errors.append(exc)
     return ResultMutationAttempt(result=scored_result, errors=errors)
 
@@ -364,7 +365,7 @@ def modification_is_rejected(result_mutation_attempt: ResultMutationAttempt) -> 
     """Every attempted reassignment raised, and none silently succeeded."""
     assert len(result_mutation_attempt.errors) == 3
     assert all(
-        isinstance(error, (AttributeError, FrozenInstanceError))
+        isinstance(error, (AttributeError, ValidationError))
         for error in result_mutation_attempt.errors
     )
 
