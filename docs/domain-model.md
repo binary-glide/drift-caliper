@@ -1,10 +1,61 @@
 ---
 created: 2026-09-09
+updated: 2026-09-10
 feature: BIN-100 — Domain model — aggregates, ubiquitous language, value objects
 bounded_context: measurement, baseline
+canonical: true
 ---
 
 # Domain Model: Caliper SPC Library
+
+> **Canonical copy.** This file (`docs/domain-model.md`, in the repo, reviewed
+> via PR like any other source change) is the canonical domain model.
+> `Projects/caliper/domain-model.md` in the Obsidian vault had drifted from
+> this file by the time of this refresh (BIN-100) — the vault copy was
+> missing three glossary rows (`Requested ARL`, `Achieved ARL`, `Signal`), the
+> entire Validation Checklist section, and several detail sentences (specific
+> ticket/scenario citations in the Error Contract Reference and Open
+> Questions tables) that this copy has and it does not. Neither copy was
+> "ahead" on substance — both reflected the same 2026-09-09 amendment — the
+> vault copy was simply a lossier hand-condensation of this one made at the
+> same time. Rather than re-reconcile two editable copies indefinitely (the
+> same structural problem CLAUDE.md's "Structural cause not addressed" note
+> already flags for scenarios existing in three places), the vault copy has
+> been replaced with a pointer to this file. This file is the one to read,
+> edit, and cite going forward.
+>
+> **Human gate note:** most of what this document presented as open when it
+> was first written yesterday is now settled — ADR-006 closed four of the
+> eleven original Open Questions the same day E1 shipped. The only question
+> below that is a live product decision, as opposed to something an E2 story
+> will settle when it gets there, is **OQ-9** (provenance-change override
+> between Phase I and Phase II). See the Open Questions section.
+
+---
+
+## E1 Status — Implemented, Tested, Merged
+
+Everything the Measurement context describes below (`Judge`, `ModelVersion`,
+`ScoringCriteria`, `Provenance`, `ScoringResult`, `JudgeProviderPort`) is
+implemented in `src/caliper/measurement/`, per the module layout BIN-103
+introduced:
+
+```
+src/caliper/errors.py                        # shared across bounded contexts
+src/caliper/measurement/domain/
+    criteria.py         # ScoringCriteria
+    judge.py             # Judge
+    model_version.py     # ModelVersion
+    provenance.py         # Provenance
+    result.py             # ScoringResult
+src/caliper/measurement/ports/
+    judge_provider.py     # JudgeProviderPort, JudgeProviderResponse
+```
+
+Where this document and the code disagree, **the code is right** — this
+refresh corrects the document to match it. The Baseline context (`Baseline`,
+`FittedControlLimits` and its chart-specific artefacts) remains unimplemented
+design at this point; nothing in this refresh changes that part of the model.
 
 ## Bounded Contexts
 
@@ -88,7 +139,9 @@ The `Baseline` is the only mutable object in the domain. Everything else is immu
 
 ### Judge — immutable configured adapter
 
-The `Judge` is the measurement instrument. It wraps an LLM provider, holds a pinned model version, and scores agent outputs against criteria.
+The `Judge` is the measurement instrument. It wraps an LLM provider (behind a
+port — see below), holds a pinned model version, optionally holds judge-level
+scoring criteria, and scores agent outputs against criteria.
 
 **Not a traditional entity:** the Judge has no lifecycle beyond creation, no mutable state, and no need for identity. Two judges with the same model version configured against the same provider are functionally interchangeable.
 
@@ -96,20 +149,97 @@ The `Judge` is the measurement instrument. It wraps an LLM provider, holds a pin
 
 **Best characterised as:** an immutable configured adapter behind a port boundary. The domain model defines its configuration contract; the implementation is an adapter concern.
 
+**Implemented** (`src/caliper/measurement/domain/judge.py`, BIN-59/ADR-006). A
+Pydantic `BaseModel` with `ConfigDict(frozen=True, arbitrary_types_allowed=True)`
+— `arbitrary_types_allowed` is required because `provider` is typed as
+`JudgeProviderPort`, a `Protocol`, which Pydantic cannot build a validation
+schema for; it is `@runtime_checkable`, so Pydantic still isinstance-checks a
+supplied provider against the protocol's method set rather than accepting
+anything.
+
 **Configuration constraints:**
 
 | Field | Type | Constraint | Source |
 |-------|------|-----------|--------|
-| `model_version` | `ModelVersion` | Required, non-empty, immutable, preserved exactly as provided | BIN-57 |
-| Criteria attachment point | TBD | **OQ-1** — criteria may attach at judge creation, at monitoring setup, or per-call | BIN-58 OQ-3 |
+| `model_version` | `ModelVersion` | Required (by Caliper validation, not the Python signature), non-empty, immutable, preserved exactly as provided | BIN-57 |
+| `provider` | `JudgeProviderPort \| None` | Optional at creation. A functional dependency, not user data — no scenario tests "create with no provider" as a structured-error case, so it is not wrapped in optional-with-required-semantics the way `model_version` is. Its absence surfaces as `MissingPrerequisiteError` at `score()` time. | ADR-006 §2 |
+| `criteria` | `ScoringCriteria \| None` | Optional at creation. May also be supplied (or overridden, for that call only) per call to `score()`. **Settles former OQ-1** — see Open Questions. | ADR-006 §2, BIN-58 |
 
 **Operations:**
 
 | Operation | Input | Output | Errors |
 |-----------|-------|--------|--------|
-| Create | `model_version: str` | `Judge` | `InvalidParameterError` (missing/empty/whitespace-only model version) |
-| `score(output, criteria?)` | Agent output, scoring criteria (if not attached at creation) | `ScoringResult` | `ProviderError`, `MalformedResponseError`, `JudgeRefusalError`, `MissingPrerequisiteError` (no criteria available) |
-| Inspect | — | `model_version` | — |
+| `create(model_version, provider=None, criteria=None)` | `model_version: str \| None` (optional-with-required-semantics — `None` raises), `provider`, `criteria` (both genuinely optional) | `Judge` | `InvalidParameterError` (`kind="missing"` when `model_version` omitted; `kind="invalid"` when empty/whitespace-only, raised from `ModelVersion`'s validator; also raised from `ScoringCriteria`'s validator if `criteria` is supplied but blank) |
+| `score(agent_output, *, agent_input=None, criteria=None)` | `agent_output: str` (required, positional); `agent_input: str \| None` (optional, not validated for emptiness, **not** carried onto `Provenance` or `ScoringResult`); `criteria: str \| None` (per-call override, does not mutate the frozen `Judge`) | `ScoringResult` | `MissingPrerequisiteError` (no provider configured; or no criteria resolvable from either the call or the judge — checked in that order, both before any provider call), `InvalidParameterError` (`agent_output` empty/whitespace-only — **settles former OQ-10**), `ProviderError`, `MalformedResponseError`, `JudgeRefusalError` (all propagated unchanged from the provider) |
+| Inspect | — | `model_version`, `provider`, `criteria` | — |
+
+**Criteria resolution order inside `score()`** (ADR-006 §2): per-call
+`criteria` argument, if given → else judge-level `self.criteria`, if set → else
+raise `MissingPrerequisiteError` before the provider is ever called. "Monitoring
+setup" is explicitly **not** a third attachment point in R1 — no `Monitor`
+construct exists anywhere in this domain model, and inventing one to give
+criteria a third home would design beyond what BIN-59 asked for. If a
+monitor-like construct is introduced later (R2 decorator/context-manager
+stories), it becomes an additive fourth fallback in the same resolution order,
+not a redesign.
+
+**`agent_output` vs `agent_input` naming** is deliberate, not a stylistic
+choice: bare `input` shadows a Python builtin and this project's `ruff`
+configuration (`flake8-builtins`, rule `A002`) rejects it. The `agent_` prefix
+also matches the feature files' own ubiquitous language ("agent output",
+"agent input").
+
+---
+
+### The judge provider port — `JudgeProviderPort`
+
+A **real hexagonal port** (`src/caliper/measurement/ports/judge_provider.py`,
+ADR-006 §1) — the seam between `Judge` and whatever actually calls an LLM. No
+concrete adapter exists yet; only `FakeJudgeProviderPort` (test code,
+`tests/support/fakes.py`) implements it, which is what makes `Judge.score()`
+testable without a network call.
+
+```python
+@runtime_checkable
+class JudgeProviderPort(Protocol):
+    def score(
+        self,
+        *,
+        model_version: str,
+        criteria: str,
+        agent_output: str,
+        agent_input: str | None = None,
+    ) -> JudgeProviderResponse: ...
+```
+
+The port returns an already-parsed `(score, reasoning)` pair
+(`JudgeProviderResponse`), not a raw provider payload — interpreting a
+provider's structured-output shape (OpenAI JSON mode, Anthropic tool use, or
+anything else) is an infrastructure concern specific to each provider's API,
+and belongs in the adapter, not in `Judge`. This mirrors the `SPCPort` pattern
+ADR-001 already established.
+
+`JudgeProviderResponse` is a value object in its own right — a frozen Pydantic
+`BaseModel` (`score: float`, `reasoning: str`) — internal to `Judge.score()`'s
+orchestration and not exposed to the engineer; `Judge.score()` attaches
+`Provenance` after receiving it.
+
+**Exception contract** (normative on the Protocol, not expressible in Python's
+type system): a conforming implementation raises `ProviderError` if the
+provider call fails or is unreachable, `MalformedResponseError` if the
+response can't be interpreted as a `(score, reasoning)` pair, or
+`JudgeRefusalError` if the provider declines on content/safety grounds.
+`MissingPrerequisiteError` is never raised by the port itself — it is raised
+by `Judge.score()` before the port is ever called.
+
+**No retry inside the library in R1** (ADR-006 §4, settling BIN-59 OQ-4,
+which this document did not previously carry as a numbered open question but
+is worth recording here since it bears directly on the port's contract): a
+`JudgeProviderPort` implementation calls the provider once from Caliper's
+point of view and raises immediately on failure; `Judge.score()` does not
+catch and retry. Retry, if ever added, lives entirely inside a future
+concrete adapter (e.g. wrapped with `stamina`) — additive, not a change to
+the port contract.
 
 ---
 
@@ -262,25 +392,83 @@ Every fitted artefact carries **two** spread-related quantities in the shared co
 
 ## Value Object Inventory
 
-All value objects below are immutable after creation. Equality is by value (all fields) unless noted otherwise.
+All value objects below are implemented as Pydantic `BaseModel` subclasses
+with `ConfigDict(frozen=True)` and `@field_validator`, per the house standard
+(`architecture/references/ddd.md`) — **not** stdlib frozen dataclasses (that
+was a conformance gap remediated under BIN-103) and **not** `Result[...]`-
+returning factories (see the correction below). Equality is by value (all
+fields) unless noted otherwise, using Pydantic's default field-wise equality.
+
+**Two implementation details worth carrying forward, because they are not
+obvious from the pattern alone:**
+
+1. **Validators raise `InvalidParameterError` directly, not `ValueError`.**
+   `architecture/references/ddd.md`'s example has `@field_validator` raise
+   `ValueError` and translate it to a domain error "at a service boundary."
+   Caliper has no service layer, so there is no boundary to translate at —
+   **the value object's validator is the boundary**, and raises the
+   `CaliperError` subclass directly. This works because of a specific,
+   verified Pydantic behaviour: Pydantic wraps `ValueError`/`AssertionError`
+   raised inside a validator in its own `pydantic.ValidationError`; any other
+   exception type propagates unwrapped. Verified empirically against
+   pydantic 2.13.5 (not assumed from the docs).
+2. **Immutability violations raise `pydantic_core.ValidationError`, not
+   `dataclasses.FrozenInstanceError`.** This changed with the BIN-103
+   dataclass→Pydantic migration; ADR-002 §7 keeps immutability violations
+   outside the `CaliperError` taxonomy either way — they are programming
+   mistakes, not operational failures, and are asserted by tests as a raw
+   Pydantic exception, never as a `CaliperError`.
+
+### Correction — no `Result[...]` factories
+
+This document previously specified `ModelVersion.create(raw: str) ->
+Result[ModelVersion, InvalidParameterError]` and equivalent
+`Result`-returning factories for `ScoringCriteria`, `Provenance` and
+`ScoringResult`. **These raise directly instead** — Caliper has no `returns`
+dependency and is instructed never to add one for this.
+
+To be fair to the standard this deviated from rather than just calling the
+original wording wrong: `coding-standards/references/python.md` does list
+`returns`/`Result` for typed error handling, but its own "When NOT to use
+`returns`" section is explicit that *"for simple single-failure-point
+functions, plain exceptions remain cleaner"*, and its own counter-example —
+`get_market(market_id) -> Market`, raising `NotFoundError` rather than
+returning a `Result` — is structurally identical to `ModelVersion.create`,
+`ScoringCriteria.create` and friends: one validation check, one failure mode,
+one exception type. `returns` would still be the right tool for a genuine
+multi-stage pipeline with heterogeneous failure types, should Caliper ever
+grow one; nothing here has that shape.
 
 ### `ModelVersion`
 
 **Carried by:** `Judge.model_version`, `Provenance.model_version`
-**Equality:** by value (string comparison)
+**Equality:** by value (wraps a single `str` field, `value`)
 **Constraints:**
 - Must be a non-empty string (BIN-57 BR-1, BR-2)
 - Whitespace-only strings are rejected (BIN-57 SC4)
 - Preserved exactly as provided, including leading/trailing whitespace (BIN-57 SC5, SC7)
-- Immutable after creation (BIN-57 SC6)
+- Immutable after creation (BIN-57 SC6) — enforced by Pydantic (`pydantic_core.ValidationError` on reassignment, per the note above)
 
-**Factory:** `ModelVersion.create(raw: str) -> Result[ModelVersion, InvalidParameterError]`
-**Rejects:** empty string, whitespace-only string, `None`.
+**Construction:** `ModelVersion(value=raw)` — validated by a `@field_validator`, raising `InvalidParameterError` directly (not returning a `Result`) when `raw` is empty or whitespace-only. Also constructed indirectly via `Judge.create(model_version=raw)`, which raises its own `InvalidParameterError(kind="missing")` first if `raw` is `None` (the "missing" case is a distinct condition Caliper checks before a `ModelVersion` is ever built — `ModelVersion` itself never sees `kind="missing"`, only `kind="invalid"`).
+**Rejects (as a `CaliperError`):** empty string, whitespace-only string.
+
+**⚠️ Known gap — BIN-104, not yet fixed:** the claim above ("no way to build a
+`ModelVersion` that wraps an empty or whitespace-only `str`") holds only for
+*blank* values. A wrong-*typed* argument, e.g. `ModelVersion(value=123)`, is
+rejected by Pydantic's own core type coercion, which runs **before** the
+`@field_validator` — so it surfaces as `pydantic_core.ValidationError`, not a
+`CaliperError`. "The value object is the boundary" is therefore true for
+blank values and not (yet) true for wrong types. This is not a regression —
+the stdlib-dataclass version raised an unhandled `AttributeError` from
+`.strip()` on an `int`, which was no better — but it is a real gap, filed as
+BIN-104 with a scenario still to be written. `ModelVersion` and
+`ScoringCriteria`'s docstrings have already been narrowed to claim only what
+holds.
 
 ### `ScoringCriteria`
 
-**Carried by:** `Provenance.scoring_criteria`, criteria configuration point (OQ-1)
-**Equality:** by value (string comparison)
+**Carried by:** `Provenance.scoring_criteria`, `Judge.criteria` (judge-level, optional), and the `criteria` parameter of `Judge.score()` (per-call, optional). **Former OQ-1 (criteria attachment point) is settled** — see Open Questions.
+**Equality:** by value (wraps a single `str` field, `value`)
 **Constraints:**
 - Must be a non-empty string (BIN-58 BR-1)
 - Whitespace-only strings are rejected (BIN-58 SC3)
@@ -288,33 +476,34 @@ All value objects below are immutable after creation. Equality is by value (all 
 - Preserved exactly as provided, including surrounding whitespace (BIN-58 SC4, SC7)
 - Immutable after creation
 
-**Factory:** `ScoringCriteria.create(raw: str) -> Result[ScoringCriteria, InvalidParameterError]`
-**Rejects:** empty string, whitespace-only string, `None`.
+**Construction:** `ScoringCriteria(value=raw)` — validated by a `@field_validator`, raising `InvalidParameterError` directly. Unlike `ModelVersion`, there is no "missing" case for this value object in the feature file — every scenario supplies a value, including blank ones — so `context["kind"]` is always `"invalid"` here.
+**Rejects (as a `CaliperError`):** empty string, whitespace-only string.
+**Same BIN-104 gap as `ModelVersion` applies** — a wrong-typed argument leaks `pydantic_core.ValidationError`, not `InvalidParameterError`.
 
 ### `Provenance`
 
 **Carried by:** `ScoringResult.provenance`, `Baseline.provenance_signature`, `FittedControlLimits` (via two protocol properties)
-**Equality:** compares both dimensions (model version AND criteria). **OQ-2 (open):** whether comparison is exact string match or normalised is unresolved. The need for equality is established (BIN-63 provenance checking, BIN-68 phase boundary comparison); the mechanism is not.
+**Equality:** compares both dimensions (model version AND criteria), via Pydantic's field-wise equality on the wrapped `ModelVersion`/`ScoringCriteria` instances. **OQ-2 (open):** whether comparison is exact string match or normalised is unresolved. The need for equality is established (BIN-63 provenance checking, BIN-68 phase boundary comparison); the mechanism is not.
 **Constraints:**
-- Both dimensions required and non-empty
+- Both dimensions required
 - Immutable after creation
+- **No validator.** There is nothing left to validate — `Provenance` cannot hold a blank or whitespace-only model version or criteria string, because `ModelVersion` and `ScoringCriteria` already cannot. The invariant is structural, not re-checked.
 
 **Structure:**
 
 | Field | Type | Source |
 |-------|------|--------|
-| `model_version` | `str` | From `ModelVersion`, carried through from the Judge |
-| `scoring_criteria` | `str` | From `ScoringCriteria`, carried through from the criteria configuration |
+| `model_version` | `ModelVersion` | Carried through from the Judge — **not** `str`. Confirmed correct as this document originally worded it ("Carried by: ... `Provenance.model_version`" was read literally: the *type*, `ModelVersion`, is carried, not just the string concept). ADR-006 §7 was revised to match this reading after a draft briefly typed both fields as `str`; that draft is not what shipped. |
+| `scoring_criteria` | `ScoringCriteria` | Carried through from the criteria configuration — likewise a value object, not `str` |
 
-**Factory:** `Provenance.create(model_version: str, scoring_criteria: str) -> Result[Provenance, InvalidParameterError]`
-**Rejects:** either dimension empty or None.
+**Construction:** `Provenance(model_version=..., scoring_criteria=...)`, built directly from the already-validated `ModelVersion`/`ScoringCriteria` a `Judge` holds — no unwrapping to `str` and back. Reading a dimension follows the `.value` idiom already established for `Judge.model_version`: `result.provenance.model_version.value`. Comparing two provenance dimensions for equality does not need `.value` at all — `ModelVersion` and `ScoringCriteria` are value-equal, so `result.provenance.model_version == judge.model_version` holds directly.
 
 **Usage across five stories:**
 - BIN-57: originates model version
-- BIN-59: attaches provenance to each ScoringResult
-- BIN-63: enforces provenance consistency within the baseline; exposes provenance signature
-- BIN-65/94/95: carries provenance onto the fitted artefact
-- BIN-68: compares provenance across the Phase I/II boundary; raises `ProvenanceMismatchError` on divergence
+- BIN-59: attaches provenance to each ScoringResult (implemented)
+- BIN-63: enforces provenance consistency within the baseline; exposes provenance signature (not yet implemented)
+- BIN-65/94/95: carries provenance onto the fitted artefact (not yet implemented)
+- BIN-68: compares provenance across the Phase I/II boundary; raises `ProvenanceMismatchError` on divergence (not yet implemented)
 
 ### `ScoringResult`
 
@@ -323,17 +512,30 @@ All value objects below are immutable after creation. Equality is by value (all 
 **Constraints:**
 - All three fields required (BIN-59 BR-1, BR-2)
 - Immutable after creation (BIN-59 BR-3)
+- `score` must be a **finite** float — NaN and ±infinity are rejected (ADR-006 §5, **settles former OQ-5**; see Open Questions)
 
 **Structure:**
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `score` | `float` | Scalar quality score (ADR-001: `float`, higher-is-better) |
-| `reasoning` | `str` | Judge's textual reasoning for the score |
+| `score` | `float` | Scalar quality score (ADR-001: `float`, higher-is-better). **Unconstrained range otherwise** — no fixed `[0,1]`, no engineer-declared range; the SPC maths works on any bounded continuous range and normalisation is out of scope for this story (ADR-006 §5). |
+| `reasoning` | `str` | Judge's textual reasoning for the score. No emptiness constraint — not tested by any scenario. |
 | `provenance` | `Provenance` | Measurement configuration that produced this score |
 
-**Factory:** `ScoringResult.create(score: float, reasoning: str, provenance: Provenance) -> Result[ScoringResult, InvalidParameterError]`
-**Rejects:** missing fields. Score range constraints are **OQ-5** (open: BIN-59 OQ-2).
+**Construction:** `ScoringResult(score=..., reasoning=..., provenance=...)` — a `@field_validator` on `score` raises `InvalidParameterError` (`context["parameter"]=="score"`, `context["kind"]=="invalid"`) when the value is not finite. `reasoning` and `provenance` presence are enforced by the type signature; no additional content constraint on `reasoning`.
+**Rejects (as a `CaliperError`):** non-finite `score` (`NaN`, `+inf`, `-inf`).
+
+### `JudgeProviderResponse`
+
+**Carried by:** the return value of `JudgeProviderPort.score()`
+**Equality:** by value (both fields)
+**Constraints:** none beyond field presence — no finiteness check on `score` here (that check lives on `ScoringResult`, once `Judge.score()` has attached provenance). Frozen Pydantic `BaseModel`.
+**Not exposed to the engineer** — internal to `Judge.score()`'s orchestration; carries no provenance of its own.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `score` | `float` | Raw score from the provider, before provenance is attached |
+| `reasoning` | `str` | Raw reasoning text from the provider |
 
 ### `SufficiencyResult`
 
@@ -391,7 +593,7 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 | **Provenance signature** | The provenance established by the first observation in a baseline. All subsequent observations must match. | Baseline | BIN-63 SC8 |
 | **Scoring result** | The immutable output of a single scoring operation: a float score, textual reasoning, and provenance. The unit of measurement. | Measurement | BIN-59 |
 | **Score** | A scalar `float` quality value produced by an LLM judge. Higher is better (ADR-001): a falling score indicates degradation (lower arm); a rising score indicates improvement or stale baseline (upper arm). | Both | ADR-001, BIN-59 |
-| **Observation** | A scoring result recorded into a baseline. Observations are the unit of baseline data. In R1, an observation IS a `ScoringResult` — no additional fields. BIN-63 OQ-3 (open) may add a timestamp or sequence index. | Baseline | BIN-63 |
+| **Observation** | A scoring result recorded into a baseline. Observations are the unit of baseline data. In R1, an observation IS a `ScoringResult` — no additional fields. **OQ-8 (open)** may add a timestamp or sequence index — see Open Questions; this is also the recorded trigger for adding `whenever` as a dependency (CLAUDE.md, "Stack Members Not Yet Used" — zero `datetime` usage anywhere in `src/caliper` today; a timestamp on `Observation` is named as the first plausible caller). | Baseline | BIN-63 |
 | **Baseline** (Phase I baseline) | An ordered, provenance-consistent collection of observations from which control limits are fitted. The only mutable object in the domain. | Baseline | BIN-63 |
 | **Phase I** | The baseline collection and fitting phase. The engineer collects observations, checks sufficiency, and fits control limits. | Baseline | BIN-63, BIN-65/94/95 |
 | **Phase II** | The ongoing monitoring phase. Partially in scope: BIN-68 covers provenance comparison across the phase boundary. Phase II monitoring logic (BIN-69) is not yet specified. | Baseline | BIN-68 |
@@ -416,11 +618,15 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 | **Higher-is-better** | Caliper's score orientation (ADR-001). A falling score = degradation (lower CUSUM arm). A rising score = improvement / stale baseline (upper CUSUM arm). This mapping holds throughout the library. | Both | ADR-001 |
 | **Signal** | An out-of-control indication from Phase II monitoring. E4 (BIN-75 through BIN-81) has no written requirements. Not modelled in R1. | — | context.md (sketch only) |
 | **SPCPort** | The port interface for the SPC engine (ADR-001). The boundary between the domain and the statistical computation layer. Fitting operations are behind this port. | Baseline | ADR-001 |
+| **Agent output** | The text produced by the engineer's agent, the subject being scored. Required, rejected if empty or whitespace-only (**settles former OQ-10**). Named `agent_output`, not `output`, to keep the `agent_` prefix consistent with `agent_input` and the feature files' own wording. | Measurement | BIN-59, ADR-006 §3, §6 |
+| **Agent input** | The input that produced the agent output, when the caller has it. Optional, not validated for emptiness (a proactively-acting agent may legitimately have none), and **not** carried onto `Provenance` or `ScoringResult` — it is the subject being measured, not the measurement configuration. Named `agent_input`, not `input`, because bare `input` shadows a Python builtin and this project's `ruff` config (`flake8-builtins`, rule `A002`) rejects it. | Measurement | BIN-59, ADR-006 §3 |
+| **Judge provider** / **`JudgeProviderPort`** | The port through which a `Judge` obtains a score and reasoning from an LLM (or any scoring backend). A real hexagonal port — `@runtime_checkable Protocol`, no concrete adapter yet, only `FakeJudgeProviderPort` in test code. Interpreting a provider's raw response shape is the adapter's job, never the domain's. | Measurement | ADR-006 §1 |
 
 **Consistency notes:**
 - "False alarm tolerance" is used throughout the feature files as a neutral term. ADR-004 resolved this to ARL_0 as the primary representation.
 - "Spread measure" in BIN-66 SC1 refers to `baseline_spread` (shared core sample standard deviation). "Sigma estimate" in BIN-95 SC2 refers to `sigma_estimate` (shared core MR-based estimate). These are explicitly different quantities, both in the shared core.
 - "Observation" and "scoring result" are the same data — the term shifts at the context boundary. A "scoring result" becomes an "observation" when recorded into a baseline.
+- "Output"/"input" in earlier drafts of the PRD and feature file text are the informal predecessors of the canonical `agent_output`/`agent_input` terms ADR-006 settled on. Same concepts, more precise names.
 
 ---
 
@@ -438,11 +644,13 @@ The signal handler chain (E4: BIN-75 through BIN-81) is the natural location for
 
 **When this changes:** E4 requirements will introduce events. The `SignalEvent` sketch in `context.md` (signal, judgement result, consecutive signal count, severity) is indicative but not contractual. The domain model should be extended when E4 requirements are written.
 
+**Confirmed still true after E1 shipped (BIN-100 refresh):** ADR-006 introduced no events. `Judge.score()` is a synchronous call-and-return, exactly as this section already described.
+
 ---
 
 ## Error Contract Reference
 
-ADR-002 defines the error taxonomy. Nine typed exceptions under `CaliperError`, each with required `context` fields. The full specification is in `docs/architecture/adr/002-error-contract-exception-taxonomy.md`.
+ADR-002 defines the error taxonomy. Nine typed exceptions under `CaliperError`, each with required `context` fields. The full specification is in `docs/architecture/adr/002-error-contract-exception-taxonomy.md`. **ADR-008** additionally settles how tests assert against this taxonomy: `isinstance` plus required `context` key presence, **never** message text — `recovery_hint` is human-facing prose and deliberately untested. This governs even where it conflicts with `test-patterns`' general Pydantic-validation guidance (which assumes an HTTP boundary Caliper does not have).
 
 | Exception | Category string | Required context fields | Raised by |
 |-----------|----------------|------------------------|-----------|
@@ -456,7 +664,9 @@ ADR-002 defines the error taxonomy. Nine typed exceptions under `CaliperError`, 
 | `InsufficientBaselineError` | `insufficient_baseline` | `have`, `need` | Fitting from too-small baseline (BIN-65/94/95) |
 | `DegenerateBaselineError` | `degenerate_baseline` | `reason` | Fitting from zero-variance baseline (BIN-65/94/95) |
 
-**Immutability violations** (BIN-57 SC6, BIN-59 SC6, BIN-63 SC9, BIN-65 SC11, BIN-94 SC12, BIN-95 SC12) raise Python's built-in `AttributeError` or `FrozenInstanceError`, not `CaliperError`. These are programming mistakes caught by the type system, not operational failures.
+**Immutability violations** (BIN-57 SC6, BIN-59 SC6, BIN-63 SC9, BIN-65 SC11, BIN-94 SC12, BIN-95 SC12) raise **`pydantic_core.ValidationError`**, not `CaliperError` (ADR-002 §7, corrected 2026-09-09 under BIN-103 — value objects were stdlib frozen dataclasses, raising `dataclasses.FrozenInstanceError`, when §7 was originally written and this document previously said `AttributeError`/`FrozenInstanceError`). These are programming mistakes caught by the type system, not operational failures. One capability was lost in the dataclass→Pydantic migration and is worth knowing: mypy used to catch frozen-*dataclass* assignment statically; it cannot see that a Pydantic model is frozen, so this guarantee is now runtime-only, asserted by tests rather than by the type checker (ADR-007).
+
+**Known gap outside this taxonomy — BIN-104:** a wrong-*typed* constructor argument (e.g. `ModelVersion(value=123)`) is rejected by Pydantic's core type coercion *before* the value object's `@field_validator` runs, so it surfaces as `pydantic_core.ValidationError`, not `InvalidParameterError`. "The value object is the boundary" (see Value Object Inventory) holds for blank values, not yet for wrong types. See the Value Object Inventory's `ModelVersion` entry for detail; not fixed by this refresh.
 
 ---
 
@@ -466,17 +676,17 @@ These are the operations the ten feature files establish. They replace the "serv
 
 | Operation | Feature file | Input | Output | Context |
 |-----------|-------------|-------|--------|---------|
-| Create judge | BIN-57 | `model_version: str` | `Judge` | Measurement |
-| Configure criteria | BIN-58 | `criteria: str` | `ScoringCriteria` (attachment point OQ-1) | Measurement |
-| Score agent output | BIN-59 | Agent output, criteria | `ScoringResult` | Measurement |
-| Create baseline | BIN-63 | (none) | `Baseline` (empty) | Baseline |
-| Record observation | BIN-63 | `ScoringResult` | Mutates baseline | Baseline |
-| Check sufficiency | BIN-64 | Optional: threshold, chart type | `SufficiencyResult` | Baseline |
-| Fit EWMA | BIN-65 | `Baseline`, `target_arl`, optional `smoothing_param` | `FittedEWMA` | Baseline |
-| Fit CUSUM | BIN-94 | `Baseline`, `target_arl`, optional `reference_value`, optional `direction` | `FittedCUSUM` | Baseline |
-| Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline |
-| Review artefact | BIN-66 | Any `FittedControlLimits` | Read properties; human-readable summary | Baseline |
-| Compare provenance | BIN-68 | `ScoringResult`, `FittedControlLimits` | Confirms compatibility or raises `ProvenanceMismatchError` | Baseline |
+| Create judge | BIN-57 | `model_version: str \| None`, optional `provider`, optional `criteria` | `Judge` | Measurement — **implemented** |
+| Configure criteria | BIN-58 | `criteria: str` | `ScoringCriteria` (attachment point **settled**: judge creation and/or per-call — former OQ-1) | Measurement — **implemented** |
+| Score agent output | BIN-59 | `agent_output: str` (required), optional `agent_input: str`, optional `criteria: str` | `ScoringResult` | Measurement — **implemented** (ADR-006) |
+| Create baseline | BIN-63 | (none) | `Baseline` (empty) | Baseline — not yet implemented |
+| Record observation | BIN-63 | `ScoringResult` | Mutates baseline | Baseline — not yet implemented |
+| Check sufficiency | BIN-64 | Optional: threshold, chart type | `SufficiencyResult` | Baseline — not yet implemented |
+| Fit EWMA | BIN-65 | `Baseline`, `target_arl`, optional `smoothing_param` | `FittedEWMA` | Baseline — not yet implemented |
+| Fit CUSUM | BIN-94 | `Baseline`, `target_arl`, optional `reference_value`, optional `direction` | `FittedCUSUM` | Baseline — not yet implemented |
+| Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline — not yet implemented |
+| Review artefact | BIN-66 | Any `FittedControlLimits` | Read properties; human-readable summary | Baseline — not yet implemented |
+| Compare provenance | BIN-68 | `ScoringResult`, `FittedControlLimits` | Confirms compatibility or raises `ProvenanceMismatchError` | Baseline — not yet implemented |
 
 **Fitting parameter semantics (ADR-004 section 5):**
 - `target_arl`: **optional in Python signature** (default `None`), **required by Caliper validation**. Omitting raises `InvalidParameterError(kind="missing")`.
@@ -487,40 +697,92 @@ These are the operations the ten feature files establish. They replace the "serv
 
 ## Open Questions
 
-| # | Question | Owner | Blocks | Source |
-|---|----------|-------|--------|--------|
-| 1 | **Where do scoring criteria attach?** At judge creation, at monitoring setup, or per-call? The feature files are deliberately neutral. | domain-modeller / product | `Judge` structure, `ScoringResult` creation | BIN-58 OQ-3 |
-| 2 | **Criteria comparison mechanism.** Exact string match or normalised comparison for provenance equality? Affects both intra-baseline checking (BIN-63) and cross-phase comparison (BIN-68). | system-architect | `Provenance` equality semantics | BIN-63 OQ-6, BIN-68 OQ-2 |
-| 3 | **Sufficiency check: internal or external to fitting?** Does fitting call sufficiency internally, or does the engineer call it first? Both designs satisfy the feature files. | domain-modeller | Fitting operation structure | BIN-65/94/95 OQ-3 |
-| 4 | **Sufficiency override for testing.** Should the engineer be able to bypass sufficiency enforcement for exploratory fitting? | domain-modeller | Fitting operation parameters | BIN-65/94/95 OQ-4 |
-| 5 | **Score range.** Fixed [0, 1], engineer-declared range, or unconstrained? The maths works on any bounded continuous range. No feature file asserts a range. | system-architect | `ScoringResult.score` constraints | BIN-59 OQ-2 |
-| 6 | **Scoring input shape.** Does scoring take both agent input and output, or output alone? Feature files use "agent output" without specifying input. | product | `Judge.score()` signature | BIN-59 OQ-6 |
-| 7 | **Serialisable form for audit logging.** Should the artefact provide a `to_dict()` or equivalent? The PRD recommends in-scope for BIN-66. | domain-modeller | `FittedControlLimits` interface | BIN-66 OQ-1 |
-| 8 | **Observation identity.** Do observations carry a timestamp, sequence index, or neither? The feature files assert ordering without assuming a mechanism. | domain-modeller | `Observation` structure | BIN-63 OQ-3 |
-| 9 | **Explicit override for known provenance change between phases.** Should an engineer who knowingly changed the judge be able to acknowledge and proceed? | product | `compare_provenance()` signature | BIN-68 OQ-3 |
-| 10 | **Whether scoring accepts empty agent output.** Not tested in any feature file. | product | `Judge.score()` validation | BIN-59 OQ-5 |
-| 11 | **Dual mismatch representation.** When both provenance dimensions differ, what shape does the error context take? (String, list, or paired entries.) | system-architect | `ProvenanceMismatchError.context["dimension"]` | BIN-68 OQ-1 |
+**Reader's guide:** four of the original eleven questions were settled by
+ADR-006, alongside E1 shipping. Of the seven still open, six belong to E2
+stories that will settle them as a byproduct of doing that story's design
+work (BIN-63, BIN-64, BIN-65/94/95, BIN-66, BIN-68) — they are not blocked on
+anyone deciding anything today.
+
+**OQ-9 was the exception, and it is now settled: ratified 2026-09-10 —
+there is no escape hatch. A changed judge requires a new baseline.** It was
+the one free-standing product decision here, because it asked whether to
+carve an exception into Caliper's strictest integrity rule rather than how
+to implement a story. All eleven original questions now have an owner and a
+disposition.
+
+| # | Question | Owner | Blocks | Source | Status |
+|---|----------|-------|--------|--------|--------|
+| 1 | ~~Where do scoring criteria attach? At judge creation, at monitoring setup, or per-call?~~ | — | — | BIN-58 OQ-3 | **SETTLED** — ADR-006 §2: judge creation *and/or* per-call; per-call wins for that call only, without mutating the frozen `Judge`. "Monitoring setup" explicitly rejected as a third point in R1 (no `Monitor` construct exists). |
+| 2 | **Criteria comparison mechanism.** Exact string match or normalised comparison for provenance equality? Affects both intra-baseline checking (BIN-63) and cross-phase comparison (BIN-68). | system-architect | `Provenance` equality semantics | BIN-63 OQ-6, BIN-68 OQ-2 | **Open.** ADR-006 §7 explicitly declined to settle this, naming it out of scope for BIN-102/`BIN-59` and owned by BIN-63/BIN-68 instead. Belongs to whichever of those E2 stories lands first. |
+| 3 | **Sufficiency check: internal or external to fitting?** Does fitting call sufficiency internally, or does the engineer call it first? Both designs satisfy the feature files. | domain-modeller | Fitting operation structure | BIN-65/94/95 OQ-3 | **Open.** Untouched by ADR-006/007/008. Belongs to BIN-65/94/95. |
+| 4 | **Sufficiency override for testing.** Should the engineer be able to bypass sufficiency enforcement for exploratory fitting? | domain-modeller | Fitting operation parameters | BIN-65/94/95 OQ-4 | **Open.** Untouched. Belongs to BIN-65/94/95. |
+| 5 | ~~Score range. Fixed [0, 1], engineer-declared range, or unconstrained?~~ | — | — | BIN-59 OQ-2 | **SETTLED** — ADR-006 §5: unconstrained (no fixed or engineer-declared range), but the score must be a **finite** float — `NaN` and `±inf` are rejected as `InvalidParameterError`. A future fitting-time range check remains additive and is not foreclosed. |
+| 6 | ~~Scoring input shape. Both agent input and output, or output alone?~~ | — | — | BIN-59 OQ-6 | **SETTLED** — ADR-006 §3: both accepted — `agent_output` required, `agent_input` optional. Neither is echoed onto `Provenance` or `ScoringResult` (they are the subject measured, not the measurement configuration). |
+| 7 | **Serialisable form for audit logging.** Should the artefact provide a `to_dict()` or equivalent? The PRD recommends in-scope for BIN-66. | domain-modeller | `FittedControlLimits` interface | BIN-66 OQ-1 | **Open.** Untouched. Belongs to BIN-66. |
+| 8 | **Observation identity.** Do observations carry a timestamp, sequence index, or neither? The feature files assert ordering without assuming a mechanism. | domain-modeller | `Observation` structure | BIN-63 OQ-3 | **Open.** Untouched. Belongs to BIN-63. Doubles as the recorded trigger for adding `whenever` as a dependency — see CLAUDE.md "Stack Members Not Yet Used" and the Glossary's Observation entry. |
+| 9 | ~~Explicit override for known provenance change between phases.~~ | — | — | BIN-68 OQ-3 | **SETTLED** — product owner, 2026-09-10: **no override. The engineer refits.** `ProvenanceMismatchError` raises unconditionally; `compare_provenance()` takes no acknowledgement or force parameter. See "Provenance change requires a refit" below. |
+| 10 | ~~Whether scoring accepts empty agent output.~~ | — | — | BIN-59 OQ-5 | **SETTLED** — ADR-006 §6: rejected. Empty or whitespace-only `agent_output` raises `InvalidParameterError` before any provider call. An engineer who wants "no response" scored passes their own sentinel string. |
+| 11 | **Dual mismatch representation.** When both provenance dimensions differ, what shape does the error context take? (String, list, or paired entries.) | system-architect | `ProvenanceMismatchError.context["dimension"]` | BIN-68 OQ-1 | **Open.** Untouched — `BIN-59` never compares two `Provenance` instances, only constructs and reads one (ADR-006, Related decisions). Belongs to BIN-68. |
+
+### Provenance change requires a refit (OQ-9, settled 2026-09-10)
+
+**Decision: there is no acknowledgement path. An engineer who knowingly
+changes the judge model or the scoring criteria must fit a new baseline.**
+`compare_provenance()` gains no `acknowledge=`, `force=` or equivalent
+parameter, and none should be added without reopening this decision.
+
+**Rationale.** An acknowledged mismatch is still a mismatch. Knowing that the
+instrument changed does not make measurements taken with the old instrument
+comparable to measurements taken with the new one — the control limits were
+estimated from a distribution the new judge does not produce, so every
+subsequent ARL₀ claim, every signal and every in-control run is computed
+against a baseline that no longer describes the process. An override would let
+an engineer keep a chart that looks authoritative and reports numbers that mean
+nothing, which is the precise failure Caliper exists to prevent.
+
+Refitting is not a punishment for the engineer; it is the only operation that
+restores the guarantee.
+
+⚠️ **The cost is real and compounds with ADR-005, and should not be
+soft-pedalled.** ADR-005 set the minimum Phase I baseline at **100 individual
+observations** — already a materially larger adoption barrier than the 20–25
+figure `context.md` originally assumed, and Phase I→II conversion is the
+project's OMTM. This decision means a judge-model change resets that cost in
+full: 100 fresh observations before monitoring resumes, with no shortcut.
+
+That is accepted deliberately, not overlooked. The alternative trades a
+one-off cost the engineer can see for a silent, permanent invalidation they
+cannot.
+
+**What this does not foreclose.** Nothing here prevents Caliper from making
+the refit *easier* — carrying forward configuration, warning early when a
+provider version drifts, or offering a helper that begins a new baseline from
+a running stream. Those are ergonomics, and they are additive. What is closed
+is proceeding on the old baseline with the new judge.
 
 ---
 
 ## Validation Checklist
 
 - [x] Every observation in the ten feature files is satisfiable by this model
-- [x] No new aggregate duplicates an existing one (repo has no source code — no conflicts)
-- [x] Every domain event name is past tense and unambiguous — N/A, no events in R1
-- [x] Every VO has a `create()` factory and at least one constraint
+- [x] No new aggregate duplicates an existing one — checked against `src/caliper/measurement/` (E1's actual implementation), not just other docs
+- [x] Every domain event name is past tense and unambiguous — N/A, no events in R1; confirmed still true after ADR-006/E1
+- [x] Every VO raises its typed error directly at the point of construction and has at least one constraint — **not** a `create()` → `Result[...]` factory (corrected this refresh; see Value Object Inventory)
 - [x] No collection references another collection by object — only by value (Provenance)
 - [x] Every term in the glossary appears in at least one feature file or ADR
-- [x] Open Questions lists every ambiguity rather than resolving it silently
-- [x] Both Shewhart spread quantities are present and distinguished (ADR-004 finding)
-- [x] Provenance modelled as first-class VO with equality semantics left open (OQ-2)
+- [x] Open Questions lists every ambiguity rather than resolving it silently — four marked SETTLED with citation, not deleted; seven still genuinely open
+- [x] Both Shewhart spread quantities are present and distinguished (ADR-004 finding) — untouched by this refresh, still prominent
+- [x] Provenance modelled as first-class VO holding `ModelVersion`/`ScoringCriteria` (not `str`), with equality semantics left open (OQ-2) — this document's original "Carried by" wording confirmed correct by ADR-006 §7
 - [x] No numerical constants pinned (no d_2, h, k, L, or ARL_0 values)
-- [x] Error contract references ADR-002's nine types without inventing parallel concepts
+- [x] Error contract references ADR-002's nine types without inventing parallel concepts; ADR-008's type-and-context-only assertion convention noted
 - [x] Identity question addressed honestly: not needed in R1
+- [x] BIN-104's known gap (wrong-typed constructor args leak `pydantic_core.ValidationError`) recorded, not silently left for a reader to discover
+- [x] Repo (`docs/domain-model.md`) and vault (`Projects/caliper/domain-model.md`) copies reconciled — vault now points here; this file is canonical
 
 ---
 
 ## Changelog
 
+- 2026-09-10 (BIN-100 refresh): Reconciled against ADR-006 (scoring API surface and judge provider port), ADR-007 (two type checkers), ADR-008 (error assertions over message text), and the merged, tested E1 implementation in `src/caliper/measurement/`. Settled OQ-1 (criteria attachment), OQ-5 (score range), OQ-6 (scoring input shape), OQ-10 (empty agent output) — each marked SETTLED with ADR section and resolution, not deleted. Corrected the `Result[...]`-returning VO factories (VOs raise `InvalidParameterError` directly; explained why the `returns`-standard's own "single-failure-point" exception applies here, not a misapplication of house style). Rewrote the `Judge` section for `provider`/`criteria`/`score()`. Added `JudgeProviderPort` and `JudgeProviderResponse` as a real hexagonal port and its response VO. Documented BIN-103's module layout (`measurement/domain/`, `measurement/ports/`, top-level `errors.py`). Recorded BIN-104's known gap (wrong-typed constructor args bypass the value-object boundary). Corrected immutability-violation exception type (`pydantic_core.ValidationError`, not `FrozenInstanceError`/`AttributeError`) per the BIN-103 dataclass→Pydantic migration. Reconciled the vault copy (`Projects/caliper/domain-model.md`), which had drifted into a lossier condensation of this file, into a pointer — this file is now the single canonical copy. Left untouched, as instructed: OQ-2/3/4/7/8/9/11 (still open), all numerical constants (still unpinned), the dual-spread finding (still prominent), and the absence of domain events (E4 still unspecified).
 - 2026-09-09 (amendment): Sigma estimator correction — `sigma_estimate` (MR-based) and `sigma_estimation_method` moved from Shewhart chart-specific to the shared core. Standard SPC practice uses MR/d_2 for ALL chart types on individual observations, not just Shewhart. ADR-005's inference that "EWMA and CUSUM use the sample standard deviation" was incorrect. FittedCUSUM and FittedShewhart chart-specific sigma fields removed (now shared). Dual-spread section reframed from "Shewhart-specific" to "all artefacts." ADR-004 shared core affected — flagged for system-architect amendment. Amendment 2 (CUSUM duplication invariant) rendered moot — the fields now hold genuinely different quantities.
 - 2026-09-09: Initial model — BIN-100
