@@ -109,10 +109,20 @@ rates from a classifier. The API (`update(value)`) and internal naming
 continuous quality scores from LLM judges, not classification errors.
 
 **5. The CUSUM is one-sided upper only.**
-Quality monitoring needs to detect both upward drift (degradation on a
-higher-is-better score) and downward drift (degradation on a lower-is-better
-score, or improvement that invalidates control limits). The standard approach
-is two one-sided CUSUMs. Frouros provides only the upper CUSUM.
+**Caliper's scores are higher-is-better** — a judge score falling from 0.85 to
+0.81 is degradation. On such a score the arms map as follows, and this mapping
+holds throughout the library:
+
+- **Lower arm — degradation.** The score drifts *down*. This is the primary
+  failure mode Caliper exists to detect: model decay, prompt drift, a silent
+  provider update.
+- **Upper arm — improvement.** The score drifts *up*. Not a quality problem, but
+  still a signal: the process has changed, so the Phase I baseline no longer
+  describes it and the control limits are stale.
+
+Both matter, so the standard approach is two one-sided CUSUMs run together.
+**Frouros provides only the upper arm** — which, on a higher-is-better score, is
+the arm that detects *improvement*. It would miss degradation entirely.
 
 **6. Practical adoption barriers.**
 - Latest PyPI release: 0.9.0 (2024-10-05) -- nearly two years stale.
@@ -157,8 +167,10 @@ time -- they are not pinned from recall here.
 provides corrected diffusion approximations for one-sided CUSUM ARL under the
 exponential family (Theorem 10.16). Given a target in-control ARL_0, this
 approximation yields the decision interval *h*. For two-sided monitoring, two
-one-sided CUSUMs are run simultaneously (upper for degradation, lower for
-improvement); the two-sided ARL is approximated from the one-sided ARLs.
+one-sided CUSUMs are run simultaneously; on Caliper's higher-is-better scores
+the **lower arm detects degradation** and the **upper arm detects improvement**
+that leaves the baseline stale (see §5). The two-sided ARL is approximated from
+the one-sided ARLs.
 
 **EWMA:** Lucas & Saccucci (1990), "Exponentially weighted moving average
 control schemes: Properties and enhancements," *Technometrics* 32(1):1-12,
