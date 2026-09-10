@@ -50,13 +50,22 @@ from beartype.claw import beartype_package
 # ``missing_fields`` cannot be recovered from it. See BIN-109.
 beartype_package("caliper.baseline.domain.ewma_fitting")
 
-# ``spc_numerics`` (hoisted during BIN-94) has no public entry point -- its
-# only callers are other domain modules, never an engineer -- so it is a
-# clean target for the same reasoning above, without needing the carve-out
-# ``ewma_fitting`` requires. ``fit_cusum``/``fit_ewma`` themselves are NOT
-# hooked (nor is ``cusum_fitting`` as a whole -- it has a public entry
-# point, ``fit_cusum``); only this entry-point-free module is. See
-# ``spc_numerics.py``'s module docstring.
+# ``spc_numerics`` (hoisted during BIN-94) has no public entry point at all --
+# its only callers are other domain modules, never an engineer -- so it is the
+# clean case: nothing above needs weighing, because there is no public boundary
+# in it to guard by accident.
+#
+# ``cusum_fitting`` is deliberately NOT hooked: it contains ``fit_cusum``, a
+# public entry point.
+#
+# ⚠️ ``fit_ewma`` **is** hooked, unavoidably -- ``beartype_package`` takes a
+# module, and ``fit_ewma`` shares ``ewma_fitting`` with the numerics. BIN-109
+# accepted that after checking it displaces nothing: ``fit_ewma`` already
+# leaked ``AttributeError`` on a wrong-typed baseline before beartype existed,
+# so no typed exception is replaced (unlike ``Baseline.record``, which has one
+# -- hooking its package broke five tests). Logged on BIN-104 as part of the
+# wrong-typed-argument gap. **Do not read this as a precedent for hooking a
+# boundary that does raise properly.**
 beartype_package("caliper.baseline.domain.spc_numerics")
 
 

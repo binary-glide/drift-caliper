@@ -424,3 +424,66 @@ def test_combine_two_sided_arl0_matches_montgomery_eq_9_7(
 
     # Assert
     assert combined == pytest.approx(expected_combined, rel=1e-9)
+
+
+# --- The calibration's central promise, and the direction that shapes it -------
+#
+# `code-reviewer` found that flipping `if direction == "two_sided":` inside
+# `_calibrate_decision_interval` left all 255 tests passing. That single line
+# decides whether `achieved_arl` reports the combined two-sided figure or the
+# raw per-arm one -- so nothing was asserting the calibration's central
+# promise: that a chart fitted for a requested ARL0 actually reports achieving
+# it.
+#
+# The third instance on this project of a helper whose effect cancels out of
+# everything observable. See this module's docstring and BIN-65's.
+
+
+@pytest.mark.parametrize("direction", ["two_sided", "upper", "lower"])
+def test_achieved_arl_matches_the_requested_arl_in_either_direction(
+    direction: str,
+) -> None:
+    """The calibration reports achieving what it was asked for.
+
+    Pins both arms of the flipped branch: under the mutation, a two-sided fit
+    reports twice the requested ARL0 and a one-sided fit reports half of it.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+    requested = 500.0
+
+    # Act
+    result = fit_cusum(
+        baseline, target_arl=requested, reference_value=0.5, direction=direction
+    )
+
+    # Assert -- Siegmund is an approximation, but the root-find targets the
+    # requested value directly, so agreement here is tight.
+    assert result.achieved_arl == pytest.approx(requested, rel=0.01)
+
+
+def test_two_sided_needs_a_wider_decision_interval_than_one_sided() -> None:
+    """A structural relationship no round trip can cancel.
+
+    Two arms each signal independently, so for the *same* combined false alarm
+    rate each arm must be less sensitive than a lone arm would be -- which
+    means a larger decision interval. (``"upper"`` is one such lone arm;
+    ``_VALID_DIRECTIONS`` names the arm rather than saying "one-sided".)
+    Asserting the inequality rather than either value pins the direction
+    semantics without depending on the calibration's own arithmetic to
+    interpret them.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+    requested = 500.0
+
+    # Act
+    two_sided = fit_cusum(
+        baseline, target_arl=requested, reference_value=0.5, direction="two_sided"
+    )
+    one_sided = fit_cusum(
+        baseline, target_arl=requested, reference_value=0.5, direction="upper"
+    )
+
+    # Assert
+    assert two_sided.decision_interval > one_sided.decision_interval
