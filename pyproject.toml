@@ -54,6 +54,10 @@ dev = [
   "mutmut>=3.7",
   "mypy>=2.3",
   "ty>=0.0.79",
+  # Dev-only runtime type enforcement over the numerical internals (BIN-109).
+  # Never a runtime dependency: it is applied by an import hook in
+  # tests/conftest.py, so it instruments nothing in the shipped wheel.
+  "beartype>=0.22",
   "ruff>=0.16",
 ]
 

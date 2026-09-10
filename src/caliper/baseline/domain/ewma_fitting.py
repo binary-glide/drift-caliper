@@ -74,7 +74,6 @@ import statistics
 from collections.abc import Sequence
 
 import numpy as np
-from numpy.typing import NDArray
 from scipy.optimize import brentq
 
 # scipy.stats exposes `norm` via a lazy attribute loader with no type stub
@@ -348,7 +347,12 @@ def _in_control_arl(
     cell_width = 2.0 * half_width / num_states
 
     state_indices = np.arange(-half_state_count, half_state_count + 1, dtype=np.float64)
-    midpoints: NDArray[np.float64] = state_indices * cell_width
+    # Deliberately annotated `np.ndarray` rather than `NDArray[np.float64]`:
+    # beartype 0.22.9 cannot parse a parameterised NDArray against numpy
+    # 2.5's ScalarT typevar, and its claw hook instruments annotated
+    # assignments too (BIN-109). mypy infers the dtype here regardless, so
+    # nothing is lost. Revisit if beartype gains numpy 2.5 support.
+    midpoints: np.ndarray = state_indices * cell_width
     lower_bounds = midpoints - cell_width / 2.0
     upper_bounds = midpoints + cell_width / 2.0
 
