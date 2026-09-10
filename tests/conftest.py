@@ -23,6 +23,32 @@ reason it is not used here yet -- see its module docstring.
 from __future__ import annotations
 
 import pytest
+from beartype.claw import beartype_package
+
+# --- beartype: dev-only runtime type enforcement (BIN-109) --------------------
+#
+# Applied here rather than in ``src/`` on purpose. ``beartype`` is a dev
+# dependency, so the shipped wheel imports it nowhere and consumers inherit
+# nothing. The import hook instruments the package at import time, which is why
+# it must run before anything imports ``caliper``.
+#
+# What it buys, concretely: ``mypy --strict`` covers ``src/``, but there are two
+# places where it is explicitly silenced -- ``# type: ignore[attr-defined]`` on
+# the ``scipy.stats.norm`` import and ``# type: ignore[no-untyped-call]`` on the
+# ``brentq`` call in ``ewma_fitting.py``. scipy is largely untyped, so those are
+# holes in static coverage: the annotation claims ``float`` and nothing verifies
+# it. beartype checks at runtime exactly what mypy was told to stop checking.
+# BIN-94's Siegmund approximation adds more scipy calls and more such holes.
+#
+# ⚠️ Scoped to ``caliper.baseline.domain`` deliberately, and it must never be
+# widened to a package whose public entry points engineers call. beartype raises
+# ``BeartypeCallHintParamViolation``, which is **not** a ``CaliperError`` -- no
+# ``category``, no ``context`` to branch on. Guarding a public boundary would
+# replace the typed exception ADR-002 requires and break the six merged feature
+# files asserting on it. Catching and translating it does not work either: the
+# violation carries prose rather than structure, so ``missing_fields`` cannot be
+# recovered from it. See BIN-109.
+beartype_package("caliper.baseline.domain.ewma_fitting")
 
 
 def pytest_collection_modifyitems(
