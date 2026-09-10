@@ -8,12 +8,10 @@ structurally: every field below with the same name as a protocol property
 *is* that property (Pydantic model fields are attributes, which is all
 ``@runtime_checkable`` checks for).
 
-Scaffold only: the fields are exactly what the domain model specifies for
-BIN-65, with no validators beyond Pydantic's own type coercion.
-``caliper.baseline.domain.ewma_fitting.fit_ewma`` (BIN-65, not yet
-implemented) is the only place a real, correctly-calibrated instance should
-be constructed -- tests obtain a ``FittedEWMA`` by calling it, never by
-constructing one directly, mirroring the convention
+``caliper.baseline.domain.ewma_fitting.fit_ewma`` (BIN-65) is the only place
+a real, correctly-calibrated instance should be constructed -- tests obtain a
+``FittedEWMA`` by calling it, never by constructing one directly, mirroring
+the convention
 ``tests/unit/baseline/test_baseline_sufficiency.py`` established for
 ``SufficiencyResult``.
 """

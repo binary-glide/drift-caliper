@@ -399,6 +399,11 @@ def test_raises_invalid_parameter_error_when_false_alarm_tolerance_is_omitted() 
     assert error.category == "invalid_parameter"
     assert error.context["kind"] == "missing"
     assert error.context["parameter"] == "target_arl"
+    # ADR-002 requires `constraint` on every invalid_parameter. The sibling
+    # invalid-value tests assert it; this branch did not, and renaming the key
+    # survived mutation testing as a result.
+    assert isinstance(error.context["constraint"], str)
+    assert error.context["constraint"] != ""
 
 
 # --- Edge: error distinguishability -----------------------------------------------

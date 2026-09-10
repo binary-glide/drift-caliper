@@ -132,6 +132,7 @@ from caliper.baseline import (
     FittedEWMA,
     fit_ewma,
 )
+from caliper.baseline.domain.ewma_fitting import _ewma_asymptotic_std_ratio
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Relative tolerance applied to each published ARL0 value below. 2% of 500
@@ -292,3 +293,74 @@ def test_calibration_matches_the_shewhart_closed_form_as_lambda_approaches_one()
     # Assert -- the closed form, computed here rather than quoted.
     closed_form_arl = 1.0 / (2.0 * NormalDist().cdf(-implied_l))
     assert closed_form_arl == pytest.approx(target_arl, rel=0.01)
+
+
+# --- Helpers whose effect cancels out of the public output ---------------------
+#
+# `code-reviewer` found the blocker on BIN-65 and it is subtle enough to be
+# worth stating in full, because the same shape will recur in BIN-94 and BIN-95.
+#
+# `fit_ewma` calibrates L against a helper, then reapplies the *same* helper to
+# build the reported limits. The helper therefore cancels algebraically out of
+# the round trip, and no assertion on `fit_ewma`'s public output can falsify it:
+#
+#     ucl - cl = L_solved * sigma_estimate * ratio(lambda)
+#
+# and the checks above recover L by dividing by that same product. A wrong
+# `sigma_estimate` or a wrong `ratio(lambda)` divides itself out of its own
+# check. Demonstrated, not theorised: patching `abs(b - a)` to `abs(b + a)`, or
+# `/ d2` to `* d2`, left all 27 EWMA tests passing -- including the published-
+# value proof above.
+#
+# The only fix is to test the helpers **directly**, against values computed
+# independently of the implementation. Testing module-private functions is
+# normally a smell; here it is the sole way to constrain them at all.
+
+
+def test_moving_range_sigma_matches_a_hand_computed_value() -> None:
+    """MR-bar / d2 on a baseline whose moving ranges are known by inspection.
+
+    Every consecutive pair differs by exactly 0.10, so the mean moving range
+    is 0.10 and sigma is 0.10 / 1.128 -- computed here from the definition,
+    never read back off the artefact.
+    """
+    # Arrange -- alternating scores, so |consecutive difference| is 0.10
+    # throughout and the mean moving range needs no arithmetic to predict.
+    baseline = Baseline()
+    shared_provenance = ProvenanceFactory()
+    for score in [0.50, 0.60] * (DEFAULT_SUFFICIENCY_THRESHOLD // 2):
+        baseline.record(ScoringResultFactory(provenance=shared_provenance, score=score))
+
+    # Act
+    result = fit_ewma(baseline, target_arl=370.0)
+
+    # Assert
+    expected_sigma = 0.10 / 1.128
+    assert result.sigma_estimate == pytest.approx(expected_sigma, rel=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("smoothing_param", "expected_ratio"),
+    [
+        # lambda=1 removes all smoothing: the EWMA statistic is the observation
+        # itself, so its std dev equals the process std dev exactly.
+        pytest.param(1.0, 1.0, id="lambda-1-is-identity"),
+        # sqrt(0.5 / 1.5) = sqrt(1/3), computed from the definition below.
+        pytest.param(0.5, math.sqrt(1.0 / 3.0), id="lambda-0.5"),
+        # sqrt(0.2 / 1.8) = sqrt(1/9) = 1/3 exactly -- a value with a closed
+        # form, so a wrong formula cannot coincidentally reproduce it.
+        pytest.param(0.2, 1.0 / 3.0, id="lambda-0.2-exact-third"),
+    ],
+)
+def test_ewma_asymptotic_std_ratio_matches_its_published_formula(
+    smoothing_param: float, expected_ratio: float
+) -> None:
+    """``sqrt(lambda / (2 - lambda))`` -- Roberts (1959); L&S (1990) eq. 3.
+
+    Pinned directly because it cancels out of `fit_ewma`'s public output:
+    mutating it to ``lambda * (2 - lambda)``, ``2 + lambda`` or ``3 - lambda``
+    produces byte-identical limits and ARLs.
+    """
+    assert _ewma_asymptotic_std_ratio(smoothing_param) == pytest.approx(
+        expected_ratio, rel=1e-12
+    )
