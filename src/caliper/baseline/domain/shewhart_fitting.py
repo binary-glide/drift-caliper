@@ -29,7 +29,8 @@ Control limits are then ``baseline_mean +/- L * sigma_estimate``, where
 ``sigma_estimate`` is the shared moving-range estimator
 (``caliper.baseline.domain.spc_numerics._moving_range_sigma`` -- the same
 estimator EWMA and CUSUM both delegate to; see that module's docstring for
-the ``d_2 = 1.128`` citation chain).
+the ``d_2`` closed form ``2/sqrt(pi)``, which needs no citation -- see
+``spc_numerics``).
 
 See ``tests/unit/baseline/test_shewhart_arl_published_values.py`` for the
 closed-form numerical proof: unlike its Markov-chain/Siegmund-approximation

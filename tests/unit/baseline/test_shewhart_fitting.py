@@ -116,7 +116,7 @@ _ZERO_VARIANCE_REASON = "zero_variance"
 # definition, never imported from the module under test (see
 # tests/unit/baseline/test_spc_numerics.py, which established this
 # convention, and the module docstring's point 6).
-_MOVING_RANGE_D2 = 1.128
+_MOVING_RANGE_D2 = 1.1283791670955126  # 2/sqrt(pi), exact
 
 
 def _baseline_with_observations(count: int, *, score: float | None = None) -> Baseline:
@@ -684,11 +684,11 @@ def test_hand_computed_moving_range_sigma_helper_matches_a_known_value() -> None
 
     Mirrors ``test_spc_numerics.py``'s own self-check -- every consecutive
     pair differs by exactly 0.10 here, so the mean moving range is 0.10 and
-    sigma is 0.10 / 1.128, computable by inspection without running the
+    sigma is 0.10 / d2, computable by inspection without running the
     helper.
     """
     scores = [0.50, 0.60] * (DEFAULT_SUFFICIENCY_THRESHOLD // 2)
 
     result = _hand_computed_moving_range_sigma(scores)
 
-    assert result == pytest.approx(0.10 / 1.128, rel=1e-9)
+    assert result == pytest.approx(0.10 / 1.1283791670955126, rel=1e-9)

@@ -41,7 +41,7 @@ from caliper.baseline.domain.spc_numerics import _moving_range_sigma
 # a literal, exactly as test_ewma_arl_published_values.py does, so this
 # file's expected value is computed from the published constant rather than
 # imported from the module under test.
-_MOVING_RANGE_D2 = 1.128
+_MOVING_RANGE_D2 = 1.1283791670955126  # 2/sqrt(pi), exact
 
 
 def test_moving_range_sigma_matches_a_hand_computed_value() -> None:
