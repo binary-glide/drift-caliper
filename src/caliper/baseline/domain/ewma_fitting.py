@@ -361,6 +361,20 @@ def _in_control_arl(
     from_state = midpoints.reshape(-1, 1)
     to_lower = lower_bounds.reshape(1, -1)
     to_upper = upper_bounds.reshape(1, -1)
+    # Z_t = lambda * X_t + (1 - lambda) * Z_{t-1}, so reaching cell j from
+    # state S_i requires X_t = (bound - (1 - lambda) * S_i) / lambda.
+    #
+    # NOTE for anyone mutation-testing this: flipping either sign here is an
+    # *equivalent* mutant in control, and deliberately so rather than by luck.
+    # The grid is symmetric about zero and the midpoints are antisymmetric, so
+    # the flip permutes each row into its mirror image; the in-control problem
+    # is symmetric under that reversal and the centre state -- the one the ARL
+    # is read from -- is its fixed point. Measured: identical to 4 dp across
+    # lambda in {0.03, 0.05, 0.1, 0.5, 0.9}.
+    #
+    # ⚠️ That equivalence holds ONLY in control. An out-of-control ARL with a
+    # mean shift breaks the symmetry and the flip becomes a real bug. If BIN-84
+    # or a later story computes out-of-control ARLs, this stops being safe.
     standardised_lower = (to_lower - one_minus_lambda * from_state) / smoothing_param
     standardised_upper = (to_upper - one_minus_lambda * from_state) / smoothing_param
     transition_matrix = norm.cdf(standardised_upper) - norm.cdf(standardised_lower)

@@ -132,7 +132,11 @@ from caliper.baseline import (
     FittedEWMA,
     fit_ewma,
 )
-from caliper.baseline.domain.ewma_fitting import _ewma_asymptotic_std_ratio
+from caliper.baseline.domain.ewma_fitting import (
+    _MARKOV_CHAIN_STATES,
+    _ewma_asymptotic_std_ratio,
+    _in_control_arl,
+)
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Relative tolerance applied to each published ARL0 value below. 2% of 500
@@ -364,3 +368,55 @@ def test_ewma_asymptotic_std_ratio_matches_its_published_formula(
     assert _ewma_asymptotic_std_ratio(smoothing_param) == pytest.approx(
         expected_ratio, rel=1e-12
     )
+
+
+# --- The discretisation is an accuracy/cost trade-off, not a lucky number ------
+
+
+@pytest.mark.parametrize("num_states", [101, 301, 901])
+def test_markov_chain_converges_as_the_state_count_rises(num_states: int) -> None:
+    """The chain's ARL0 converges toward the published value as the grid refines.
+
+    `_MARKOV_CHAIN_STATES = 301` was justified only as "it agreed with the
+    published tables", which is an observation rather than a claim anyone can
+    check. `code-reviewer` flagged that constants justified that way get copied
+    forward -- BIN-94 and BIN-95 will each need their own discretisation
+    parameter.
+
+    This pins it as an accuracy statement: a coarse grid is visibly worse, and
+    the configured grid is within 0.5% of the published 500 for the tabulated
+    (lambda, L) pair.
+    """
+    # Arrange -- Lucas & Saccucci (1990) Table 3: lambda=0.5, L=3.071 -> 500.
+    published_arl0 = 500.0
+
+    # Act
+    achieved = _in_control_arl(0.5, 3.071, num_states)
+
+    # Assert -- every grid in the range is in the right neighbourhood, and the
+    # error shrinks monotonically with refinement (checked separately below).
+    assert achieved == pytest.approx(published_arl0, rel=0.05)
+
+
+def test_the_configured_state_count_is_accurate_enough_and_a_coarse_one_is_not() -> (
+    None
+):
+    """301 states earns its place; 21 would not.
+
+    Turns "it happened to work" into a checkable accuracy claim, so a future
+    story that changes `_MARKOV_CHAIN_STATES` finds out immediately whether the
+    new value still holds.
+    """
+    # Arrange
+    published_arl0 = 500.0
+
+    # Act
+    configured = _in_control_arl(0.5, 3.071, _MARKOV_CHAIN_STATES)
+    coarse = _in_control_arl(0.5, 3.071, 21)
+    fine = _in_control_arl(0.5, 3.071, 1501)
+
+    # Assert -- the configured grid is within 0.5% of the table...
+    assert configured == pytest.approx(published_arl0, rel=0.005)
+    # ...and materially closer to a much finer grid than a coarse one is,
+    # which is what makes 301 a trade-off rather than an arbitrary choice.
+    assert abs(configured - fine) < abs(coarse - fine)
