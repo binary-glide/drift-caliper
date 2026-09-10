@@ -1,5 +1,7 @@
 """Domain factories for the Measurement bounded context.
 
+# updated by backend-test-writer BIN-63
+
 ``factory_boy`` factories for the value objects in ``caliper.measurement``,
 per ``test-patterns/references/python.md`` ("Fixtures and Factories"). Each
 factory builds a *valid* instance by default -- these are for tests that
@@ -20,18 +22,33 @@ wrapped in a factory here: it is test infrastructure, not a domain value
 object, and its two meaningful configurations (a fixed response, or an
 error to raise) are exactly what each test needs to state explicitly.
 
-Not yet imported by any test (BIN-103). Every current unit test pins one
-numbered acceptance scenario (``SC1``, ``SC2``, ...) from a merged feature
-file and therefore intentionally uses a literal, reader-visible value even
-in its "happy path" case -- there is no current test that needs "a Judge"
-without caring which one. The natural adoption point is BIN-63 (Phase I
-baseline collection), which will accumulate many value-object instances
-where the specific value genuinely does not matter. This module exists now
-so that story does not repeat the "no tests/factories.py" gap this ticket
-fixed.
+First imported by BIN-63 (``tests/unit/baseline/test_baseline.py``), the
+adoption point this module's original docstring predicted -- Phase I
+baseline tests accumulate many value-object instances where the specific
+value genuinely does not matter.
+
+**Why every factory below declares a ``TYPE_CHECKING``-only ``__new__``:**
+``factory.Factory``'s real ``__new__``/``_create`` builds and returns an
+instance of ``Meta.model`` at runtime, but neither mypy nor ty can see that
+-- statically, ``SomeFactory()`` types as ``SomeFactory`` (the factory
+class itself), not the model it builds. That is invisible until a caller
+outside this module chains an attribute off the result (e.g.
+``ScoringResultFactory().provenance.model_version``), which resolves
+against the factory's own class-level attribute declarations (a
+``SubFactory``/``Faker`` descriptor) instead of the model's field --
+first hit by BIN-63, the first story to call these factories from another
+module. The ``if TYPE_CHECKING: def __new__(...)`` stub below is inert at
+runtime (real construction still goes through factory_boy's metaclass) and
+tells both checkers the true return type in the one place it should live,
+rather than scattering ``# type: ignore`` / ``# ty: ignore`` across every
+call site. Verified against this project's exact toolchain (mypy strict,
+ty 0.0.79) before adopting -- see the BIN-63 backend-test-writer session
+summary.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import factory
 
@@ -55,6 +72,10 @@ class ModelVersionFactory(factory.Factory):
 
     value = factory.Sequence(lambda n: f"claude-sonnet-4-5-factory-{n}")
 
+    if TYPE_CHECKING:
+
+        def __new__(cls, *args: Any, **kwargs: Any) -> ModelVersion: ...
+
 
 class ScoringCriteriaFactory(factory.Factory):
     """Builds a valid ``ScoringCriteria`` with a plausible rubric sentence."""
@@ -65,6 +86,10 @@ class ScoringCriteriaFactory(factory.Factory):
         model = ScoringCriteria
 
     value = factory.Faker("sentence", nb_words=8)
+
+    if TYPE_CHECKING:
+
+        def __new__(cls, *args: Any, **kwargs: Any) -> ScoringCriteria: ...
 
 
 class ProvenanceFactory(factory.Factory):
@@ -78,6 +103,10 @@ class ProvenanceFactory(factory.Factory):
     model_version = factory.SubFactory(ModelVersionFactory)
     scoring_criteria = factory.SubFactory(ScoringCriteriaFactory)
 
+    if TYPE_CHECKING:
+
+        def __new__(cls, *args: Any, **kwargs: Any) -> Provenance: ...
+
 
 class ScoringResultFactory(factory.Factory):
     """Builds a valid ``ScoringResult`` with a finite score in ``[0, 1]``."""
@@ -90,6 +119,10 @@ class ScoringResultFactory(factory.Factory):
     score = factory.Faker("pyfloat", min_value=0.0, max_value=1.0)
     reasoning = factory.Faker("sentence")
     provenance = factory.SubFactory(ProvenanceFactory)
+
+    if TYPE_CHECKING:
+
+        def __new__(cls, *args: Any, **kwargs: Any) -> ScoringResult: ...
 
 
 class JudgeFactory(factory.Factory):
@@ -110,3 +143,7 @@ class JudgeFactory(factory.Factory):
     model_version = factory.SubFactory(ModelVersionFactory)
     provider = factory.LazyFunction(FakeJudgeProviderPort)
     criteria = factory.SubFactory(ScoringCriteriaFactory)
+
+    if TYPE_CHECKING:
+
+        def __new__(cls, *args: Any, **kwargs: Any) -> Judge: ...

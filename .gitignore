@@ -233,3 +233,6 @@ __marimo__/
 
 # Local agent session memory
 .memsearch/
+
+# code-memory MCP index — regenerated on demand, never source
+code_memory.db
