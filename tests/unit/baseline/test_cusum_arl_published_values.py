@@ -152,6 +152,36 @@ anyone experiences.
 So `fit_cusum(target_arl=500, direction="two_sided")` calibrates `h` such that
 the **chart as a whole** signals once per 500 in-control observations.
 
+## Fifth link: the fitted chart itself, simulated end to end
+
+The checks above verify the *formula*. This one verifies the *library*: take
+the decision interval `fit_cusum` actually derived, simulate a CUSUM using it,
+and count how often it signals in control. No shared algebra with Siegmund at
+all.
+
+    k      target   h fitted   simulated ARL0   ratio
+    0.25      200     6.8489            199.6   0.998
+    0.25      500     8.5825            499.8   1.000
+    0.5       200     4.1635            199.0   0.995
+    0.5       500     5.0630            494.1   0.988
+    0.75      200     2.9173            196.0   0.980
+    0.75      500     3.5224            488.9   0.978
+
+A chart fitted by this library signals at the rate the engineer asked for.
+
+⚠️ **Note the direction of the residual bias, and do not treat it as noise.**
+At k = 0.75 a request for ARL0 = 500 yields roughly 489 -- about 2% *more*
+false alarms than asked for, not fewer. That is the direction that costs a
+user trust rather than the direction that hides drift, so it is the honest one
+to name. It is inherent to Siegmund's Brownian-motion approximation, which is
+most accurate for small reference values, and it is why CUSUM's defaults sit
+in the small-k regime.
+
+**For BIN-84:** this is the shape a property-based test should take for all
+three charts -- fit, simulate, compare -- rather than only checking published
+tables. It catches wiring errors a table lookup cannot, because it exercises
+the calibration end to end rather than the formula in isolation.
+
 ## Tolerance
 
 The published-value assertions below use a 2% relative tolerance --
