@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-09-09
 **Deciders:** system-architect (BIN-96), ratified by product owner
-**Refs:** BIN-96, BIN-57, BIN-58, BIN-59, BIN-63, BIN-64, BIN-65
+**Refs:** BIN-96, BIN-57, BIN-58, BIN-59, BIN-63, BIN-64, BIN-65, BIN-68 (amendment, 2026-09-10)
 
 ## Context
 
@@ -189,10 +189,17 @@ Implementations may add more. Removing a required field is a breaking change.
 | `provider_failure` | `provider: str`, `operation: str` | Which provider failed and what operation was attempted. |
 | `malformed_response` | `operation: str`, `expected_shape: str` | What operation produced the response and what shape was expected. |
 | `judge_refusal` | `provider: str`, `operation: str` | Which provider refused and what was being scored. |
-| `provenance_mismatch` | `dimension: str`, `expected: str`, `received: str` | Which provenance field differs (model_version or criteria) and the two values. |
+| `provenance_mismatch` | ~~`dimension: str`, `expected: str`, `received: str`~~ → `mismatches: dict[str, dict[str, str]]`† | Which provenance field(s) differ (`model_version`, `scoring_criteria`) and the expected/received value for each. |
 | `invalid_observation` | `reason: str`, `missing_fields: list[str]` | Why the observation is invalid and which fields are missing. |
 | `insufficient_baseline` | `have: int`, `need: int` | Current observation count and required minimum. |
 | `degenerate_baseline` | `reason: str` | What makes the baseline degenerate (e.g. `"zero_variance"`). |
+
+† **Amended 2026-09-10 (`BIN-68`)** — `dimension`/`expected`/`received` is
+superseded by a single `mismatches` mapping. This table row originally left
+`dimension`'s values unenumerated, unlike `category` and `kind` below. That
+silence was the defect; see "Amendment (2026-09-10): `provenance_mismatch`
+context becomes a `mismatches` mapping" at the end of this document for the
+full decision, its reasoning, and its migration cost.
 
 **Naming convention — `kind` vs `reason`.** These are deliberately different
 keys because they are different kinds of field. `kind` on `invalid_parameter` is
@@ -453,6 +460,12 @@ is the Python standard, not a controversial choice.
   `context` fields.
 - **BIN-59 m2:** Judge refusals resolved -- `JudgeRefusalError`.
 - **BIN-65 m1:** SC9 drift resolved -- "classifiable as invalid parameter."
+- **BIN-68 (2026-09-10):** `provenance_mismatch`'s `dimension` enumeration gap
+  closed -- see the Amendment at the end of this document. Settles the shape
+  `compare_provenance()` (Phase I/II boundary) and `Baseline.record()` (Phase I
+  intra-baseline) share, required by the merged
+  `provenance-mismatch-between-phases.feature` scenario asserting both raise
+  errors with "the same required fields."
 
 ---
 
@@ -675,6 +688,14 @@ scenario is added (recommended but separable).
 **Review status:** APPROVED (3 minor findings)
 **Change classification:** COSMETIC -- 3 scenarios tighten recovery guidance
 
+⚠️ **Superseded in part, 2026-09-10 (`BIN-68`).** The feature-file wording
+below is unaffected -- still zero re-review cost, confirmed again in the
+Amendment at the end of this document. But `Baseline.record()`'s
+implementation and its unit tests (not the `.feature` file) now also change:
+`context["dimension"]` becomes `context["mismatches"]` and the check-both-
+dimensions-before-raising behaviour applies here too, not only to `BIN-68`'s
+`compare_provenance()`. See the Amendment for the full migration cost.
+
 #### SC5: Recording fails when model version differs
 
 **Category:** `provenance_mismatch`
@@ -883,3 +904,205 @@ depends on the API surface design (not yet made). If the fitting interface uses
 a genuinely required Python argument, `TypeError` fires before Caliper code
 runs and SC9 would need rewording. This must be confirmed when the API surface
 is designed. See the open dependency note in Consequences.
+
+---
+
+## Amendment (2026-09-10): `provenance_mismatch` context becomes a `mismatches` mapping
+
+**Status:** Accepted. Ratified by the product owner under `BIN-68`, applying
+`CLAUDE.md`'s "Developer experience is a first-class constraint" (ratified
+2026-09-10) to a specific, load-bearing shape decision.
+
+**Trigger:** `BIN-68`'s merged scenario in
+`tests/bdd/features/baseline/provenance-mismatch-between-phases.feature`,
+"Comparison reports both dimensions when model version and criteria both
+differ," requires that when both provenance dimensions diverge, one raised
+error reports both -- *"not just the first one checked. Reporting only one
+forces the engineer through a fix-one-discover-the-other cycle."* A single
+`dimension: str` field, as originally specified in section 4's required-
+context-fields table, cannot hold two values. That table specified the
+required *key* for `provenance_mismatch` but -- unlike `category` (nine
+names, fully enumerated) and `kind` (a closed, logically exhaustive
+`"missing"`/`"invalid"` discriminator, section 3) -- never enumerated what
+`dimension` contains. `BIN-63`'s own tests noticed the gap and deliberately
+asserted only `isinstance(error.context["dimension"], str)`, refusing to
+guess the token (`tests/unit/baseline/test_baseline.py`, module docstring).
+`BIN-68` forces the question this ADR left open.
+
+### What changed
+
+`ProvenanceMismatchError.context` replaces `dimension` / `expected` /
+`received` with one required key:
+
+```python
+mismatches: dict[str, dict[str, str]]
+# e.g. {
+#     "model_version": {"expected": "claude-sonnet-a", "received": "claude-sonnet-b"},
+#     "scoring_criteria": {"expected": "Evaluate for tone.", "received": "Evaluate for accuracy."},
+# }
+```
+
+Every raised `ProvenanceMismatchError` now checks **both** dimensions before
+raising and includes one entry per differing dimension -- one entry for a
+single-dimension mismatch, two for a dual mismatch. There is no
+first-checked-wins short-circuit.
+
+`ProvenanceMismatchError` gains a read-only `mismatches` property returning
+`self.context["mismatches"]`, so the common read is
+`error.mismatches["model_version"]["expected"]` rather than
+`error.context["mismatches"][...]`. `context` stays the uniform,
+loggable, JSON-serialisable machine contract; `mismatches` is sugar over the
+same dict, not a second source of truth. Values stay plain `dict[str, str]`,
+not Pydantic models on `context` -- see Alternative I below.
+
+**Reasoning, on DX grounds, against aligned parallel tuples:**
+
+- **The commonest question is a membership test.** `if "model_version" in
+  e.mismatches:` answers "did the model change?" in one expression. Parallel
+  tuples (`dimensions`, `expected`, `received`) need a scan or a `zip`.
+- **Nothing can misalign.** Three parallel tuples can be zipped wrongly and
+  fail silently -- in error-handling code that only runs when something is
+  already wrong, the worst place for a silent bug.
+- **A third provenance dimension later does not change the shape.** If
+  `Provenance` ever grows a third field, `mismatches` gains a third possible
+  key with no shape change and no taxonomy version bump.
+
+**Dimension keys -- semi-open, not closed.** Today the set is exactly
+`{"model_version", "scoring_criteria"}`, one key per field on `Provenance`
+(`docs/domain-model.md`, Provenance). This is not a closed enum like
+`category` (nine names; changing the set is itself a breaking/minor-version
+event on the exception hierarchy) or `kind` (a two-value discriminator that
+is logically exhaustive -- a parameter either was or was not supplied). It
+tracks `Provenance`'s own field set: every raised error's `mismatches` keys
+are a subset of `Provenance`'s field names, and that subset relationship --
+not a fixed, hand-maintained vocabulary -- is the contract. Consumers must
+not assume the key set is closed at exactly two.
+
+**`BIN-63` is in scope, not only `BIN-68`.** `docs/domain-model.md` (open
+question 11) and `CLAUDE.md`'s "Provenance mismatch raises" section already
+commit to this being the same violation, same treatment, at both the
+Phase I intra-baseline boundary (`BIN-63`) and the Phase I/II boundary
+(`BIN-68`). The merged `BIN-68` scenario "Phase II provenance mismatch is
+classifiable as the same category as a Phase I baseline recording mismatch
+... both carry structured context with the same required fields" makes that
+a *tested* requirement, not only a stated intention: if `Baseline.record()`
+kept `dimension`/`expected`/`received` while `compare_provenance()` used
+`mismatches`, that scenario fails, because the two required-key sets would
+differ. `_reject_if_provenance_differs`
+(`src/caliper/baseline/domain/baseline.py`) must be restructured the same
+way: check both dimensions, accumulate every mismatch, raise once with the
+full `mismatches` dict. This folds in `BIN-98` (logged to add a dual-mismatch
+scenario to `BIN-63`'s own feature file) as confirmed necessary, not merely
+desirable.
+
+**Migration cost -- stated honestly, not undersold as pure loosening.**
+
+1. `src/caliper/errors.py` -- `ProvenanceMismatchError`'s required-keys
+   docstring, plus the new `mismatches` property.
+2. `src/caliper/baseline/domain/baseline.py` -- `_reject_if_provenance_differs`
+   changes from short-circuit (raise on the first differing dimension) to
+   check-both-then-raise-once. **This is a behaviour change, not only a test
+   change:** today a dual mismatch raises reporting only `model_version`;
+   after this amendment it raises once, reporting both.
+3. `tests/unit/baseline/test_baseline.py` -- the two loose assertions
+   (`isinstance(error.context["dimension"], str)`, `!= ""`) were written
+   loose *because this was undecided*; tightening them is what they were
+   waiting for. But the module docstring (explaining why `dimension` was left
+   unpinned) and both per-scenario docstrings making the same argument are now
+   stale statements of a question this amendment closes -- they need
+   rewriting, not just their assertions.
+   `test_provenance_mismatch_dimension_distinguishes_model_version_from_criteria`
+   tested distinguishability by comparing two single-dimension `dimension`
+   strings for inequality; under `mismatches` the same property is a
+   membership test (`"model_version" in error.mismatches` vs
+   `"scoring_criteria" in error.mismatches`) and should be rewritten to assert
+   that directly, not patched line-by-line.
+4. `tests/unit/baseline/test_baseline_sufficiency.py`'s comment contrasting
+   `dimension`'s "no canonical example" against `DataQualityConcern.kind`'s
+   pinned example is also now stale.
+5. `BIN-68` itself needs no migration -- `compare_provenance()` does not exist
+   yet anywhere in `src/` or `tests/` as of this amendment, so it is written
+   directly against `mismatches`.
+6. No `.feature` file changes (see below) -- the cost is entirely in Python
+   source and unit tests, not the requirements layer.
+
+This is implementation work for `domain-implementer` and `backend-test-writer`
+to carry out, not this ADR's -- recorded here so the cost is visible before
+it is incurred.
+
+### Feature file impact
+
+**No `.feature` file requires a change.** Verified directly against both
+files:
+
+- `tests/bdd/features/baseline/phase-i-baseline-collection.feature` (`BIN-63`)
+  SC5/SC6 already read "the error carries recovery guidance identifying which
+  provenance dimension differs" -- ADR-002's original migration (see BIN-63
+  above) already made this mechanism-neutral.
+- `tests/bdd/features/baseline/provenance-mismatch-between-phases.feature`
+  (`BIN-68`) already reads "the error identifies the differing dimension as
+  model version," "the error reports the expected and received values for
+  each differing dimension," "the error identifies that both provenance
+  dimensions differ," and "both carry structured context with the same
+  required fields" -- every one mechanism-neutral, every one satisfied by a
+  `mismatches` mapping without rewording.
+
+Ten feature files have survived eight architecture spikes untouched; this is
+the ninth spike, and it does not break that record.
+
+### Alternatives considered (amendment-specific)
+
+**G. Three aligned parallel values on `context`: `dimensions: list[str]`,
+`expected: list[str]`, `received: list[str]`.** Rejected. Three collections
+that must stay index-aligned by construction, with nothing enforcing the
+alignment at the type level -- a `zip(dimensions, expected)` in
+error-handling code that only runs when something has already gone wrong is
+exactly where a silent misalignment is most likely to go unnoticed. Also
+fails the membership-test heuristic: answering "did the model change?" needs
+a linear scan instead of a dict lookup.
+
+**H. Keep `dimension: str` singular; on a dual mismatch, join into one string
+(e.g. `"model_version,scoring_criteria"`), or raise on the first differing
+dimension and let a second call surface the second.** Rejected. A joined
+string forces the caller to parse prose to recover structure -- exactly what
+`context` exists to avoid (section 4 above). Raise-first-then-second directly
+contradicts the merged `BIN-68` dual-mismatch scenario, which requires one
+error reporting both dimensions in a single raise.
+
+**I. A `ProvenanceMismatch` Pydantic model (or list of them) as the `context`
+value, instead of a plain dict.** Rejected for the same reason `Provenance`
+itself does not appear directly in `context` today: `context` must stay a
+plain, log-safe, JSON-serialisable mapping without a `.model_dump()` step at
+every call site -- a typed model on `context` would be the first
+non-primitive value there, breaking a property every other category already
+has.
+
+**J. Keep `dimension`/`expected`/`received` for a single-dimension mismatch;
+add separate `dimensions`/`multi_expected`/`multi_received` keys used only on
+a dual mismatch.** Rejected. Two shapes for the same category means every
+consumer must branch on how many dimensions differ before it can read the
+error at all -- defeating the membership-test goal this amendment exists to
+serve -- and doubles the documented required-key surface for one category.
+
+### Reversibility
+
+Medium cost, same class as the rest of this ADR -- `context`'s key set for
+`provenance_mismatch` is part of the public API; removing `mismatches` or
+narrowing its typing later is a breaking change. No released version of
+Caliper has shipped `dimension` -- `BIN-63` and `BIN-68` are both
+unimplemented as of this amendment -- so there is no external consumer to
+migrate away from the superseded shape.
+
+### What did not change
+
+- Provenance mismatch still raises, unconditionally, at both boundaries
+  (`docs/domain-model.md` OQ-9, ratified 2026-09-10). No acknowledgement or
+  force parameter is introduced by this amendment.
+- Criteria and model-version comparison remain exact string equality
+  (`BIN-63` OQ-6, ratified 2026-09-10). This amendment changes how a mismatch
+  is *reported*, not how one is *detected*.
+- ADR-008's rule that tests assert on type plus required `context` key
+  presence, never message text, is unchanged and applies to `mismatches` the
+  same way it applied to `dimension`.
+- The nine-category taxonomy, the flat hierarchy, and every other category's
+  required context fields are unaffected.

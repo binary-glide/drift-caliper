@@ -692,7 +692,7 @@ ADR-002 defines the error taxonomy. Nine typed exceptions under `CaliperError`, 
 | `ProviderError` | `provider_failure` | `provider`, `operation` | LLM provider failure during scoring (BIN-59) |
 | `MalformedResponseError` | `malformed_response` | `operation`, `expected_shape` | Unparseable judge response (BIN-59) |
 | `JudgeRefusalError` | `judge_refusal` | `provider`, `operation` | Judge safety-filter refusal (ADR-002) |
-| `ProvenanceMismatchError` | `provenance_mismatch` | `dimension`, `expected`, `received` | Baseline recording (BIN-63), Phase II comparison (BIN-68) |
+| `ProvenanceMismatchError` | `provenance_mismatch` | `mismatches: dict[str, dict[str, str]]` (amended 2026-09-10, was `dimension`/`expected`/`received` — see ADR-002 Amendment) | Baseline recording (BIN-63), Phase II comparison (BIN-68) |
 | `InvalidObservationError` | `invalid_observation` | `reason`, `missing_fields` | Incomplete input to baseline (BIN-63) |
 | `InsufficientBaselineError` | `insufficient_baseline` | `have`, `need` | Fitting from too-small baseline (BIN-65/94/95) |
 | `DegenerateBaselineError` | `degenerate_baseline` | `reason` | Fitting from zero-variance baseline (BIN-65/94/95) |
@@ -755,7 +755,7 @@ disposition.
 | 8 | **Observation identity.** Do observations carry a timestamp, sequence index, or neither? The feature files assert ordering without assuming a mechanism. | domain-modeller | `Observation` structure | BIN-63 OQ-3 | **Open.** Untouched. Belongs to BIN-63. Doubles as the recorded trigger for adding `whenever` as a dependency — see CLAUDE.md "Stack Members Not Yet Used" and the Glossary's Observation entry. |
 | 9 | ~~Explicit override for known provenance change between phases.~~ | — | — | BIN-68 OQ-3 | **SETTLED** — product owner, 2026-09-10: **no override. The engineer refits.** `ProvenanceMismatchError` raises unconditionally; `compare_provenance()` takes no acknowledgement or force parameter. See "Provenance change requires a refit" below. |
 | 10 | ~~Whether scoring accepts empty agent output.~~ | — | — | BIN-59 OQ-5 | **SETTLED** — ADR-006 §6: rejected. Empty or whitespace-only `agent_output` raises `InvalidParameterError` before any provider call. An engineer who wants "no response" scored passes their own sentinel string. |
-| 11 | **Dual mismatch representation.** When both provenance dimensions differ, what shape does the error context take? (String, list, or paired entries.) | system-architect | `ProvenanceMismatchError.context["dimension"]` | BIN-68 OQ-1 | **Open.** Untouched — `BIN-59` never compares two `Provenance` instances, only constructs and reads one (ADR-006, Related decisions). Belongs to BIN-68. |
+| 11 | ~~Dual mismatch representation. When both provenance dimensions differ, what shape does the error context take?~~ | — | — | BIN-68 OQ-1 | **SETTLED** — system-architect, 2026-09-10: `context["mismatches"]`, a `dict[str, dict[str, str]]` keyed by dimension name (`"model_version"`, `"scoring_criteria"`), each holding `{"expected": ..., "received": ...}`. Replaces `dimension`/`expected`/`received`. `Baseline.record()` (BIN-63) and `compare_provenance()` (BIN-68) both produce this shape — required by the merged dual-mismatch scenario. See ADR-002 Amendment (2026-09-10). |
 
 ### Criteria equality is exact (OQ-2, settled 2026-09-10)
 
