@@ -325,7 +325,7 @@ def test_moving_range_sigma_matches_a_hand_computed_value() -> None:
     """MR-bar / d2 on a baseline whose moving ranges are known by inspection.
 
     Every consecutive pair differs by exactly 0.10, so the mean moving range
-    is 0.10 and sigma is 0.10 / 1.128 -- computed here from the definition,
+    is 0.10 and sigma is 0.10 / d2 -- computed here from the definition,
     never read back off the artefact.
     """
     # Arrange -- alternating scores, so |consecutive difference| is 0.10
@@ -339,7 +339,7 @@ def test_moving_range_sigma_matches_a_hand_computed_value() -> None:
     result = fit_ewma(baseline, target_arl=370.0)
 
     # Assert
-    expected_sigma = 0.10 / 1.128
+    expected_sigma = 0.10 / 1.1283791670955126  # d2 = 2/sqrt(pi)
     assert result.sigma_estimate == pytest.approx(expected_sigma, rel=1e-9)
 
 

@@ -163,7 +163,8 @@ MAX_MEANINGFUL_ARL = 1_000_000.0
 #
 # Hoisted to ``caliper.baseline.domain.spc_numerics`` during BIN-94 -- see
 # that module's docstring for the full citation chain (Montgomery Appendix
-# VI, d_2 = 1.128 for a moving-range span of 2) and
+# VI, d_2 = 1.128 for a moving-range span of 2 -- superseded on BIN-95 by the
+# exact closed form 2/sqrt(pi); see spc_numerics) and
 # ``tests/unit/baseline/test_spc_numerics.py`` for its direct test. Both
 # ``fit_ewma`` and ``fit_cusum`` delegate to the one shared estimator now,
 # rather than each carrying an independently-untested copy.

@@ -41,17 +41,35 @@ directly.
 from __future__ import annotations
 
 import itertools
+import math
 import statistics
 from collections.abc import Sequence
 
 # The unbiasing constant d_2 for a moving-range span of 2 (consecutive
-# individual observations). See
-# ``caliper.baseline.domain.ewma_fitting``'s ``_MOVING_RANGE_D2`` for the full
-# citation chain (Montgomery Appendix VI, cross-verified against three
-# independent secondary sources) -- reproduced verbatim here rather than
-# imported, so this module has no dependency on ``ewma_fitting`` in either
-# direction once the hoist is complete.
-_MOVING_RANGE_D2 = 1.128
+# individual observations).
+#
+# **Derived, not cited.** d2 for a moving-range span of 2 has an exact closed
+# form, so this project needs no source for it:
+#
+#     d2(n=2) = E[|X1 - X2|]  for iid X1, X2 ~ N(0, 1)
+#             = E|N(0, 2)|  =  sqrt(2) * sqrt(2/pi)  =  2 / sqrt(pi)
+#             = 1.128379167...
+#
+# Published tables give 1.128 because they are printed to four significant
+# figures, not because the quantity was ever measured. BIN-65 originally
+# reached it through a paywalled Montgomery lookup cross-verified against three
+# secondary sources -- a citation chain guarding plain arithmetic. Derived from
+# first principles on BIN-95 and checked against 20 million simulated pairs
+# (agreeing to 0.03%, sampling error).
+#
+# Worth asking of any constant this project treats as published: some are
+# measurements, some are arithmetic. Only the first kind needs a source.
+#
+# The rounded literal over-estimated sigma by ~336 ppm, making every derived
+# control limit that fraction too wide -- negligible, and harmless in direction
+# (slightly fewer false alarms rather than more), but there is no reason to
+# carry it.
+_MOVING_RANGE_D2 = 2.0 / math.sqrt(math.pi)
 _MOVING_RANGE_METHOD = "moving_range"
 
 

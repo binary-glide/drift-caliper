@@ -30,6 +30,8 @@ from caliper.baseline.domain.ewma_fitting import (
 from caliper.baseline.domain.fitted_control_limits import FittedControlLimits
 from caliper.baseline.domain.fitted_cusum import FittedCUSUM
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
+from caliper.baseline.domain.fitted_shewhart import FittedShewhart
+from caliper.baseline.domain.shewhart_fitting import fit_shewhart
 from caliper.baseline.domain.sufficiency_result import SufficiencyResult
 
 __all__ = [
@@ -48,7 +50,9 @@ __all__ = [
     "FittedCUSUM",
     "FittedControlLimits",
     "FittedEWMA",
+    "FittedShewhart",
     "SufficiencyResult",
     "fit_cusum",
     "fit_ewma",
+    "fit_shewhart",
 ]
