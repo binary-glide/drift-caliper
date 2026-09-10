@@ -3,19 +3,50 @@
 See ``docs/domain-model.md`` (Object Map -- Baseline, the one mutable
 collection) and ``docs/architecture/adr/002-error-contract-exception-taxonomy.md``
 for the error contract enforced by ``record()``.
+
+``check_sufficiency()`` (BIN-64) is a read-only, advisory inspection of
+whether the baseline has enough observations for reliable fitting -- see
+ADR-005 for the default threshold and its rationale.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from caliper.errors import InvalidObservationError, ProvenanceMismatchError
+from caliper.baseline.domain.data_quality_concern import DataQualityConcern
+from caliper.baseline.domain.sufficiency_result import SufficiencyResult
+from caliper.errors import (
+    InvalidObservationError,
+    InvalidParameterError,
+    ProvenanceMismatchError,
+)
 from caliper.measurement import Provenance, ScoringResult
 
 # Fields a candidate observation must expose to be treated as a complete
 # ScoringResult. Used only to report *which* fields are missing when an
 # isinstance check has already failed -- not to duck-type acceptance itself.
 _REQUIRED_OBSERVATION_FIELDS = ("score", "reasoning", "provenance")
+
+# The library's default minimum Phase I baseline size for
+# ``check_sufficiency()`` -- 100 individual observations, applied uniformly
+# across chart types (ADR-005 "Default minimum: 100 observations (uniform
+# across chart types)"). A pragmatic interim default derived from the Phase
+# I estimation literature (Quesenberry 1993; Jones, Champ & Rigdon 2001),
+# not a theoretically optimal threshold -- see ADR-005 for the full
+# rationale and its two documented caveats (the normality assumption and
+# estimation error). Configurable per call via ``check_sufficiency(threshold=...)``
+# (BIN-64 BR-3); this is only the value used when no override is given.
+DEFAULT_SUFFICIENCY_THRESHOLD = 100
+
+# The only DataQualityConcern.kind this story introduces (OQ-1 closes the
+# door on additional concern types for BIN-64) -- see docs/domain-model.md
+# Value Object Inventory's worked example for DataQualityConcern.kind.
+_ZERO_VARIANCE_CONCERN_KIND = "zero_variance"
+
+# Sample variance is undefined for a single point, so a singleton baseline
+# is never flagged as zero-variance -- there is nothing yet to compare it
+# against. An empty baseline (0 observations) is likewise never flagged.
+_MIN_OBSERVATIONS_FOR_VARIANCE_CHECK = 2
 
 
 def _missing_observation_fields(candidate: object) -> list[str]:
@@ -72,6 +103,35 @@ def _reject_if_provenance_differs(observed: Provenance, signature: Provenance) -
                 "taken against two different criteria."
             ),
         )
+
+
+def _zero_variance_concerns(
+    observations: Sequence[ScoringResult],
+) -> list[DataQualityConcern]:
+    """Report a zero-variance concern if every observation shares one score.
+
+    A baseline whose scores are all identical produces a zero variance
+    estimate; fitted control limits would collapse to the mean and be
+    unable to detect any deviation (BIN-64 SC7/SC12). Returns an empty
+    list when there are too few observations to assess variance, or when
+    the scores are not all identical.
+    """
+    if len(observations) < _MIN_OBSERVATIONS_FOR_VARIANCE_CHECK:
+        return []
+    distinct_scores = {observation.score for observation in observations}
+    if len(distinct_scores) > 1:
+        return []
+    return [
+        DataQualityConcern(
+            kind=_ZERO_VARIANCE_CONCERN_KIND,
+            description=(
+                "every recorded observation has an identical score -- the "
+                "baseline has zero variance, so fitted control limits "
+                "would collapse to the mean and be unable to detect any "
+                "deviation"
+            ),
+        )
+    ]
 
 
 class Baseline:
@@ -149,3 +209,68 @@ class Baseline:
             _reject_if_provenance_differs(result.provenance, self._provenance_signature)
 
         self._observations.append(result)
+
+    def check_sufficiency(
+        self,
+        *,
+        threshold: int | None = None,
+        chart_type: str | None = None,
+    ) -> SufficiencyResult:
+        """Check whether this baseline has enough observations for fitting.
+
+        A read-only, advisory inspection (BR-6) -- it never modifies the
+        baseline. Reports the observation count, the threshold applied
+        (``threshold`` if given, else ``DEFAULT_SUFFICIENCY_THRESHOLD``),
+        the gap (``max(0, threshold - observation_count)``), and any data
+        quality concerns (BIN-64 SC7/SC12: an all-identical baseline is
+        flagged with a ``DataQualityConcern(kind="zero_variance", ...)``
+        regardless of whether the count threshold is met). A non-positive
+        ``threshold`` raises ``InvalidParameterError`` before anything
+        else. ``chart_type`` is accepted so the mechanism supports
+        per-chart-type thresholds (BR-5) without requiring them -- it is
+        purely informational here; an explicit ``threshold`` is what
+        governs the determination, per ADR-005 (all chart types currently
+        share the one default until BIN-92's simulation study).
+
+        Args:
+            threshold: Minimum observation count required to be
+                sufficient. ``None`` uses ``DEFAULT_SUFFICIENCY_THRESHOLD``.
+                Must be positive.
+            chart_type: Optional label for which chart type's threshold
+                this check is for. Purely informational in this story --
+                see the docstring above.
+
+        Returns:
+            A ``SufficiencyResult`` describing the baseline's readiness.
+
+        Raises:
+            InvalidParameterError: ``threshold`` is zero or negative.
+        """
+        del chart_type  # informational only in this story -- see docstring
+
+        effective_threshold = (
+            threshold if threshold is not None else DEFAULT_SUFFICIENCY_THRESHOLD
+        )
+        if effective_threshold <= 0:
+            raise InvalidParameterError(
+                "sufficiency threshold must be a positive integer",
+                context={
+                    "parameter": "threshold",
+                    "constraint": "must be a positive integer",
+                    "kind": "invalid",
+                    "provided": threshold,
+                },
+                recovery_hint=(
+                    "Pass a positive threshold, or omit it to use the "
+                    "library default (DEFAULT_SUFFICIENCY_THRESHOLD)."
+                ),
+            )
+
+        observation_count = self.observation_count
+        return SufficiencyResult(
+            is_sufficient=observation_count >= effective_threshold,
+            observation_count=observation_count,
+            threshold=effective_threshold,
+            gap=max(0, effective_threshold - observation_count),
+            data_quality_concerns=_zero_variance_concerns(self._observations),
+        )

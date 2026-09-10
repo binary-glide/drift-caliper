@@ -10,6 +10,13 @@ context's types, re-exported here so every consumer imports from
 "Module layout" note.
 """
 
-from caliper.baseline.domain.baseline import Baseline
+from caliper.baseline.domain.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline
+from caliper.baseline.domain.data_quality_concern import DataQualityConcern
+from caliper.baseline.domain.sufficiency_result import SufficiencyResult
 
-__all__ = ["Baseline"]
+__all__ = [
+    "DEFAULT_SUFFICIENCY_THRESHOLD",
+    "Baseline",
+    "DataQualityConcern",
+    "SufficiencyResult",
+]
