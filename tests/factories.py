@@ -1,6 +1,5 @@
 """Domain factories for the Measurement bounded context.
 
-# updated by backend-test-writer BIN-63
 
 ``factory_boy`` factories for the value objects in ``caliper.measurement``,
 per ``test-patterns/references/python.md`` ("Fixtures and Factories"). Each

@@ -196,7 +196,6 @@ class Judge(BaseModel):
             ),
         )
 
-    # added by domain-implementer BIN-103
     def _resolve_effective_criteria(self, criteria: str | None) -> ScoringCriteria:
         """Resolve per-call criteria over judge-level criteria, or raise.
 
@@ -229,7 +228,6 @@ class Judge(BaseModel):
         return ScoringCriteria(value=effective_criteria_raw)
 
 
-# added by domain-implementer BIN-103
 def _require_non_blank_agent_output(agent_output: str) -> None:
     """Reject an empty or whitespace-only ``agent_output`` (ADR-006 section 6).
 

@@ -126,7 +126,6 @@ class Baseline:
             ProvenanceMismatchError: ``result.provenance`` differs from the
                 baseline's established provenance signature.
         """
-        # added by domain-implementer BIN-63
         if not isinstance(result, ScoringResult):
             raise InvalidObservationError(
                 "recorded observation is not a complete scoring result",
