@@ -501,7 +501,7 @@ holds.
 **Usage across five stories:**
 - BIN-57: originates model version
 - BIN-59: attaches provenance to each ScoringResult (implemented)
-- BIN-63: enforces provenance consistency within the baseline; exposes provenance signature (not yet implemented)
+- BIN-63: enforces provenance consistency within the baseline; exposes provenance signature (**implemented**)
 - BIN-65/94/95: carries provenance onto the fitted artefact (not yet implemented)
 - BIN-68: compares provenance across the Phase I/II boundary; raises `ProvenanceMismatchError` on divergence (not yet implemented)
 
@@ -679,9 +679,9 @@ These are the operations the ten feature files establish. They replace the "serv
 | Create judge | BIN-57 | `model_version: str \| None`, optional `provider`, optional `criteria` | `Judge` | Measurement — **implemented** |
 | Configure criteria | BIN-58 | `criteria: str` | `ScoringCriteria` (attachment point **settled**: judge creation and/or per-call — former OQ-1) | Measurement — **implemented** |
 | Score agent output | BIN-59 | `agent_output: str` (required), optional `agent_input: str`, optional `criteria: str` | `ScoringResult` | Measurement — **implemented** (ADR-006) |
-| Create baseline | BIN-63 | (none) | `Baseline` (empty) | Baseline — not yet implemented |
-| Record observation | BIN-63 | `ScoringResult` | Mutates baseline | Baseline — not yet implemented |
-| Check sufficiency | BIN-64 | Optional: threshold, chart type | `SufficiencyResult` | Baseline — not yet implemented |
+| Create baseline | BIN-63 | (none) | `Baseline` (empty) | Baseline — **implemented** |
+| Record observation | BIN-63 | `ScoringResult` | Mutates baseline | Baseline — **implemented** |
+| Check sufficiency | BIN-64 | Optional keyword-only: `threshold`, `chart_type` | `SufficiencyResult` | Baseline — **implemented** (advisory; never raises) |
 | Fit EWMA | BIN-65 | `Baseline`, `target_arl`, optional `smoothing_param` | `FittedEWMA` | Baseline — not yet implemented |
 | Fit CUSUM | BIN-94 | `Baseline`, `target_arl`, optional `reference_value`, optional `direction` | `FittedCUSUM` | Baseline — not yet implemented |
 | Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline — not yet implemented |
@@ -805,6 +805,13 @@ a running stream. Those are ergonomics, and they are additive. What is closed
 is proceeding on the old baseline with the new judge.
 
 ---
+
+> **Keeping this table honest.** The status column drifted through `BIN-63` and
+> `BIN-64` — both shipped while their rows still read "not yet implemented",
+> because the first omission was then read as precedent by the next story.
+> **Update the row in the same PR that implements the operation.** This document
+> is canonical (the vault copy is a pointer), so a stale status here is a wrong
+> answer to the question a new agent most often asks of it: what already exists?
 
 ## Validation Checklist
 
