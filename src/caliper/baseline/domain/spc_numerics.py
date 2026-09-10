@@ -45,12 +45,26 @@ import statistics
 from collections.abc import Sequence
 
 # The unbiasing constant d_2 for a moving-range span of 2 (consecutive
-# individual observations). See
-# ``caliper.baseline.domain.ewma_fitting``'s ``_MOVING_RANGE_D2`` for the full
-# citation chain (Montgomery Appendix VI, cross-verified against three
-# independent secondary sources) -- reproduced verbatim here rather than
-# imported, so this module has no dependency on ``ewma_fitting`` in either
-# direction once the hoist is complete.
+# individual observations).
+#
+# ⚠️ Left as the rounded published figure for now. It has an EXACT closed form
+# and does not need a citation at all -- see BIN-95, where this was derived
+# from first principles rather than inherited:
+#
+#     d2(n=2) = E[|X1 - X2|] for iid X1, X2 ~ N(0, 1)
+#             = E|N(0, 2)|  =  sqrt(2) * sqrt(2/pi)  =  2 / sqrt(pi)
+#             = 1.128379167...
+#
+# Verified against 20 million simulated pairs (agreeing to 0.03%, sampling
+# error). Tables publish 1.128 because they are printed to four figures, not
+# because the quantity is empirical.
+#
+# Using the rounded value over-estimates sigma by ~336 ppm, so every control
+# limit derived from it is that fraction too wide. Negligible in practice and
+# harmless in direction (slightly fewer false alarms, not more), but it is a
+# free accuracy gain and it removes this project's dependency on a paywalled
+# source. **BIN-95 should replace this with `2.0 / math.sqrt(math.pi)`** and
+# drop the citation chain, since a derivation beats a citation.
 _MOVING_RANGE_D2 = 1.128
 _MOVING_RANGE_METHOD = "moving_range"
 
