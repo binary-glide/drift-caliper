@@ -442,6 +442,40 @@ arguments for false alarm tolerance, the missing case belongs to Python's
 `TypeError` and never reaches this taxonomy -- a legitimate outcome that does not
 weaken the contract.
 
+### The precedent this sets, and the bar for following it
+
+`system-architect` raised this while making the amendment, and it is worth
+settling now rather than when someone appeals to it:
+
+**`mismatches` is the only nested value in the whole error contract.** Every
+other category's `context` is flat — scalars and lists. This is a deliberate
+exception, which means the next engineer wanting a nested structure will point
+at it, and "use judgement" is not an answer.
+
+**The rule: nesting is allowed when the flat alternative requires parallel
+structures that can misalign. Otherwise, flat wins.**
+
+That is a question with a yes-or-no answer rather than a matter of taste. Ask
+what the flat version looks like:
+
+- If it is **more keys** — `parameter`, `constraint`, `kind`, `provided` on
+  `invalid_parameter` — flat wins. Nothing can get out of step, and a flat
+  mapping is trivially loggable.
+- If it is **parallel sequences the caller must zip** — `dimension`,
+  `expected`, `received` as three aligned tuples — nesting wins. Three
+  sequences that must stay index-aligned can be consumed in the wrong order
+  and fail silently, in error-handling code that only runs when something has
+  already gone wrong.
+
+`provenance_mismatch` is the only category in the taxonomy that reports **an
+unknown number of things at once**, which is why it is the only one that
+reaches the bar. If a future category has the same property, it qualifies on
+the same grounds and needs no further debate. If it does not, flat.
+
+**Values inside a nested structure stay plain data** — dicts of scalars, not
+value objects or models. `context` must remain loggable and JSON-serialisable;
+that constraint is not relaxed by this amendment.
+
 ### Reversibility
 
 **Medium cost.** The exception types are part of the public API. Removing a type
