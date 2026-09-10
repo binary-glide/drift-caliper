@@ -68,7 +68,6 @@ with that file's own independently-recomputed reference figures (499.9,
 
 from __future__ import annotations
 
-import itertools
 import math
 import statistics
 from collections.abc import Sequence
@@ -84,6 +83,7 @@ from scipy.stats import norm  # type: ignore[attr-defined]
 
 from caliper.baseline.domain.baseline import Baseline
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
+from caliper.baseline.domain.spc_numerics import _moving_range_sigma
 from caliper.errors import (
     DegenerateBaselineError,
     InsufficientBaselineError,
@@ -161,20 +161,12 @@ MAX_MEANINGFUL_ARL = 1_000_000.0
 
 # --- Moving-range sigma estimation -------------------------------------------
 #
-# The unbiasing constant d_2 for a moving-range span of 2 (consecutive
-# individual observations, R1 -- docs/domain-model.md "Moving-range span").
-# d_2 = 1.128 is one of the most widely reproduced constants in SPC practice
-# (Montgomery's Introduction to Statistical Quality Control, Appendix VI --
-# not directly accessible in this environment, an O'Reilly paywall, the same
-# access gap docs/domain-model.md already records for this exact constant).
-# Cross-verified against three independent secondary sources reproducing the
-# standard control-chart-constants table for n=2: r-bar.net
-# ("Control Chart Constants | Tables and Brief Explanation"), the MIT-hosted
-# reproduction of the AIAG SPC reference manual's constants table
-# (web.mit.edu/2.810/www/files/readings/ControlChartConstantsAndFormulae.pdf),
-# and andrewmilivojevich.com's "D2 values for the Distribution of the
-# Average Range" -- all three agree on d_2 = 1.128 for n = 2.
-_MOVING_RANGE_D2 = 1.128
+# Hoisted to ``caliper.baseline.domain.spc_numerics`` during BIN-94 -- see
+# that module's docstring for the full citation chain (Montgomery Appendix
+# VI, d_2 = 1.128 for a moving-range span of 2) and
+# ``tests/unit/baseline/test_spc_numerics.py`` for its direct test. Both
+# ``fit_ewma`` and ``fit_cusum`` delegate to the one shared estimator now,
+# rather than each carrying an independently-untested copy.
 _MOVING_RANGE_METHOD = "moving_range"
 
 # --- Markov-chain calibration parameters -------------------------------------
@@ -291,20 +283,6 @@ def _validate_smoothing_param(smoothing_param: float | None) -> None:
 def _has_zero_variance(scores: Sequence[float]) -> bool:
     """Report whether every score in ``scores`` is identical."""
     return len(set(scores)) <= 1
-
-
-def _moving_range_sigma(scores: Sequence[float]) -> float:
-    """Estimate short-term sigma from the mean moving range (span 2).
-
-    ``scores`` must have at least one pair of unequal consecutive-difference
-    contributions -- guaranteed by the time this is called, because
-    ``fit_ewma`` has already rejected an all-identical baseline (a baseline
-    containing any two distinct values has at least one non-zero
-    consecutive difference, so the mean moving range is strictly positive).
-    """
-    moving_ranges = [abs(b - a) for a, b in itertools.pairwise(scores)]
-    mean_moving_range = statistics.fmean(moving_ranges)
-    return mean_moving_range / _MOVING_RANGE_D2
 
 
 # --- Markov-chain ARL0 calibration --------------------------------------------

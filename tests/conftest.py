@@ -40,15 +40,24 @@ from beartype.claw import beartype_package
 # it. beartype checks at runtime exactly what mypy was told to stop checking.
 # BIN-94's Siegmund approximation adds more scipy calls and more such holes.
 #
-# ⚠️ Scoped to ``caliper.baseline.domain`` deliberately, and it must never be
-# widened to a package whose public entry points engineers call. beartype raises
-# ``BeartypeCallHintParamViolation``, which is **not** a ``CaliperError`` -- no
-# ``category``, no ``context`` to branch on. Guarding a public boundary would
-# replace the typed exception ADR-002 requires and break the six merged feature
-# files asserting on it. Catching and translating it does not work either: the
-# violation carries prose rather than structure, so ``missing_fields`` cannot be
-# recovered from it. See BIN-109.
+# ⚠️ Scoped to individual entry-point-free modules deliberately, and it must
+# never be widened to a package whose public entry points engineers call.
+# beartype raises ``BeartypeCallHintParamViolation``, which is **not** a
+# ``CaliperError`` -- no ``category``, no ``context`` to branch on. Guarding a
+# public boundary would replace the typed exception ADR-002 requires and break
+# the six merged feature files asserting on it. Catching and translating it
+# does not work either: the violation carries prose rather than structure, so
+# ``missing_fields`` cannot be recovered from it. See BIN-109.
 beartype_package("caliper.baseline.domain.ewma_fitting")
+
+# ``spc_numerics`` (hoisted during BIN-94) has no public entry point -- its
+# only callers are other domain modules, never an engineer -- so it is a
+# clean target for the same reasoning above, without needing the carve-out
+# ``ewma_fitting`` requires. ``fit_cusum``/``fit_ewma`` themselves are NOT
+# hooked (nor is ``cusum_fitting`` as a whole -- it has a public entry
+# point, ``fit_cusum``); only this entry-point-free module is. See
+# ``spc_numerics.py``'s module docstring.
+beartype_package("caliper.baseline.domain.spc_numerics")
 
 
 def pytest_collection_modifyitems(
