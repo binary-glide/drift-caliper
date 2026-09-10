@@ -522,8 +522,8 @@ holds.
 - BIN-57: originates model version
 - BIN-59: attaches provenance to each ScoringResult (implemented)
 - BIN-63: enforces provenance consistency within the baseline; exposes provenance signature (**implemented**)
-- BIN-65/94/95: carries provenance onto the fitted artefact (not yet implemented)
-- BIN-68: compares provenance across the Phase I/II boundary; raises `ProvenanceMismatchError` on divergence (not yet implemented)
+- BIN-65/94/95: carries provenance onto the fitted artefact (**implemented**)
+- BIN-68: compares provenance across the Phase I/II boundary; raises `ProvenanceMismatchError` on divergence (**implemented**)
 
 ### `ScoringResult`
 
@@ -735,11 +735,11 @@ These are the operations the ten feature files establish. They replace the "serv
 | Create baseline | BIN-63 | (none) | `Baseline` (empty) | Baseline — **implemented** |
 | Record observation | BIN-63 | `ScoringResult` | Mutates baseline | Baseline — **implemented** |
 | Check sufficiency | BIN-64 | Optional keyword-only: `threshold`, `chart_type` | `SufficiencyResult` | Baseline — **implemented** (advisory; never raises) |
-| Fit EWMA | BIN-65 | `Baseline`, `target_arl`, optional `smoothing_param` | `FittedEWMA` | Baseline — not yet implemented |
-| Fit CUSUM | BIN-94 | `Baseline`, `target_arl`, optional `reference_value`, optional `direction` | `FittedCUSUM` | Baseline — not yet implemented |
-| Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline — not yet implemented |
-| Review artefact | BIN-66 | Any `FittedControlLimits` | Read properties; human-readable summary | Baseline — not yet implemented |
-| Compare provenance | BIN-68 | `ScoringResult`, `FittedControlLimits` | Confirms compatibility or raises `ProvenanceMismatchError` | Baseline — not yet implemented |
+| Fit EWMA | BIN-65 | `Baseline`, `target_arl`, optional `smoothing_param` | `FittedEWMA` | Baseline — **implemented** (BIN-65) |
+| Fit CUSUM | BIN-94 | `Baseline`, `target_arl`, optional `reference_value`, optional `direction` | `FittedCUSUM` | Baseline — **implemented** (BIN-94) |
+| Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline — **implemented** (BIN-95) |
+| Review artefact | BIN-66 | Any `FittedControlLimits` | Read properties; `audit_summary()` | Baseline — **implemented** (BIN-66) |
+| Compare provenance | BIN-68 | `ScoringResult`, `FittedControlLimits` | Confirms compatibility or raises `ProvenanceMismatchError` | Baseline — **implemented** (BIN-68) |
 
 **Fitting parameter semantics (ADR-004 section 5):**
 - `target_arl`: **optional in Python signature** (default `None`), **required by Caliper validation**. Omitting raises `InvalidParameterError(kind="missing")`.
@@ -771,7 +771,7 @@ disposition.
 | 4 | **Sufficiency override for testing.** Should the engineer be able to bypass sufficiency enforcement for exploratory fitting? | domain-modeller | Fitting operation parameters | BIN-65/94/95 OQ-4 | **Open.** Untouched. Belongs to BIN-65/94/95. |
 | 5 | ~~Score range. Fixed [0, 1], engineer-declared range, or unconstrained?~~ | — | — | BIN-59 OQ-2 | **SETTLED** — ADR-006 §5: unconstrained (no fixed or engineer-declared range), but the score must be a **finite** float — `NaN` and `±inf` are rejected as `InvalidParameterError`. A future fitting-time range check remains additive and is not foreclosed. |
 | 6 | ~~Scoring input shape. Both agent input and output, or output alone?~~ | — | — | BIN-59 OQ-6 | **SETTLED** — ADR-006 §3: both accepted — `agent_output` required, `agent_input` optional. Neither is echoed onto `Provenance` or `ScoringResult` (they are the subject measured, not the measurement configuration). |
-| 7 | **Serialisable form for audit logging.** Should the artefact provide a `to_dict()` or equivalent? The PRD recommends in-scope for BIN-66. | domain-modeller | `FittedControlLimits` interface | BIN-66 OQ-1 | **Open.** Untouched. Belongs to BIN-66. |
+| 7 | ~~Serialisable form for audit logging. Should the artefact provide a `to_dict()` or equivalent?~~ | — | — | BIN-66 OQ-1 | **SETTLED** — BIN-66, 2026-09-10: a **textual** `audit_summary()` only. No `to_dict()`. None of BIN-66's five scenarios asks for a machine-readable form, and Pydantic already gives every artefact `model_dump()` for free — a hand-written `to_dict()` would be a second, divergent serialisation of the same fields. A structured export remains **additive** if a concrete consumer appears. |
 | 8 | **Observation identity.** Do observations carry a timestamp, sequence index, or neither? The feature files assert ordering without assuming a mechanism. | domain-modeller | `Observation` structure | BIN-63 OQ-3 | **Open.** Untouched. Belongs to BIN-63. Doubles as the recorded trigger for adding `whenever` as a dependency — see CLAUDE.md "Stack Members Not Yet Used" and the Glossary's Observation entry. |
 | 9 | ~~Explicit override for known provenance change between phases.~~ | — | — | BIN-68 OQ-3 | **SETTLED** — product owner, 2026-09-10: **no override. The engineer refits.** `ProvenanceMismatchError` raises unconditionally; `compare_provenance()` takes no acknowledgement or force parameter. See "Provenance change requires a refit" below. |
 | 10 | ~~Whether scoring accepts empty agent output.~~ | — | — | BIN-59 OQ-5 | **SETTLED** — ADR-006 §6: rejected. Empty or whitespace-only `agent_output` raises `InvalidParameterError` before any provider call. An engineer who wants "no response" scored passes their own sentinel string. |

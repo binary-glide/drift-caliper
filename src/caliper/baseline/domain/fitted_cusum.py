@@ -29,6 +29,8 @@ from typing import NoReturn
 
 from pydantic import BaseModel, ConfigDict
 
+from caliper.baseline.domain.audit_summary import render_audit_summary
+
 
 class FittedCUSUM(BaseModel):
     """Immutable fitted CUSUM control limits, with baseline statistics and provenance.
@@ -87,4 +89,23 @@ class FittedCUSUM(BaseModel):
             "FittedCUSUM has no True/False meaning; check its "
             "`decision_interval` or other fields directly instead of using "
             "it in a boolean context"
+        )
+
+    def audit_summary(self) -> str:
+        """A full, labelled, multi-line record suitable for an audit log (BIN-66).
+
+        Distinct from ``__repr__``/``__str__`` -- see
+        ``caliper.baseline.domain.audit_summary``'s module docstring. The
+        shared-core section is rendered by ``render_audit_summary``, which
+        every concrete ``Fitted*`` type calls identically; only the
+        CUSUM-specific lines below are this method's own responsibility.
+        """
+        return render_audit_summary(
+            self,
+            [
+                f"Reference value (k): {self.reference_value}",
+                f"Decision interval (h): {self.decision_interval}",
+                f"Target value (mu_0): {self.target_value}",
+                f"Direction: {self.direction}",
+            ],
         )

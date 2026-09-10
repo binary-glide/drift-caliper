@@ -22,6 +22,8 @@ from typing import NoReturn
 
 from pydantic import BaseModel, ConfigDict
 
+from caliper.baseline.domain.audit_summary import render_audit_summary
+
 
 class FittedEWMA(BaseModel):
     """Immutable fitted EWMA control limits, with baseline statistics and provenance.
@@ -66,4 +68,23 @@ class FittedEWMA(BaseModel):
         raise TypeError(
             "FittedEWMA has no True/False meaning; check its `ucl`/`lcl`/`cl` "
             "or other fields directly instead of using it in a boolean context"
+        )
+
+    def audit_summary(self) -> str:
+        """A full, labelled, multi-line record suitable for an audit log (BIN-66).
+
+        Distinct from ``__repr__``/``__str__`` -- see
+        ``caliper.baseline.domain.audit_summary``'s module docstring. The
+        shared-core section is rendered by ``render_audit_summary``, which
+        every concrete ``Fitted*`` type calls identically; only the
+        EWMA-specific lines below are this method's own responsibility.
+        """
+        return render_audit_summary(
+            self,
+            [
+                f"Smoothing parameter (lambda): {self.smoothing_param}",
+                f"Upper control limit (UCL): {self.ucl}",
+                f"Lower control limit (LCL): {self.lcl}",
+                f"Centre line (CL): {self.cl}",
+            ],
         )
