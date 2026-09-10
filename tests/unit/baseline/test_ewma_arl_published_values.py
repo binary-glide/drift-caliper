@@ -121,7 +121,17 @@ the tolerance is too tight.
 
 from __future__ import annotations
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_ewma
+import math
+from statistics import NormalDist
+
+import pytest
+
+from caliper.baseline import (
+    DEFAULT_SUFFICIENCY_THRESHOLD,
+    Baseline,
+    FittedEWMA,
+    fit_ewma,
+)
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Relative tolerance applied to each published ARL0 value below. 2% of 500
@@ -197,3 +207,88 @@ def test_lambda_0_03_achieves_the_published_in_control_arl_of_500() -> None:
     assert result.smoothing_param == 0.03
     assert result.requested_arl == published_arl0
     _assert_achieved_arl_close_to(result.achieved_arl, published_arl0)
+
+
+# --- The assertions that actually carry the published table's content ----------
+#
+# `domain-implementer` flagged this against its own work, and it is the most
+# important finding of BIN-65: the two tests above are **self-consistent by
+# construction**. `fit_ewma` solves for the multiplier L such that its own
+# Markov chain reports the requested ARL0, so `achieved_arl ~= requested_arl`
+# holds whatever that chain computes. A systematic scaling error would simply
+# produce a different L and report the target back regardless -- precisely the
+# factor-of-2.0000 discretisation bug described in this module's docstring
+# would sail through both of them.
+#
+# The published table's real content is the *multiplier*: lambda=0.5 with
+# ARL0=500 requires L=3.071, and lambda=0.03 requires L=2.437. L is recoverable
+# from the artefact, since ucl = cl + L * sigma * sqrt(lambda / (2 - lambda)).
+# Checking it is what makes these tests a proof rather than a tautology.
+
+
+def _implied_limit_multiplier(result: FittedEWMA) -> float:
+    """Recover L from a fitted artefact's reported limits.
+
+    Inverts ``ucl = cl + L * sigma_estimate * sqrt(lam / (2 - lam))``, the
+    asymptotic (fixed-limit) EWMA form Lucas & Saccucci tabulate.
+    """
+    lam = result.smoothing_param
+    sigma_z = result.sigma_estimate * math.sqrt(lam / (2.0 - lam))
+    return (result.ucl - result.cl) / sigma_z
+
+
+@pytest.mark.parametrize(
+    ("smoothing_param", "published_multiplier"),
+    [
+        pytest.param(0.5, 3.071, id="lambda-0.5-L-3.071"),
+        pytest.param(0.03, 2.437, id="lambda-0.03-L-2.437"),
+    ],
+)
+def test_calibration_recovers_the_published_limit_multiplier_for_arl0_500(
+    smoothing_param: float, published_multiplier: float
+) -> None:
+    """The fitted limits imply the L that Lucas & Saccucci (1990) Table 3 gives.
+
+    Unlike the two tests above, this one cannot pass against a chain with a
+    systematic scaling error: L is fixed by the published table, not by the
+    implementation's own arithmetic.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    result = fit_ewma(baseline, target_arl=500.0, smoothing_param=smoothing_param)
+
+    # Assert -- 1% of the published value. Tight enough that the 2x
+    # discretisation bug (which would move L by far more) fails loudly;
+    # loose enough to absorb the difference between the Markov-chain
+    # approximation and the quadrature the table was produced with.
+    assert _implied_limit_multiplier(result) == pytest.approx(
+        published_multiplier, rel=0.01
+    )
+
+
+def test_calibration_matches_the_shewhart_closed_form_as_lambda_approaches_one() -> (
+    None
+):
+    """As lambda -> 1 an EWMA degenerates to a Shewhart individuals chart.
+
+    That chart's in-control ARL0 has a closed form, ``1 / (2 * Phi(-L))``, with
+    no free parameters and nothing borrowed from any table. It is the one check
+    here that depends on no published source at all, and it is what actually
+    guards against a systematic scaling error in the chain.
+
+    It was carrying that weight in a docstring rather than an assertion until
+    BIN-65's review; a comment cannot fail CI.
+    """
+    # Arrange -- lambda at the top of its range, where the EWMA has no memory.
+    baseline = _sufficient_baseline()
+    target_arl = 370.0
+
+    # Act
+    result = fit_ewma(baseline, target_arl=target_arl, smoothing_param=1.0)
+    implied_l = _implied_limit_multiplier(result)
+
+    # Assert -- the closed form, computed here rather than quoted.
+    closed_form_arl = 1.0 / (2.0 * NormalDist().cdf(-implied_l))
+    assert closed_form_arl == pytest.approx(target_arl, rel=0.01)
