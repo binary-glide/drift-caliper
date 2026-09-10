@@ -405,7 +405,10 @@ def test_raises_invalid_observation_error_when_input_is_missing_provenance() -> 
     assert error.category == "invalid_observation"
     assert isinstance(error.context["reason"], str)
     assert error.context["reason"] != ""
-    assert "provenance" in error.context["missing_fields"]
+    # Exact set, not membership. Membership let two mutants survive: passing
+    # `None` into the field check reports every field as missing, and
+    # `"provenance" in [...]` still holds. Found by mutmut during BIN-63 review.
+    assert set(error.context["missing_fields"]) == {"provenance"}
     assert baseline.observation_count == 0
     assert baseline.observations == ()
 
