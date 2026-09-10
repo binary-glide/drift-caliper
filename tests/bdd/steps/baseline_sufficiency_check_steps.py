@@ -343,15 +343,18 @@ def result_reports_count_meets_threshold(check: SufficiencyCheck) -> None:
     "determination"
 )
 def result_indicates_concern_alongside_determination(check: SufficiencyCheck) -> None:
-    assert len(check.result.data_quality_concerns) >= 1
+    # `>= 1` would not catch a bogus second concern being added (OQ-1).
+    assert len(check.result.data_quality_concerns) == 1
 
 
 @then("the concern identifies that the scores show no variation")
 def concern_identifies_zero_variation(check: SufficiencyCheck) -> None:
-    assert any(
-        concern.kind == _ZERO_VARIANCE_CONCERN_KIND
-        for concern in check.result.data_quality_concerns
-    )
+    # Exact set, not membership. `any(...)` passes even when the implementation
+    # returns extra unexpected concerns alongside the real one -- which is the
+    # SufficiencyResult scope creep OQ-1 exists to prevent.
+    concerns = check.result.data_quality_concerns
+    assert len(concerns) == 1
+    assert concerns[0].kind == _ZERO_VARIANCE_CONCERN_KIND
 
 
 # --- Scenario: per-chart-type threshold (SC8) ---------------------------------
@@ -482,4 +485,5 @@ def error_identifies_parameter_and_range(attempt: SufficiencyErrorCheck) -> None
 
 @then("the result indicates a data quality concern")
 def result_indicates_a_data_quality_concern(check: SufficiencyCheck) -> None:
-    assert len(check.result.data_quality_concerns) >= 1
+    # `>= 1` would not catch a bogus second concern being added (OQ-1).
+    assert len(check.result.data_quality_concerns) == 1
