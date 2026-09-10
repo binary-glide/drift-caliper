@@ -55,11 +55,11 @@ helper, not the helper's justification. The helper's justification is the
 definition of a normal tail probability, verifiable from ``statistics``
 directly.
 
-## d_2 = 1.128, corroborated by closed-form derivation
+## d_2 is derived, not cited
 
-``caliper.baseline.domain.spc_numerics``'s ``_MOVING_RANGE_D2 = 1.128`` was
-previously cross-verified only against three secondary sources (BIN-65) --
-never derived from first principles. It has a closed form: for a moving
+``caliper.baseline.domain.spc_numerics``'s ``_MOVING_RANGE_D2`` was
+cross-verified only against three secondary sources on BIN-65 -- never derived.
+It turns out to need no source at all. For a moving
 range of span 2, ``d_2`` is the expected value of ``|X1 - X2|`` for
 ``X1, X2`` iid standard normal. Since ``X1 - X2 ~ N(0, 2)``, and
 ``E[|Z|] = sigma * sqrt(2 / pi)`` for ``Z ~ N(0, sigma^2)`` (the standard
@@ -67,9 +67,13 @@ half-normal mean identity), substituting ``sigma = sqrt(2)``:
 
     d_2 = sqrt(2) * sqrt(2 / pi) = 2 / sqrt(pi)
 
-This is independently derived and checked below -- the first primary-source
-(rather than secondary-corroborated) verification of this constant on the
-project, per this story's explicit instruction to derive or corroborate
+Derived and checked below. The constant is now stored **as that expression**
+(``2.0 / math.sqrt(math.pi)``), not as the rounded ``1.128`` tables print;
+the citation chain BIN-65 built is gone, because a derivation supersedes it.
+
+Worth carrying forward: some "published constants" are measurements and some
+are arithmetic. Only the first kind needs a source, and it is worth asking
+which before going hunting -- per this story's instruction to derive or corroborate
 ``d_2`` rather than inherit its prior verification.
 
 ## Helpers whose effect cancels out -- checked even though the relationship is exact
@@ -215,10 +219,10 @@ def test_moving_range_d2_matches_the_expected_range_of_two_standard_normals() ->
 
     See module docstring's "d_2, corroborated by closed-form derivation"
     section for the full derivation:
-    ``d_2 = sqrt(2) * sqrt(2 / pi) = 2 / sqrt(pi)``. This is a first-
-    principles derivation, not a citation -- independently corroborating
-    ``spc_numerics.py``'s ``_MOVING_RANGE_D2 = 1.128`` (previously verified
-    only against three secondary sources) from the definition itself.
+    ``d_2 = sqrt(2) * sqrt(2 / pi) = 2 / sqrt(pi)``. A derivation, not a
+    citation -- and since ``spc_numerics.py`` now stores exactly this
+    expression, the value it pins is the one the library uses rather than a
+    rounded approximation of it.
     """
     # Act
     closed_form_d2 = 2.0 / math.sqrt(math.pi)

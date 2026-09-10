@@ -50,7 +50,7 @@ def test_moving_range_sigma_matches_a_hand_computed_value() -> None:
     Identical arrangement to
     ``test_ewma_arl_published_values.test_moving_range_sigma_matches_a_hand_computed_value``:
     every consecutive pair differs by exactly 0.10, so the mean moving range
-    is 0.10 and sigma is 0.10 / 1.128 -- computed here from the definition,
+    is 0.10 and sigma is 0.10 / d2 -- computed here from the definition,
     never read back off any fitted artefact.
     """
     # Arrange -- alternating scores, so |consecutive difference| is 0.10
