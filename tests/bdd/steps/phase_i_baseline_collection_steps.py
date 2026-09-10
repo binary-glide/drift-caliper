@@ -333,12 +333,17 @@ def recording_fails_as_provenance_mismatch(recording_attempt: RecordingAttempt) 
     "the error carries recovery guidance identifying which provenance dimension differs"
 )
 def error_identifies_differing_dimension(recording_attempt: RecordingAttempt) -> None:
-    """The error's context names a non-empty, differing provenance dimension."""
+    """The error's context names at least one differing provenance dimension.
+
+    ``context["mismatches"]`` supersedes ``dimension``/``expected``/
+    ``received`` (ADR-002 Amendment, 2026-09-10) -- a mapping keyed by
+    dimension name, each entry holding a distinct expected/received pair.
+    """
     error = recording_attempt.error
     assert isinstance(error, ProvenanceMismatchError)
-    assert isinstance(error.context["dimension"], str)
-    assert error.context["dimension"] != ""
-    assert error.context["expected"] != error.context["received"]
+    assert len(error.mismatches) > 0
+    for values in error.mismatches.values():
+        assert values["expected"] != values["received"]
 
 
 # --- Scenario: incomplete scoring result (SC7) -------------------------------

@@ -141,14 +141,38 @@ class JudgeRefusalError(CaliperError):
 class ProvenanceMismatchError(CaliperError):
     """An observation's provenance differs from an established signature.
 
+    Raised at both the Phase I intra-baseline boundary
+    (``Baseline.record()``) and the Phase I/II boundary
+    (``compare_provenance()``) -- the same violation, same category, same
+    required context shape, at either boundary (ADR-002 section "Category
+    consistency with Phase I").
+
     Required ``context`` keys:
-        dimension: Which provenance field differs (model version or
-            criteria).
-        expected: The established value.
-        received: The differing value.
+        mismatches: ``dict[str, dict[str, str]]`` keyed by provenance
+            dimension name (``"model_version"``, ``"scoring_criteria"``),
+            each value ``{"expected": ..., "received": ...}``. One entry
+            per differing dimension -- both dimensions are checked before
+            raising, so a dual mismatch reports two entries in a single
+            raise rather than the first dimension checked (ADR-002
+            Amendment, 2026-09-10, "provenance_mismatch context becomes a
+            mismatches mapping"). Dimension keys are semi-open -- they
+            track ``Provenance``'s own field set, not a closed enum like
+            ``category``.
     """
 
     category = "provenance_mismatch"
+
+    @property
+    def mismatches(self) -> dict[str, dict[str, str]]:
+        """Sugar over ``context["mismatches"]`` -- not a second source of truth.
+
+        Lets the common read be ``error.mismatches["model_version"]["expected"]``
+        rather than ``error.context["mismatches"][...]``, and the commonest
+        question -- "did the model change?" -- a membership test:
+        ``"model_version" in error.mismatches``.
+        """
+        mismatches: dict[str, dict[str, str]] = self.context["mismatches"]
+        return mismatches
 
 
 class InvalidObservationError(CaliperError):

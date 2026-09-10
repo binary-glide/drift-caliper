@@ -47,20 +47,22 @@ literal figure compared independently.
    simulation study) -- this is a design decision this test file commits
    to, not one dictated by any single scenario, and it is called out here
    for that reason.
-2. **``DataQualityConcern.kind`` for the zero-variance case.** Unlike
-   ``ProvenanceMismatchError.context["dimension"]`` (BIN-63), which had no
-   canonical example anywhere and was deliberately left unpinned,
+2. **``DataQualityConcern.kind`` for the zero-variance case.** This file's
+   ``kind`` field has always been pinned, for a reason unrelated to
+   ``ProvenanceMismatchError.context["mismatches"]``'s dimension keys
+   (BIN-63/BIN-68, now also exactly pinned since the ADR-002 Amendment,
+   2026-09-10, settled them -- see ``test_baseline.py``):
    ``docs/domain-model.md``'s Value Object Inventory gives a concrete
    worked example for this exact field: ``kind: str -- "E.g.,
    \"zero_variance\""``. Because this is the *only* ``DataQualityConcern``
    kind this story introduces (OQ-1 explicitly closes the door on
    additional concern types for BIN-64), there is no sibling case to
-   distinguish it from the way SC5/SC6 distinguished model-version from
-   criteria mismatches without pinning either string. Given a concrete,
-   documented example and no competing candidate, this file pins
-   ``kind == "zero_variance"`` rather than leaving it unconstrained --
-   flagged here so a different implementation choice is a deliberate,
-   visible decision, not a silently broken test.
+   distinguish it from the way ``test_baseline.py`` distinguishes
+   model-version from criteria mismatches by ``mismatches`` key membership.
+   Given a concrete, documented example and no competing candidate, this
+   file pins ``kind == "zero_variance"`` rather than leaving it
+   unconstrained -- flagged here so a different implementation choice is a
+   deliberate, visible decision, not a silently broken test.
 
 Uses ``ScoringResultFactory``/``ProvenanceFactory`` (``tests/factories.py``)
 for observations where the specific score does not matter, per
@@ -87,8 +89,8 @@ from caliper.errors import InvalidParameterError
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # The only DataQualityConcern.kind this story introduces -- see the module
-# docstring's "decisions" section for why this is pinned rather than left
-# generic, unlike ADR-002's context["dimension"].
+# docstring's "decisions" section for why this is pinned to a concrete
+# literal, per its own worked example in docs/domain-model.md.
 _ZERO_VARIANCE_CONCERN_KIND = "zero_variance"
 
 # An arbitrary fixed score used only to make every observation identical.

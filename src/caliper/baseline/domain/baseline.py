@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 
 from caliper.baseline.domain.data_quality_concern import DataQualityConcern
+from caliper.baseline.domain.provenance_comparison import build_mismatches
 from caliper.baseline.domain.sufficiency_result import SufficiencyResult
 from caliper.errors import (
     InvalidObservationError,
@@ -65,44 +66,35 @@ def _missing_observation_fields(candidate: object) -> list[str]:
 def _reject_if_provenance_differs(observed: Provenance, signature: Provenance) -> None:
     """Raise ``ProvenanceMismatchError`` if ``observed`` differs from ``signature``.
 
-    Checks the model version dimension before the scoring criteria
-    dimension. Equality is Pydantic's exact, field-wise equality on
-    ``ModelVersion``/``ScoringCriteria`` -- no stripping, no case folding
-    (settled 2026-09-10, see ``docs/domain-model.md`` "Criteria equality is
-    exact").
+    Checks both the model version and scoring criteria dimensions before
+    raising -- not a short-circuit on the first difference found, so a
+    dual mismatch is reported in one raise covering both dimensions
+    (ADR-002 Amendment, 2026-09-10, "provenance_mismatch context becomes a
+    mismatches mapping"). Equality is Pydantic's exact, field-wise
+    equality on ``ModelVersion``/``ScoringCriteria`` -- no stripping, no
+    case folding (settled 2026-09-10, see ``docs/domain-model.md``
+    "Criteria equality is exact").
     """
-    if observed.model_version != signature.model_version:
-        raise ProvenanceMismatchError(
-            "observation's judge model version differs from the baseline's "
-            "established provenance",
-            context={
-                "dimension": "model_version",
-                "expected": signature.model_version.value,
-                "received": observed.model_version.value,
-            },
-            recovery_hint=(
-                "Record observations scored by a single, consistently "
-                "pinned judge model version. If the model version has "
-                "genuinely changed, start a new baseline rather than "
-                "mixing measurements from two instruments."
-            ),
-        )
-    if observed.scoring_criteria != signature.scoring_criteria:
-        raise ProvenanceMismatchError(
-            "observation's scoring criteria differs from the baseline's "
-            "established provenance",
-            context={
-                "dimension": "scoring_criteria",
-                "expected": signature.scoring_criteria.value,
-                "received": observed.scoring_criteria.value,
-            },
-            recovery_hint=(
-                "Record observations scored against a single, consistent "
-                "set of criteria. If the rubric has genuinely changed, "
-                "start a new baseline rather than mixing measurements "
-                "taken against two different criteria."
-            ),
-        )
+    mismatches = build_mismatches(
+        expected_model_version=signature.model_version.value,
+        received_model_version=observed.model_version.value,
+        expected_criteria=signature.scoring_criteria.value,
+        received_criteria=observed.scoring_criteria.value,
+    )
+    if not mismatches:
+        return
+
+    raise ProvenanceMismatchError(
+        "observation's provenance differs from the baseline's established provenance",
+        context={"mismatches": mismatches},
+        recovery_hint=(
+            "Record observations scored by a single, consistently pinned "
+            "judge model version and a single, consistent set of scoring "
+            "criteria. If either has genuinely changed, start a new "
+            "baseline rather than mixing measurements from two "
+            "instruments."
+        ),
+    )
 
 
 def _zero_variance_concerns(

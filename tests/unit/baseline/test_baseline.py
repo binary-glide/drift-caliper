@@ -9,19 +9,34 @@ domain model's OQ-2/OQ-6; a positive same-provenance-accepted partition).
 Error assertions follow ADR-002/ADR-008: type + required ``context`` keys
 only -- never message text.
 
-``ProvenanceMismatchError.context["dimension"]`` is deliberately **not**
-pinned to a literal string anywhere below. ADR-002 specifies the required
-*key* (`dimension: str`) but never enumerates its values the way it
-enumerates ``category`` -- unlike ``kind`` (a closed `"missing"`/`"invalid"`
-discriminator) or the fully-listed ``category`` strings, `dimension`'s
-token is an implementation choice this story does not settle. Pinning a
-guessed value (e.g. asserting `== "model_version"`) would silently make
-that guess load-bearing and could fail a correct-but-differently-worded
-implementation for the wrong reason. Instead: `dimension` is asserted as a
-non-empty string everywhere, and
+``ProvenanceMismatchError.context["dimension"]``/``["expected"]``/
+``["received"]`` -- previously asserted as a non-empty, unpinned string
+below, because ADR-002 specified the required *key* but never enumerated
+its values -- is **superseded** by ``context["mismatches"]`` (ADR-002
+Amendment, 2026-09-10, ratified under BIN-68): a
+``dict[str, dict[str, str]]`` keyed by dimension name (``"model_version"``,
+``"scoring_criteria"``), each holding ``{"expected": ..., "received":
+...}``, sugared by a read-only ``.mismatches`` property. Dimension *keys*
+are pinned here (``"model_version"``, ``"scoring_criteria"``) because they
+are no longer an unpinned token to guess at -- they are the exact key names
+the amendment specifies, tracking ``Provenance``'s own field names (see
+``docs/domain-model.md`` OQ-11). This is loosening a prior deliberate
+under-specification, not weakening an assertion: the ADR-002 amendment is
+what makes a precise key pinnable at all.
 ``test_provenance_mismatch_dimension_distinguishes_model_version_from_criteria``
-separately tests the property that actually matters -- that a
-model-version mismatch and a criteria mismatch are told apart.
+is rewritten below to what the amendment's own migration note prescribes --
+a direct membership test (``"model_version" in error.mismatches`` vs.
+``"scoring_criteria" in error.mismatches``) rather than comparing two
+unpinned tokens for inequality.
+
+``_reject_if_provenance_differs`` no longer short-circuits on the first
+differing dimension (BIN-63's original behaviour) -- it checks **both**
+dimensions and raises once, reporting every dimension that differs. This is
+a behaviour change, not only a shape change (ADR-002 Amendment, "Migration
+cost" item 2), so
+``test_raises_provenance_mismatch_error_reporting_both_dimensions_when_both_differ``
+below exercises it directly at the Phase I boundary, not only through
+BIN-68's Phase II ``compare_provenance()`` path.
 
 ``Baseline.record()`` is a scaffold that raises ``NotImplementedError``
 (see ``src/caliper/baseline/domain/baseline.py``) -- every test below that
@@ -207,14 +222,10 @@ def test_observation_retains_score_and_reasoning_from_original_result() -> None:
 def test_raises_provenance_mismatch_error_when_model_version_differs() -> None:
     """SC5: a differing judge model version is rejected; the baseline is unchanged.
 
-    ``context["dimension"]`` is asserted as a non-empty string, not a
-    pinned literal -- ADR-002 specifies the required *key* but not an
-    enumerated value for it (unlike ``category``, which is fully
-    enumerated). Pinning a guessed token here would silently settle an
-    open implementation choice; ``test_provenance_mismatch_dimension_is_
-    distinguishable_between_model_version_and_criteria`` below tests the
-    property that actually matters -- that the two failure modes are
-    told apart -- without guessing the exact string.
+    ``context["mismatches"]`` reports exactly one entry, keyed
+    ``"model_version"`` (ADR-002 Amendment, 2026-09-10) -- the baseline's
+    provenance is the expected value, the rejected observation's is the
+    received value.
     """
     # Arrange
     baseline = Baseline()
@@ -228,10 +239,11 @@ def test_raises_provenance_mismatch_error_when_model_version_differs() -> None:
     # Assert
     error = exc_info.value
     assert error.category == "provenance_mismatch"
-    assert isinstance(error.context["dimension"], str)
-    assert error.context["dimension"] != ""
-    assert error.context["expected"] == "claude-sonnet-a"
-    assert error.context["received"] == "claude-sonnet-b"
+    assert set(error.mismatches.keys()) == {"model_version"}
+    assert error.mismatches["model_version"] == {
+        "expected": "claude-sonnet-a",
+        "received": "claude-sonnet-b",
+    }
     assert baseline.observation_count == 1
     assert baseline.observations == observations_before
 
@@ -242,9 +254,8 @@ def test_raises_provenance_mismatch_error_when_model_version_differs() -> None:
 def test_raises_provenance_mismatch_error_when_criteria_differs() -> None:
     """SC6: differing scoring criteria is rejected; the baseline is unchanged.
 
-    ``context["dimension"]`` is asserted generically -- see the docstring
-    on ``test_raises_provenance_mismatch_error_when_model_version_differs``
-    for why a literal token is not pinned here.
+    ``context["mismatches"]`` reports exactly one entry, keyed
+    ``"scoring_criteria"`` (ADR-002 Amendment, 2026-09-10).
     """
     # Arrange
     baseline = Baseline()
@@ -262,10 +273,11 @@ def test_raises_provenance_mismatch_error_when_criteria_differs() -> None:
     # Assert
     error = exc_info.value
     assert error.category == "provenance_mismatch"
-    assert isinstance(error.context["dimension"], str)
-    assert error.context["dimension"] != ""
-    assert error.context["expected"] == "Evaluate for tone."
-    assert error.context["received"] == "Evaluate for accuracy."
+    assert set(error.mismatches.keys()) == {"scoring_criteria"}
+    assert error.mismatches["scoring_criteria"] == {
+        "expected": "Evaluate for tone.",
+        "received": "Evaluate for accuracy.",
+    }
     assert baseline.observation_count == 1
     assert baseline.observations == observations_before
 
@@ -273,12 +285,12 @@ def test_raises_provenance_mismatch_error_when_criteria_differs() -> None:
 def test_provenance_mismatch_dimension_distinguishes_model_version_from_criteria() -> (
     None
 ):
-    """The reported dimension differs between a model-version mismatch and a
+    """A model-version mismatch and a criteria mismatch report different
 
-    criteria mismatch -- proving the two failure modes are actually told
-    apart, rather than both reporting the same (or an empty) value. This
-    is the behavioural property ADR-002 cares about; the exact string
-    token is deliberately left unpinned (see SC5/SC6 docstrings).
+    ``mismatches`` keys -- proving the two failure modes are actually told
+    apart. Under the ``mismatches`` shape (ADR-002 Amendment, 2026-09-10)
+    this is a direct membership test, not a comparison of two previously
+    unpinned tokens for inequality.
     """
     # Arrange
     model_version_mismatch_baseline = Baseline()
@@ -297,9 +309,51 @@ def test_provenance_mismatch_dimension_distinguishes_model_version_from_criteria
     # Assert
     assert isinstance(model_version_error, ProvenanceMismatchError)
     assert isinstance(criteria_error, ProvenanceMismatchError)
-    assert (
-        model_version_error.context["dimension"] != criteria_error.context["dimension"]
+    assert "model_version" in model_version_error.mismatches
+    assert "scoring_criteria" not in model_version_error.mismatches
+    assert "scoring_criteria" in criteria_error.mismatches
+    assert "model_version" not in criteria_error.mismatches
+
+
+def test_baseline_reports_both_dimensions_when_both_differ() -> None:
+    """``_reject_if_provenance_differs`` checks both dimensions before raising
+
+    (ADR-002 Amendment, "Migration cost" item 2) -- a dual mismatch is
+    reported in **one** raise covering both dimensions, not the first one
+    checked. This is a behaviour change at the Phase I boundary, not only
+    at BIN-68's Phase II ``compare_provenance()`` boundary -- see the
+    merged BIN-68 scenario "Phase II provenance mismatch is classifiable
+    as the same category as a Phase I baseline recording mismatch," which
+    requires structural parity between the two boundaries.
+    """
+    # Arrange
+    baseline = Baseline()
+    baseline.record(
+        _result(model_version="claude-sonnet-a", criteria="Evaluate for tone.")
     )
+    observations_before = baseline.observations
+
+    # Act
+    with pytest.raises(ProvenanceMismatchError) as exc_info:
+        baseline.record(
+            _result(model_version="claude-sonnet-b", criteria="Evaluate for accuracy.")
+        )
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "provenance_mismatch"
+    assert set(error.mismatches.keys()) == {"model_version", "scoring_criteria"}
+    assert error.mismatches["model_version"] == {
+        "expected": "claude-sonnet-a",
+        "received": "claude-sonnet-b",
+    }
+    assert error.mismatches["scoring_criteria"] == {
+        "expected": "Evaluate for tone.",
+        "received": "Evaluate for accuracy.",
+    }
+    assert error.context["mismatches"] == error.mismatches
+    assert baseline.observation_count == 1
+    assert baseline.observations == observations_before
 
 
 # --- Criteria equality is exact (settled OQ-2/OQ-6, 2026-09-10) --------------

@@ -27,6 +27,7 @@ already established for ``DEFAULT_SUFFICIENCY_THRESHOLD``. See
 """
 
 from caliper.baseline.domain.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline
+from caliper.baseline.domain.compare_provenance import compare_provenance
 from caliper.baseline.domain.cusum_fitting import (
     DEFAULT_DIRECTION,
     DEFAULT_REFERENCE_VALUE,
@@ -53,6 +54,7 @@ __all__ = [
     "FittedEWMA",
     "FittedShewhart",
     "SufficiencyResult",
+    "compare_provenance",
     "fit_cusum",
     "fit_ewma",
     "fit_shewhart",

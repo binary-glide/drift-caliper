@@ -20,20 +20,31 @@ Feature: Phase II provenance comparison against fitted artefact
   #   across the boundary, breaking the consistency SC6 enforces.
   #   Open: the comparison MECHANISM only (OQ-2, exact vs normalised).
   #
-  # OQ-1: How the dimension field represents a dual mismatch (both
-  #   model version and criteria differ). The dual-mismatch scenario
-  #   asserts both dimensions are reported without asserting the shape
-  #   the representation takes when plural. Whatever system-architect
-  #   decides applies.
+  # [RATIFIED 2026-09-10] OQ-1: How the dimension field represents a dual
+  #   mismatch (both model version and criteria differ).
+  #   Settled by system-architect: context["mismatches"], a
+  #   dict[str, dict[str, str]] keyed by dimension name ("model_version",
+  #   "scoring_criteria"), each holding {"expected": ..., "received": ...}.
+  #   Replaces the originally-specified dimension/expected/received keys.
+  #   See ADR-002 Amendment (2026-09-10) and docs/domain-model.md OQ-11.
+  #   The scenarios below were written to survive this resolution
+  #   unchanged -- they assert that both dimensions are reported without
+  #   prescribing the shape, and remain correct against it.
   #
-  # OQ-2: What criteria comparison mechanism applies -- exact string
-  #   match or normalised. Inherited from BIN-63 OQ-6. Whatever it
-  #   resolves to applies to both BIN-63 and BIN-68.
+  # [RATIFIED 2026-09-10] OQ-2: What criteria comparison mechanism
+  #   applies -- exact string match or normalised.
+  #   Settled by the product owner: exact string match. No stripping, no
+  #   whitespace collapsing, no case folding, no Unicode normalisation.
+  #   Inherited from BIN-63 OQ-6, applies identically here. See
+  #   docs/domain-model.md "Criteria equality is exact".
   #
-  # OQ-3: Whether an explicit override or acknowledgement path exists
-  #   for an engineer who knowingly changed the judge between phases.
-  #   BIN-64 established that legitimate opt-out must be explicit in
-  #   the engineer's code, not something stumbled into.
+  # [RATIFIED 2026-09-10] OQ-3: Whether an explicit override or
+  #   acknowledgement path exists for an engineer who knowingly changed
+  #   the judge between phases.
+  #   Settled by the product owner: no override. The engineer refits.
+  #   compare_provenance() takes no acknowledge/force parameter of any
+  #   kind -- an acknowledged mismatch is still a mismatch. See
+  #   docs/domain-model.md "Provenance change requires a refit" (OQ-9).
 
   # --- Happy path (BR-1 happy) ---
 
