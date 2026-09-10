@@ -4,20 +4,22 @@ See ``docs/domain-model.md`` (Object Map -- Baseline, the one mutable
 collection) and ``docs/architecture/adr/002-error-contract-exception-taxonomy.md``
 for the error contract enforced by ``record()``.
 
-``check_sufficiency()`` (BIN-64) is a scaffold below -- it always raises
-``NotImplementedError`` so that ``tests/unit/baseline/test_baseline_sufficiency.py``
-and ``tests/bdd/steps/baseline_sufficiency_check_steps.py`` import and run
-without ``ImportError``/``ModuleNotFoundError``; the tests are red because
-the method is unimplemented, not because a name is missing. See its own
-docstring for what ``domain-implementer`` must build.
+``check_sufficiency()`` (BIN-64) is a read-only, advisory inspection of
+whether the baseline has enough observations for reliable fitting -- see
+ADR-005 for the default threshold and its rationale.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
+from caliper.baseline.domain.data_quality_concern import DataQualityConcern
 from caliper.baseline.domain.sufficiency_result import SufficiencyResult
-from caliper.errors import InvalidObservationError, ProvenanceMismatchError
+from caliper.errors import (
+    InvalidObservationError,
+    InvalidParameterError,
+    ProvenanceMismatchError,
+)
 from caliper.measurement import Provenance, ScoringResult
 
 # Fields a candidate observation must expose to be treated as a complete
@@ -35,6 +37,16 @@ _REQUIRED_OBSERVATION_FIELDS = ("score", "reasoning", "provenance")
 # estimation error). Configurable per call via ``check_sufficiency(threshold=...)``
 # (BIN-64 BR-3); this is only the value used when no override is given.
 DEFAULT_SUFFICIENCY_THRESHOLD = 100
+
+# The only DataQualityConcern.kind this story introduces (OQ-1 closes the
+# door on additional concern types for BIN-64) -- see docs/domain-model.md
+# Value Object Inventory's worked example for DataQualityConcern.kind.
+_ZERO_VARIANCE_CONCERN_KIND = "zero_variance"
+
+# Sample variance is undefined for a single point, so a singleton baseline
+# is never flagged as zero-variance -- there is nothing yet to compare it
+# against. An empty baseline (0 observations) is likewise never flagged.
+_MIN_OBSERVATIONS_FOR_VARIANCE_CHECK = 2
 
 
 def _missing_observation_fields(candidate: object) -> list[str]:
@@ -91,6 +103,35 @@ def _reject_if_provenance_differs(observed: Provenance, signature: Provenance) -
                 "taken against two different criteria."
             ),
         )
+
+
+def _zero_variance_concerns(
+    observations: Sequence[ScoringResult],
+) -> list[DataQualityConcern]:
+    """Report a zero-variance concern if every observation shares one score.
+
+    A baseline whose scores are all identical produces a zero variance
+    estimate; fitted control limits would collapse to the mean and be
+    unable to detect any deviation (BIN-64 SC7/SC12). Returns an empty
+    list when there are too few observations to assess variance, or when
+    the scores are not all identical.
+    """
+    if len(observations) < _MIN_OBSERVATIONS_FOR_VARIANCE_CHECK:
+        return []
+    distinct_scores = {observation.score for observation in observations}
+    if len(distinct_scores) > 1:
+        return []
+    return [
+        DataQualityConcern(
+            kind=_ZERO_VARIANCE_CONCERN_KIND,
+            description=(
+                "every recorded observation has an identical score -- the "
+                "baseline has zero variance, so fitted control limits "
+                "would collapse to the mean and be unable to detect any "
+                "deviation"
+            ),
+        )
+    ]
 
 
 class Baseline:
@@ -177,24 +218,19 @@ class Baseline:
     ) -> SufficiencyResult:
         """Check whether this baseline has enough observations for fitting.
 
-        Scaffold only -- always raises ``NotImplementedError`` below. See
-        ``docs/domain-model.md`` (Object Map -- Baseline, Value Object
-        Inventory -- SufficiencyResult/DataQualityConcern) and ADR-005 (the
-        default threshold) for what ``domain-implementer`` (BIN-64) must
-        build: a read-only check (BR-6) that reports the observation
-        count, the threshold applied (``threshold`` if given, else
-        ``DEFAULT_SUFFICIENCY_THRESHOLD``), the gap
-        (``max(0, threshold - observation_count)``), and any data quality
-        concerns (BIN-64 SC7/SC12: an all-identical baseline is flagged
-        with a ``DataQualityConcern(kind="zero_variance", ...)`` regardless
-        of whether the count threshold is met). A non-positive ``threshold``
-        raises ``InvalidParameterError`` (``context["kind"] == "invalid"``,
-        ``context["parameter"] == "threshold"``) before anything else.
-        ``chart_type`` is accepted so the mechanism supports per-chart-type
-        thresholds (BR-5) without requiring them; passing it alongside an
-        explicit ``threshold`` is how it is used in this story (see
-        ``tests/unit/baseline/test_baseline_sufficiency.py``'s module
-        docstring for why no separate per-chart-type registry exists yet).
+        A read-only, advisory inspection (BR-6) -- it never modifies the
+        baseline. Reports the observation count, the threshold applied
+        (``threshold`` if given, else ``DEFAULT_SUFFICIENCY_THRESHOLD``),
+        the gap (``max(0, threshold - observation_count)``), and any data
+        quality concerns (BIN-64 SC7/SC12: an all-identical baseline is
+        flagged with a ``DataQualityConcern(kind="zero_variance", ...)``
+        regardless of whether the count threshold is met). A non-positive
+        ``threshold`` raises ``InvalidParameterError`` before anything
+        else. ``chart_type`` is accepted so the mechanism supports
+        per-chart-type thresholds (BR-5) without requiring them -- it is
+        purely informational here; an explicit ``threshold`` is what
+        governs the determination, per ADR-005 (all chart types currently
+        share the one default until BIN-92's simulation study).
 
         Args:
             threshold: Minimum observation count required to be
@@ -208,12 +244,33 @@ class Baseline:
             A ``SufficiencyResult`` describing the baseline's readiness.
 
         Raises:
-            NotImplementedError: always, in this scaffold.
-            InvalidParameterError: ``threshold`` is zero or negative, once
-                implemented.
+            InvalidParameterError: ``threshold`` is zero or negative.
         """
-        raise NotImplementedError(
-            "Baseline.check_sufficiency() is not yet implemented -- see "
-            "BIN-64 (domain-implementer) and docs/domain-model.md (Object "
-            "Map -- Baseline, Value Object Inventory -- SufficiencyResult)"
+        del chart_type  # informational only in this story -- see docstring
+
+        effective_threshold = (
+            threshold if threshold is not None else DEFAULT_SUFFICIENCY_THRESHOLD
+        )
+        if effective_threshold <= 0:
+            raise InvalidParameterError(
+                "sufficiency threshold must be a positive integer",
+                context={
+                    "parameter": "threshold",
+                    "constraint": "must be a positive integer",
+                    "kind": "invalid",
+                    "provided": threshold,
+                },
+                recovery_hint=(
+                    "Pass a positive threshold, or omit it to use the "
+                    "library default (DEFAULT_SUFFICIENCY_THRESHOLD)."
+                ),
+            )
+
+        observation_count = self.observation_count
+        return SufficiencyResult(
+            is_sufficient=observation_count >= effective_threshold,
+            observation_count=observation_count,
+            threshold=effective_threshold,
+            gap=max(0, effective_threshold - observation_count),
+            data_quality_concerns=_zero_variance_concerns(self._observations),
         )
