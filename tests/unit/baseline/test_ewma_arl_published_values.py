@@ -63,6 +63,40 @@ amendment practised for its own citation gap.
 note should be updated to cite the table entries directly rather than via
 the `spc` package's reproduction.**
 
+## Third link: reproduced from the method, not from any implementation
+
+Both (lambda, L) pairs below were **independently recomputed** while reviewing
+this file, using a Brook & Evans / Lucas & Saccucci Markov-chain
+discretisation written from the published method rather than copied from
+`spc`, R, or any other implementation:
+
+    lambda=0.50, L=3.071  ->  ARL0 = 499.9   (table: 500)
+    lambda=0.03, L=2.437  ->  ARL0 = 499.8   (table: 500)
+
+That calculation was itself validated before being trusted: as lambda -> 1 an
+EWMA degenerates to a Shewhart individuals chart, whose in-control ARL has the
+closed form 1 / (2 * Phi(-L)). The chain reproduces it to four decimal places
+at lambda = 0.999 for three different L values.
+
+The self-test was not ceremony. The first version of that chain was wrong by a
+factor of exactly 2.0000 -- it discretised 2m cells of half-width h/m, spanning
+(-2h, +2h) instead of (-h, +h), so it modelled limits at twice their true
+width. It reported ~1000 against the table's 500 and would have been read as
+"the published constants are wrong" had the closed-form check not caught it
+first.
+
+**Carry that forward to BIN-84 and to BIN-94/BIN-95.** A verification routine
+is code, it can be wrong, and a disagreement with a published table is at
+least as likely to be a bug in the checker as in the table. Validate the
+checker against a case with a known closed form before trusting what it says
+about a case without one.
+
+So the chain of evidence for these two constants is: the paper (paywalled,
+not read) -> `spc`'s documentation, which cites it and reproduces it by
+Nystroem quadrature -> an independent Markov-chain recomputation here, itself
+validated against a closed form. Three routes, two of them computational and
+mutually independent, agreeing to within 0.1.
+
 ## Why sigma does not need to be controlled
 
 The in-control (zero-state) ARL of an EWMA chart depends only on the
