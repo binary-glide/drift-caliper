@@ -3,19 +3,12 @@
 See ``docs/domain-model.md`` (Value Object Inventory -- SufficiencyResult)
 and ADR-005 (the library's default minimum threshold).
 
-Scaffold only: this value object's shape (the five fields, frozen, no
-validators -- the domain model specifies none beyond field presence) is
-already exactly what ``docs/domain-model.md`` documents, so there is
-nothing further for ``domain-implementer`` to add here. It exists as its
-own module so ``tests/unit/baseline/test_baseline_sufficiency.py`` and
-``tests/bdd/steps/baseline_sufficiency_check_steps.py`` can import it
-before ``Baseline.check_sufficiency()`` (which actually produces one) is
-implemented -- see ``check_sufficiency()``'s docstring in ``baseline.py``.
+Produced by ``Baseline.check_sufficiency()``. The five fields are exactly
+those ``docs/domain-model.md`` specifies; the domain model requires no
+validators beyond field presence.
 """
 
 from __future__ import annotations
-
-from collections.abc import Sequence
 
 from pydantic import BaseModel, ConfigDict
 
@@ -27,6 +20,19 @@ class SufficiencyResult(BaseModel):
 
     Read-only inspection (BIN-64 BR-6) -- producing one never modifies the
     baseline it was computed from. Immutable; equality by value.
+
+    ``data_quality_concerns`` is a ``tuple``, not a ``Sequence`` holding a
+    list. ``ConfigDict(frozen=True)`` stops a field being *rebound*; it does
+    not freeze what the field points at, so a list-typed field left this
+    type's documented immutability false -- a caller could ``.append()`` to a
+    result the domain model promises cannot change (BIN-108). Pydantic
+    coerces a list passed to the constructor into a tuple, so this costs
+    callers nothing, and it makes the model hashable, which the list field
+    had silently prevented.
+
+    ``Baseline.observations`` wraps in ``tuple()`` for the same reason.
+    **Tuples are the house convention for sequence fields on immutable
+    domain types** -- see ``docs/domain-model.md``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -35,4 +41,4 @@ class SufficiencyResult(BaseModel):
     observation_count: int
     threshold: int
     gap: int
-    data_quality_concerns: Sequence[DataQualityConcern]
+    data_quality_concerns: tuple[DataQualityConcern, ...]

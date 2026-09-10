@@ -75,6 +75,7 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
 from caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
@@ -474,7 +475,7 @@ def test_reports_no_zero_variance_concern_when_the_baseline_holds_one_observatio
     result = baseline.check_sufficiency()
 
     # Assert
-    assert result.data_quality_concerns == []
+    assert result.data_quality_concerns == ()
 
 
 def test_reports_no_zero_variance_concern_when_exactly_two_scores_differ() -> None:
@@ -489,4 +490,53 @@ def test_reports_no_zero_variance_concern_when_exactly_two_scores_differ() -> No
     result = baseline.check_sufficiency()
 
     # Assert
-    assert result.data_quality_concerns == []
+    assert result.data_quality_concerns == ()
+
+
+# --- Documented immutability must actually hold (BIN-108) ---
+#
+# `ConfigDict(frozen=True)` stops a field being *rebound*; it does not freeze
+# what the field points at. While `data_quality_concerns` held a list, this
+# type's documented "Immutable after creation" was false — a caller could
+# `.append()` to a result the domain model promises cannot change, and no test
+# noticed, at 100% line coverage.
+
+
+def test_rejects_in_place_mutation_of_the_data_quality_concerns() -> None:
+    # Arrange -- a baseline that genuinely produces a concern, so there is a
+    # populated sequence to attempt to mutate.
+    baseline = _baseline_with_observations(2, score=0.75)
+    result = baseline.check_sufficiency()
+    concerns_before = result.data_quality_concerns
+
+    # Act / Assert -- a tuple has no `append`, so the attempt fails rather
+    # than silently succeeding as it did before BIN-108.
+    with pytest.raises(AttributeError):
+        result.data_quality_concerns.append(  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            DataQualityConcern(kind="injected", description="should not land")
+        )
+
+    assert result.data_quality_concerns == concerns_before
+
+
+def test_rejects_rebinding_the_data_quality_concerns() -> None:
+    # Arrange
+    baseline = _baseline_with_observations(2, score=0.75)
+    result = baseline.check_sufficiency()
+
+    # Act / Assert -- the frozen-model half of the guarantee, which was
+    # already true; asserted here so both halves are pinned together.
+    with pytest.raises(ValidationError):
+        result.data_quality_concerns = ()  # ty: ignore[invalid-assignment]
+
+
+def test_result_is_hashable_so_it_can_be_used_as_a_key_or_set_member() -> None:
+    # Arrange -- a consequence of the same defect: a list-typed field made
+    # this "equality by value" type unhashable, so it could not go in a set.
+    baseline = _baseline_with_observations(2, score=0.75)
+
+    # Act
+    result = baseline.check_sufficiency()
+
+    # Assert
+    assert len({result, baseline.check_sufficiency()}) == 1

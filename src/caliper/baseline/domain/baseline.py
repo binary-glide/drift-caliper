@@ -107,21 +107,23 @@ def _reject_if_provenance_differs(observed: Provenance, signature: Provenance) -
 
 def _zero_variance_concerns(
     observations: Sequence[ScoringResult],
-) -> list[DataQualityConcern]:
+) -> tuple[DataQualityConcern, ...]:
     """Report a zero-variance concern if every observation shares one score.
 
     A baseline whose scores are all identical produces a zero variance
     estimate; fitted control limits would collapse to the mean and be
     unable to detect any deviation (BIN-64 SC7/SC12). Returns an empty
-    list when there are too few observations to assess variance, or when
-    the scores are not all identical.
+    empty tuple when there are too few observations to assess variance, or
+    when the scores are not all identical. A tuple, not a list: sequence
+    fields on immutable domain types are tuples (BIN-108), so that
+    ``SufficiencyResult``'s documented immutability actually holds.
     """
     if len(observations) < _MIN_OBSERVATIONS_FOR_VARIANCE_CHECK:
-        return []
+        return ()
     distinct_scores = {observation.score for observation in observations}
     if len(distinct_scores) > 1:
-        return []
-    return [
+        return ()
+    return (
         DataQualityConcern(
             kind=_ZERO_VARIANCE_CONCERN_KIND,
             description=(
@@ -130,8 +132,8 @@ def _zero_variance_concerns(
                 "would collapse to the mean and be unable to detect any "
                 "deviation"
             ),
-        )
-    ]
+        ),
+    )
 
 
 class Baseline:

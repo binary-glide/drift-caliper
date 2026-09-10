@@ -553,7 +553,40 @@ holds.
 | `observation_count` | `int` | Current count in the baseline |
 | `threshold` | `int` | The minimum that was applied (configured or default) |
 | `gap` | `int` | Observations still needed; 0 when sufficient |
-| `data_quality_concerns` | `Sequence[DataQualityConcern]` | E.g., zero variance (BIN-64 SC7) |
+| `data_quality_concerns` | `tuple[DataQualityConcern, ...]` | E.g., zero variance (BIN-64 SC7). A tuple, not a list — see the convention below (BIN-108) |
+
+### Sequence fields on immutable types are tuples
+
+**Convention, settled under `BIN-108`: any sequence-typed field on an
+immutable domain type is a `tuple`, never a `list`.**
+
+`ConfigDict(frozen=True)` stops a field being **rebound**. It does not freeze
+what the field points at. So while `SufficiencyResult.data_quality_concerns`
+held a list, this document's "Immutable after creation" was simply false — a
+caller could `.append()` to a result and it took, with no error:
+
+```python
+r = baseline.check_sufficiency()
+r.data_quality_concerns.append("injected")   # succeeded; length went 1 -> 2
+```
+
+`Baseline.observations` already wrapped in `tuple()` for exactly this reason;
+`SufficiencyResult` did not, which is what made it an oversight rather than a
+decision.
+
+Three things worth knowing before typing the next one:
+
+- **It costs callers nothing.** Pydantic coerces a list passed to the
+  constructor into a tuple, so constructor ergonomics are unchanged.
+- **It restores hashability.** A list field silently made an "equality by
+  value" type unhashable — it could not go in a set or serve as a dict key.
+- **`mypy` enforces it at the call site, Pydantic does not.** Runtime coercion
+  hides a producer still returning a list; the strict type check does not. Fix
+  the producer's return type rather than leaning on coercion.
+
+⚠️ **Line coverage cannot see this class of defect.** The field was at 100%
+coverage while its documented immutability was false. Pin it with a test that
+attempts in-place mutation.
 
 ### `DataQualityConcern`
 
