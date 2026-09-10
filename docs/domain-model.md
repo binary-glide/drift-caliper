@@ -483,7 +483,7 @@ holds.
 ### `Provenance`
 
 **Carried by:** `ScoringResult.provenance`, `Baseline.provenance_signature`, `FittedControlLimits` (via two protocol properties)
-**Equality:** compares both dimensions (model version AND criteria), via Pydantic's field-wise equality on the wrapped `ModelVersion`/`ScoringCriteria` instances. **OQ-2 (open):** whether comparison is exact string match or normalised is unresolved. The need for equality is established (BIN-63 provenance checking, BIN-68 phase boundary comparison); the mechanism is not.
+**Equality:** compares both dimensions (model version AND criteria), via Pydantic's field-wise equality on the wrapped `ModelVersion`/`ScoringCriteria` instances — which is **exact string comparison**, settled 2026-09-10 (was OQ-2). No stripping, no case folding, no Unicode normalisation. See "Criteria equality is exact" in Open Questions.
 **Constraints:**
 - Both dimensions required
 - Immutable after creation
@@ -713,7 +713,7 @@ disposition.
 | # | Question | Owner | Blocks | Source | Status |
 |---|----------|-------|--------|--------|--------|
 | 1 | ~~Where do scoring criteria attach? At judge creation, at monitoring setup, or per-call?~~ | — | — | BIN-58 OQ-3 | **SETTLED** — ADR-006 §2: judge creation *and/or* per-call; per-call wins for that call only, without mutating the frozen `Judge`. "Monitoring setup" explicitly rejected as a third point in R1 (no `Monitor` construct exists). |
-| 2 | **Criteria comparison mechanism.** Exact string match or normalised comparison for provenance equality? Affects both intra-baseline checking (BIN-63) and cross-phase comparison (BIN-68). | system-architect | `Provenance` equality semantics | BIN-63 OQ-6, BIN-68 OQ-2 | **Open.** ADR-006 §7 explicitly declined to settle this, naming it out of scope for BIN-102/`BIN-59` and owned by BIN-63/BIN-68 instead. Belongs to whichever of those E2 stories lands first. |
+| 2 | ~~Criteria comparison mechanism.~~ | — | — | BIN-63 OQ-6, BIN-68 OQ-2 | **SETTLED** — product owner, 2026-09-10: **exact string match.** No normalisation of any kind. See "Criteria equality is exact" below. |
 | 3 | **Sufficiency check: internal or external to fitting?** Does fitting call sufficiency internally, or does the engineer call it first? Both designs satisfy the feature files. | domain-modeller | Fitting operation structure | BIN-65/94/95 OQ-3 | **Open.** Untouched by ADR-006/007/008. Belongs to BIN-65/94/95. |
 | 4 | **Sufficiency override for testing.** Should the engineer be able to bypass sufficiency enforcement for exploratory fitting? | domain-modeller | Fitting operation parameters | BIN-65/94/95 OQ-4 | **Open.** Untouched. Belongs to BIN-65/94/95. |
 | 5 | ~~Score range. Fixed [0, 1], engineer-declared range, or unconstrained?~~ | — | — | BIN-59 OQ-2 | **SETTLED** — ADR-006 §5: unconstrained (no fixed or engineer-declared range), but the score must be a **finite** float — `NaN` and `±inf` are rejected as `InvalidParameterError`. A future fitting-time range check remains additive and is not foreclosed. |
@@ -723,6 +723,50 @@ disposition.
 | 9 | ~~Explicit override for known provenance change between phases.~~ | — | — | BIN-68 OQ-3 | **SETTLED** — product owner, 2026-09-10: **no override. The engineer refits.** `ProvenanceMismatchError` raises unconditionally; `compare_provenance()` takes no acknowledgement or force parameter. See "Provenance change requires a refit" below. |
 | 10 | ~~Whether scoring accepts empty agent output.~~ | — | — | BIN-59 OQ-5 | **SETTLED** — ADR-006 §6: rejected. Empty or whitespace-only `agent_output` raises `InvalidParameterError` before any provider call. An engineer who wants "no response" scored passes their own sentinel string. |
 | 11 | **Dual mismatch representation.** When both provenance dimensions differ, what shape does the error context take? (String, list, or paired entries.) | system-architect | `ProvenanceMismatchError.context["dimension"]` | BIN-68 OQ-1 | **Open.** Untouched — `BIN-59` never compares two `Provenance` instances, only constructs and reads one (ADR-006, Related decisions). Belongs to BIN-68. |
+
+### Criteria equality is exact (OQ-2, settled 2026-09-10)
+
+**Decision: provenance comparison is exact string equality on both
+dimensions.** No stripping, no whitespace collapsing, no case folding, no
+Unicode normalisation. `Provenance` equality is Pydantic's field-wise
+equality over `ModelVersion` and `ScoringCriteria`, which is exactly this —
+so **no comparison code is needed**, and none should be written.
+
+**Rationale — this follows from decisions already taken, rather than being a
+fresh call.**
+
+`ModelVersion` and `ScoringCriteria` *deliberately* preserve surrounding
+whitespace byte-for-byte. That is not incidental: `BIN-57` `SC7` and
+`BIN-58`'s boundary scenario both assert it, and both were written to pin it
+against exactly the well-meaning "helpful" trimming a normalising comparison
+would reintroduce at the other end. Preserving a value on the way in and then
+ignoring part of it on the way out would be incoherent.
+
+Normalisation is also a claim about what does not matter *semantically* in
+someone else's rubric, and Caliper cannot know that. Whitespace is the
+obvious candidate — but is case? A rubric that says "MUST be accurate" is
+plausibly emphasising something a lowercase "must" does not. Every
+normalisation rule is a guess about another team's intent.
+
+An engineer who wants insensitivity has a clean route: normalise the criteria
+text before passing it in. That is the caller deciding, consistent with every
+other boundary in this library.
+
+**Asymmetry settles the direction.** Relaxing exact to normalised later is
+non-breaking for anyone whose criteria already match. Tightening normalised
+to exact later would break every consumer relying on the leniency. Start
+strict — the same reasoning as the fail-loudly ruling on unpinned models
+(`BIN-57`) and the empty-output rejection (ADR-006 §6).
+
+⚠️ **Known cost, and it compounds.** A trivial reformat of a rubric — a
+reflowed line, an added trailing newline — invalidates a baseline and, under
+`OQ-9`'s no-override ruling, forces a full refit at ADR-005's 100-observation
+minimum. That is a real papercut on the OMTM.
+
+**`BIN-105` is the mitigation** (refit by re-scoring retained outputs), and
+this makes its case stronger rather than weaker. If a report ever arrives of
+someone losing a baseline to a whitespace change, that is a signal to revisit
+this decision with evidence — not a reason to pre-emptively soften it now.
 
 ### Provenance change requires a refit (OQ-9, settled 2026-09-10)
 
