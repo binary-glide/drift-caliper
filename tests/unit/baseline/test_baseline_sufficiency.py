@@ -439,3 +439,54 @@ def test_gap_and_sufficiency_follow_the_count_and_threshold_for_any_combination(
     assert result.threshold == threshold
     assert result.gap == max(0, threshold - count)
     assert result.is_sufficient == (count >= threshold)
+
+
+# --- Zero-variance boundary (mutation-testing findings, BIN-64 review) ---
+#
+# `_zero_variance_concerns` guards on two thresholds, and mutmut showed both
+# were unpinned: `len(observations) < 2` survived mutation to `<= 2`, and
+# `len(distinct_scores) > 1` survived mutation to `> 2`. Coverage was already
+# 100% on the function -- every line ran, but nothing constrained where the
+# boundaries sat. These three tests pin them.
+
+
+def test_flags_zero_variance_when_exactly_two_observations_share_a_score() -> None:
+    # Arrange -- two is the smallest count at which variance is defined, and
+    # the exact point the `< 2` guard must stop suppressing the concern.
+    baseline = _baseline_with_observations(2, score=0.75)
+
+    # Act
+    result = baseline.check_sufficiency()
+
+    # Assert
+    assert len(result.data_quality_concerns) == 1
+    assert result.data_quality_concerns[0].kind == _ZERO_VARIANCE_CONCERN_KIND
+
+
+def test_reports_no_zero_variance_concern_when_the_baseline_holds_one_observation() -> (
+    None
+):
+    # Arrange -- sample variance is undefined for a singleton, so the concern
+    # must not fire however tempting a "all scores identical" reading is.
+    baseline = _baseline_with_observations(1, score=0.75)
+
+    # Act
+    result = baseline.check_sufficiency()
+
+    # Assert
+    assert result.data_quality_concerns == []
+
+
+def test_reports_no_zero_variance_concern_when_exactly_two_scores_differ() -> None:
+    # Arrange -- two distinct values is the smallest genuine variance there
+    # can be, and the exact point the `> 1` guard must start suppressing.
+    baseline = Baseline()
+    shared_provenance = ProvenanceFactory()
+    baseline.record(ScoringResultFactory(provenance=shared_provenance, score=0.25))
+    baseline.record(ScoringResultFactory(provenance=shared_provenance, score=0.75))
+
+    # Act
+    result = baseline.check_sufficiency()
+
+    # Assert
+    assert result.data_quality_concerns == []
