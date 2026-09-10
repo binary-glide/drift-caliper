@@ -88,3 +88,12 @@ class ScoringCriteria(BaseModel):
                 ),
             )
         return v
+
+    def __str__(self) -> str:
+        """Return the wrapped rubric text directly (BIN-110 P3).
+
+        Mirrors ``ModelVersion.__str__`` -- the readback fix applies
+        uniformly to both value-object wrappers ``Provenance`` holds.
+        ``repr()`` is untouched.
+        """
+        return self.value

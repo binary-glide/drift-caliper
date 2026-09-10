@@ -80,14 +80,20 @@ from pydantic import ValidationError
 from caliper.baseline import (
     DEFAULT_SMOOTHING_PARAM,
     DEFAULT_SUFFICIENCY_THRESHOLD,
-    MAX_MEANINGFUL_ARL,
-    MAX_SMOOTHING_PARAM,
-    MIN_MEANINGFUL_ARL,
-    MIN_SMOOTHING_PARAM,
     Baseline,
     FittedControlLimits,
     FittedEWMA,
     fit_ewma,
+)
+
+# MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
+# re-exported from caliper.baseline, so tests that need the exact bound
+# values import them from the owning submodule directly.
+from caliper.baseline.domain.ewma_fitting import (
+    MAX_MEANINGFUL_ARL,
+    MAX_SMOOTHING_PARAM,
+    MIN_MEANINGFUL_ARL,
+    MIN_SMOOTHING_PARAM,
 )
 from caliper.errors import (
     CaliperError,

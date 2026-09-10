@@ -131,7 +131,27 @@ The `Baseline` is the only mutable object in the domain. Everything else is immu
 |-----------|-------|--------|--------|
 | `record(result)` | `ScoringResult` | `None` (mutates baseline) | `ProvenanceMismatchError`, `InvalidObservationError` |
 | `check_sufficiency(threshold?, chart_type?)` | Optional threshold override, optional chart type | `SufficiencyResult` | `InvalidParameterError` (non-positive threshold) |
-| Read: iterate observations, inspect count, inspect provenance signature | — | — | — |
+| `len(baseline)`, `iter(baseline)`, `repr(baseline)` | — | `int`, iterator of `ScoringResult`, `str` | — |
+| Read: inspect count, inspect provenance signature | — | — | — |
+
+**Baseline is a collection; result types are not (BIN-110).** `Baseline`
+implements `__len__`, `__iter__` and `__repr__`, so it behaves the way an
+engineer already expects a container to behave — including being falsy when
+empty, which Python derives from `__len__` without a `__bool__` of its own.
+Iteration yields from the same fresh tuple `observations` returns, so no
+caller reaches the mutable internal list.
+
+`SufficiencyResult` defines `__bool__` returning `is_sufficient`. Before
+BIN-110 it inherited object identity truthiness, so `if
+baseline.check_sufficiency():` was always true and would fit control limits
+from an empty baseline — authoritative-looking limits derived from nothing,
+the exact failure this library exists to prevent.
+
+`ScoringResult` and the three fitted artefacts raise `TypeError` from
+`__bool__`. None of them has a “failed” instance, so any truth value would
+have to be invented; leaving Python's default would relocate the same trap
+onto four more types. The rule is: truthiness is forbidden unless a yes/no
+field already carries the meaning.
 
 **Design note:** The Baseline has aggregate-like properties (enforces invariants on its contents, controls access to its observations) without the transactional semantics that define an aggregate in DDD. No transaction wraps a `record()` call; the invariant is enforced synchronously in a single-threaded library call.
 

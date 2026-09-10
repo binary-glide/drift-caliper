@@ -92,6 +92,23 @@ def test_differs_by_provided_value_when_criteria_empty_vs_whitespace() -> None:
     assert empty_provided != whitespace_provided
 
 
+# --- Readback ergonomics (BIN-110 P3) -----------------------------------------
+
+
+def test_str_returns_the_wrapped_value_directly() -> None:
+    """Readback: ``str(...)`` returns the raw rubric text, not a wrapper repr.
+
+    Mirrors ``tests/unit/measurement/test_model_version.py`` -- the
+    readback fix applies uniformly to both value-object wrappers
+    ``Provenance`` holds.
+    """
+    # Arrange
+    criteria = ScoringCriteria(value="Evaluate for factual accuracy.")
+
+    # Act / Assert
+    assert str(criteria) == "Evaluate for factual accuracy."
+
+
 def test_preserves_criteria_with_whitespace_and_punctuation() -> None:
     """SC4: the reported criteria match the original text exactly."""
     # Arrange

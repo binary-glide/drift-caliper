@@ -153,3 +153,26 @@ def test_preserves_any_non_blank_model_version_character_for_character(
 
     # Assert
     assert judge.model_version.value == model_version
+
+
+# --- Readback ergonomics (BIN-110 P3) -----------------------------------------
+
+
+def test_model_version_reads_back_as_the_original_string_via_str() -> None:
+    """The engineer-facing readback: a str goes in, ``str(...)`` gives it back.
+
+    Before BIN-110, ``judge.model_version`` read back as
+    ``ModelVersion(value='...')`` in a REPL/log line, needing ``.value`` to
+    recover the original string. ``judge.model_version`` is still a
+    ``ModelVersion`` (ADR-006 section 7; ``.value`` keeps working, asserted
+    below) -- only ``str()`` no longer requires it. See
+    ``tests/unit/measurement/test_model_version.py`` for the unit-level
+    version of this same fix.
+    """
+    # Arrange
+    model_version = "claude-sonnet-4-5-20250929"
+    judge = Judge.create(model_version=model_version)
+
+    # Act / Assert
+    assert str(judge.model_version) == model_version
+    assert judge.model_version.value == model_version  # unchanged accessor

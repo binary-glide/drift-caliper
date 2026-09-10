@@ -83,3 +83,15 @@ class ModelVersion(BaseModel):
                 ),
             )
         return v
+
+    def __str__(self) -> str:
+        """Return the wrapped string directly (BIN-110 P3).
+
+        A ``str`` goes in at ``Judge.create(model_version=...)``; without
+        this, reading it back (an f-string, a log line) produced Pydantic's
+        default ``"ModelVersion(value='...')"``, needing ``.value`` to
+        recover the original string. ``repr()`` is untouched -- it still
+        identifies the wrapper type, which is the correct behaviour for a
+        REPL echo (``CLAUDE.md``: "Every public type reprs usefully").
+        """
+        return self.value

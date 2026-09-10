@@ -18,6 +18,8 @@ the convention
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -32,6 +34,10 @@ class FittedEWMA(BaseModel):
     ``ConfigDict(frozen=True)`` -- attempting to reassign any field raises
     ``pydantic_core.ValidationError`` (ADR-002 section 7), not a
     ``CaliperError``.
+
+    ``bool()`` is forbidden (BIN-110 P0/general ruling): a ``FittedEWMA``
+    that exists already succeeded -- there is no "unfitted" instance to
+    distinguish from a fitted one. See ``tests/unit/test_truthiness.py``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -54,3 +60,10 @@ class FittedEWMA(BaseModel):
     ucl: float
     lcl: float
     cl: float
+
+    def __bool__(self) -> NoReturn:
+        """Forbid truthiness -- see the class docstring's BIN-110 note."""
+        raise TypeError(
+            "FittedEWMA has no True/False meaning; check its `ucl`/`lcl`/`cl` "
+            "or other fields directly instead of using it in a boolean context"
+        )

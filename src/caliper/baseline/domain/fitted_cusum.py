@@ -25,6 +25,8 @@ this. Do not read ``decision_interval`` as a UCL/LCL analogue.
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -42,6 +44,10 @@ class FittedCUSUM(BaseModel):
     (BIN-94 BR-11) via ``ConfigDict(frozen=True)`` -- attempting to reassign
     any field raises ``pydantic_core.ValidationError`` (ADR-002 section 7),
     not a ``CaliperError``.
+
+    ``bool()`` is forbidden (BIN-110 P0/general ruling): a ``FittedCUSUM``
+    that exists already succeeded -- there is no "unfitted" instance to
+    distinguish from a fitted one. See ``tests/unit/test_truthiness.py``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -74,3 +80,11 @@ class FittedCUSUM(BaseModel):
     direction: str
     """``"two_sided"`` (default), ``"lower"`` (degradation only), or
     ``"upper"`` (improvement only, i.e. baseline staleness)."""
+
+    def __bool__(self) -> NoReturn:
+        """Forbid truthiness -- see the class docstring's BIN-110 note."""
+        raise TypeError(
+            "FittedCUSUM has no True/False meaning; check its "
+            "`decision_interval` or other fields directly instead of using "
+            "it in a boolean context"
+        )

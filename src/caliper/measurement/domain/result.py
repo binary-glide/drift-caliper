@@ -7,6 +7,7 @@ section 7.
 from __future__ import annotations
 
 import math
+from typing import NoReturn
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -20,6 +21,14 @@ class ScoringResult(BaseModel):
     Attempting to reassign any field after creation raises Pydantic's
     ``ValidationError`` -- not a ``CaliperError`` (ADR-002 section 7;
     immutability violations are not part of the exception taxonomy).
+
+    ``bool()`` is forbidden (BIN-110 P0/general ruling): there is no
+    "unsuccessful" ``ScoringResult`` -- if an engineer holds one, the
+    operation that produced it already succeeded (``Judge.score()`` raises
+    on the way there otherwise). Leaving Pydantic's silent always-``True``
+    default in place would relocate the same truthiness trap
+    ``SufficiencyResult`` had, rather than fix its cause -- so this raises
+    loudly instead. See ``tests/unit/test_truthiness.py``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -55,3 +64,10 @@ class ScoringResult(BaseModel):
                 ),
             )
         return v
+
+    def __bool__(self) -> NoReturn:
+        """Forbid truthiness -- see the class docstring's BIN-110 note."""
+        raise TypeError(
+            "ScoringResult has no True/False meaning; check its `score` or "
+            "other fields directly instead of using it in a boolean context"
+        )

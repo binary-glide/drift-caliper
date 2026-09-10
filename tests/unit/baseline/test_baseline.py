@@ -508,3 +508,125 @@ def test_recording_errors_are_distinguishable_by_category_with_distinct_guidance
     assert len({type(error) for error in errors}) == 2
     assert len({error.category for error in errors}) == 2
     assert len({error.recovery_hint for error in errors}) == 2
+
+
+# --- Collection protocol (BIN-110 P1) -----------------------------------------
+#
+# Before BIN-110: ``len(baseline)`` raised ``TypeError``, ``for obs in
+# baseline`` raised ``TypeError``, and ``repr(baseline)`` printed
+# ``<...Baseline object at 0x...>``. ``.observation_count`` and
+# ``.observations`` already worked, but the obvious Python collection forms
+# did not -- a collection answering neither ``len()`` nor iteration is not
+# holding up its end of Python. ``observation_count`` is KEPT (it reads
+# better in ``SufficiencyResult``'s context and in log lines, per the
+# ticket) -- ``__len__``/``__iter__``/``__repr__`` are added alongside it,
+# not instead of it.
+
+
+def test_len_returns_the_observation_count() -> None:
+    """``len(baseline)`` must agree with ``.observation_count``, not raise."""
+    # Arrange
+    baseline = Baseline()
+    baseline.record(ScoringResultFactory())
+    baseline.record(ScoringResultFactory(provenance=baseline.provenance_signature))
+
+    # Act / Assert
+    assert len(baseline) == 2
+    assert len(baseline) == baseline.observation_count
+
+
+def test_len_of_empty_baseline_is_zero() -> None:
+    """An empty baseline must answer ``len()``, not raise ``TypeError``."""
+    assert len(Baseline()) == 0
+
+
+def test_is_iterable_and_yields_observations_in_recording_order() -> None:
+    """``for obs in baseline`` must work and preserve recording order."""
+    # Arrange
+    baseline = Baseline()
+    shared_provenance = ProvenanceFactory()
+    results = [
+        ScoringResultFactory(provenance=shared_provenance, score=score)
+        for score in (0.9, 0.1, 0.5)
+    ]
+    for result in results:
+        baseline.record(result)
+
+    # Act
+    iterated = list(baseline)
+
+    # Assert
+    assert iterated == results
+    assert iterated == list(baseline.observations)
+
+
+def test_iterating_an_empty_baseline_yields_nothing() -> None:
+    """An empty baseline must be iterable, yielding zero observations."""
+    assert list(Baseline()) == []
+
+
+def test_supports_membership_test_via_iteration() -> None:
+    """``x in baseline`` -- the natural consequence of being iterable."""
+    # Arrange
+    baseline = Baseline()
+    result = ScoringResultFactory()
+    other = ScoringResultFactory(provenance=result.provenance)
+    baseline.record(result)
+
+    # Act / Assert
+    assert result in baseline
+    assert other not in baseline
+
+
+def test_empty_baseline_is_falsy_as_a_natural_consequence_of_len() -> None:
+    """An empty collection is falsy -- the standard Python collection contract.
+
+    This falls out of adding ``__len__`` (Python uses it for ``bool()``
+    when ``__bool__`` is absent); no separate ``__bool__`` is needed or
+    added. Unlike ``SufficiencyResult``/``ScoringResult``/``Fitted*`` (see
+    ``tests/unit/test_truthiness.py``), ``Baseline`` is a genuine mutable
+    collection, so "empty is falsy" is the correct, unambiguous meaning --
+    not the trap those immutable result types' identity-truthiness was.
+    """
+    assert not Baseline()
+
+
+def test_nonempty_baseline_is_truthy() -> None:
+    """The positive partition of the same collection contract."""
+    baseline = Baseline()
+    baseline.record(ScoringResultFactory())
+
+    assert baseline
+
+
+def test_repr_reports_class_name_and_observation_count() -> None:
+    """``repr(baseline)`` must be a useful REPL/log/debugger representation.
+
+    Before BIN-110, ``Baseline`` had no ``__repr__`` and printed as
+    ``<caliper.baseline.domain.baseline.Baseline object at 0x...>`` --
+    useless in a REPL, a log line, or a debugger (``CLAUDE.md``: "Every
+    public type reprs usefully"). This does not pin an exact format string
+    (an implementation detail) -- it pins the two facts a useful repr must
+    surface.
+    """
+    # Arrange
+    baseline = Baseline()
+    baseline.record(ScoringResultFactory())
+    baseline.record(ScoringResultFactory(provenance=baseline.provenance_signature))
+
+    # Act
+    text = repr(baseline)
+
+    # Assert
+    assert "Baseline" in text
+    assert "2" in text  # observation_count, somewhere in the repr
+    assert "0x" not in text  # not the default object.__repr__ memory address
+
+
+def test_repr_of_empty_baseline_does_not_use_the_default_object_repr() -> None:
+    """The empty case must also get a useful repr, not the default."""
+    text = repr(Baseline())
+
+    assert "Baseline" in text
+    assert "0x" not in text
+    assert "object at" not in text

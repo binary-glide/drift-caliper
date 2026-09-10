@@ -83,12 +83,18 @@ from pydantic import ValidationError
 
 from caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
-    MAX_MEANINGFUL_ARL,
-    MIN_MEANINGFUL_ARL,
     Baseline,
     FittedControlLimits,
     FittedShewhart,
     fit_shewhart,
+)
+
+# MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
+# re-exported from caliper.baseline, so tests that need the exact bound
+# values import them from the owning submodule directly.
+from caliper.baseline.domain.shewhart_fitting import (
+    MAX_MEANINGFUL_ARL,
+    MIN_MEANINGFUL_ARL,
 )
 from caliper.errors import (
     CaliperError,

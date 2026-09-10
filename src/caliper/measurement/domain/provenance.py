@@ -29,3 +29,29 @@ class Provenance(BaseModel):
 
     model_version: ModelVersion
     scoring_criteria: ScoringCriteria
+
+    def __str__(self) -> str:
+        """Report the wrapped values directly, not nested wrapper reprs.
+
+        Before this (BIN-110 P3), the default Pydantic repr nested
+        ``ModelVersion``'s and ``ScoringCriteria``'s own reprs three levels
+        deep to read two strings. ``.model_version``/``.scoring_criteria``
+        still return the real value objects, unchanged (ADR-006 section 7)
+        -- only this readout changes.
+        """
+        return (
+            f"model_version={self.model_version}, "
+            f"scoring_criteria={self.scoring_criteria}"
+        )
+
+    def __repr__(self) -> str:
+        """A reconstructible-looking repr without nesting wrapper reprs.
+
+        See ``__str__`` above for the rationale -- this is the same fix
+        applied to ``repr()``, since an f-string/log line and a REPL echo
+        both hit this, and both suffered the same three-level nesting.
+        """
+        return (
+            f"Provenance(model_version={str(self.model_version)!r}, "
+            f"scoring_criteria={str(self.scoring_criteria)!r})"
+        )

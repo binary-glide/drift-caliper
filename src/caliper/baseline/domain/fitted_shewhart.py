@@ -27,6 +27,8 @@ section 5; BIN-95 A3/A5) -- there is no ``smoothing_param``/
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -47,6 +49,10 @@ class FittedShewhart(BaseModel):
     -- attempting to reassign any field raises
     ``pydantic_core.ValidationError`` (ADR-002 section 7), not a
     ``CaliperError``.
+
+    ``bool()`` is forbidden (BIN-110 P0/general ruling): a ``FittedShewhart``
+    that exists already succeeded -- there is no "unfitted" instance to
+    distinguish from a fitted one. See ``tests/unit/test_truthiness.py``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -78,3 +84,11 @@ class FittedShewhart(BaseModel):
 
     cl: float
     """Centre line (= ``baseline_mean``)."""
+
+    def __bool__(self) -> NoReturn:
+        """Forbid truthiness -- see the class docstring's BIN-110 note."""
+        raise TypeError(
+            "FittedShewhart has no True/False meaning; check its "
+            "`ucl`/`lcl`/`cl` or other fields directly instead of using it "
+            "in a boolean context"
+        )

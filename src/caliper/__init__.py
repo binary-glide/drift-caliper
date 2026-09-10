@@ -3,18 +3,88 @@
 Caliper treats a judge score stream as a process: fit control limits on a
 trusted Phase I baseline, then monitor Phase II observations against them.
 
-The public surface is deliberately empty at this point in the build -- names
-are exported here only once the story that introduces them lands.
+``import caliper`` exposes every name an engineer names in their own code --
+``Judge``, the value objects it produces, ``JudgeProviderPort`` and the
+response type an adapter returns, ``Baseline``, the three ``fit_*`` functions
+and the fitted artefact types they return, and the full ``CaliperError``
+taxonomy an engineer catches. Subpackage imports (``caliper.measurement``,
+``caliper.baseline``) keep working unconditionally -- this front door only
+adds a shorter path alongside them, it replaces nothing.
 
-BIN-57 lands ``Judge`` and ``ModelVersion``, but re-exports them from
-``caliper.measurement`` only (see that package's ``__init__.py``), not from
-this top-level package. ``tests/test_package.py`` pins this package's
-``__all__`` to ``[]`` as a smoke test, and the measurement bounded context
-is not yet the library's only context (baseline collection, fitting, and
-monitoring will each add their own names) -- promoting names to the
-top level piecemeal, one story at a time, would churn the top-level surface
-repeatedly. That promotion is better made once, deliberately, when the
-walking skeleton's public API shape is decided.
+``__all__`` was ``[]`` until BIN-110, and that was a deliberate deferral
+rather than an oversight: promoting names one story at a time would have
+churned the top-level surface repeatedly, so BIN-57 chose to make the
+promotion once, when the walking skeleton's API shape was decided. That
+condition is now met -- E1 (scoring) and E2's collection, sufficiency and
+fitting stories have all landed -- so the deferral is discharged here, not
+overturned.
+
+Names are promoted on one test: does an engineer type it? Validation bounds
+(``MIN_*``/``MAX_*``) are not exported anywhere -- they are internal to the
+validators that enforce them. ``DEFAULT_*`` constants stay on
+``caliper.baseline``, where someone overriding a default reads it first.
 """
 
-__all__: list[str] = []
+from caliper.baseline import (
+    Baseline,
+    DataQualityConcern,
+    FittedControlLimits,
+    FittedCUSUM,
+    FittedEWMA,
+    FittedShewhart,
+    SufficiencyResult,
+    fit_cusum,
+    fit_ewma,
+    fit_shewhart,
+)
+from caliper.errors import (
+    CaliperError,
+    DegenerateBaselineError,
+    InsufficientBaselineError,
+    InvalidObservationError,
+    InvalidParameterError,
+    JudgeRefusalError,
+    MalformedResponseError,
+    MissingPrerequisiteError,
+    ProvenanceMismatchError,
+    ProviderError,
+)
+from caliper.measurement import (
+    Judge,
+    JudgeProviderPort,
+    JudgeProviderResponse,
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
+
+__all__ = [
+    "Baseline",
+    "CaliperError",
+    "DataQualityConcern",
+    "DegenerateBaselineError",
+    "FittedCUSUM",
+    "FittedControlLimits",
+    "FittedEWMA",
+    "FittedShewhart",
+    "InsufficientBaselineError",
+    "InvalidObservationError",
+    "InvalidParameterError",
+    "Judge",
+    "JudgeProviderPort",
+    "JudgeProviderResponse",
+    "JudgeRefusalError",
+    "MalformedResponseError",
+    "MissingPrerequisiteError",
+    "ModelVersion",
+    "Provenance",
+    "ProvenanceMismatchError",
+    "ProviderError",
+    "ScoringCriteria",
+    "ScoringResult",
+    "SufficiencyResult",
+    "fit_cusum",
+    "fit_ewma",
+    "fit_shewhart",
+]

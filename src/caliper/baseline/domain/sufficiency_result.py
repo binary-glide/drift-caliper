@@ -42,3 +42,18 @@ class SufficiencyResult(BaseModel):
     threshold: int
     gap: int
     data_quality_concerns: tuple[DataQualityConcern, ...]
+
+    def __bool__(self) -> bool:
+        """Truthiness mirrors ``is_sufficient`` (BIN-110 P0).
+
+        Without this, a frozen Pydantic ``BaseModel`` falls back to
+        ``object.__bool__`` -- unconditionally ``True`` regardless of
+        ``is_sufficient`` -- so ``if baseline.check_sufficiency():`` would
+        silently enter the fitting branch on an empty baseline. This type
+        already *is* a yes/no answer to "is this baseline ready?", so
+        ``bool()`` disagreeing with ``is_sufficient`` would itself be a
+        footgun. Contrast with ``ScoringResult``/``Fitted*``, which have no
+        such field and forbid ``bool()`` outright -- see
+        ``tests/unit/test_truthiness.py``.
+        """
+        return self.is_sufficient

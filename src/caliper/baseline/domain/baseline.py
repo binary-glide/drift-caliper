@@ -11,7 +11,7 @@ ADR-005 for the default threshold and its rationale.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from caliper.baseline.domain.data_quality_concern import DataQualityConcern
 from caliper.baseline.domain.sufficiency_result import SufficiencyResult
@@ -164,6 +164,35 @@ class Baseline:
     def provenance_signature(self) -> Provenance | None:
         """The provenance every observation must match, or ``None`` if empty."""
         return self._provenance_signature
+
+    def __len__(self) -> int:
+        """The number of recorded observations (BIN-110 P1).
+
+        Agrees with ``observation_count``, which is kept alongside this --
+        it reads better in ``SufficiencyResult``'s context and in log
+        lines. This is the collection-protocol form.
+        """
+        return self.observation_count
+
+    def __iter__(self) -> Iterator[ScoringResult]:
+        """Iterate recorded observations in recording order (BIN-110 P1).
+
+        Iterates a snapshot tuple, not the internal mutable list -- a
+        caller holding this iterator cannot reach in and mutate
+        ``Baseline``'s private state through it.
+        """
+        return iter(self.observations)
+
+    def __repr__(self) -> str:
+        """A useful REPL/log/debugger representation (BIN-110 P1).
+
+        Before this, ``Baseline`` had no ``__repr__`` and fell back to
+        ``object.__repr__`` (``<...Baseline object at 0x...>``) -- useless
+        anywhere an engineer actually looks at one. Reports the class name
+        and observation count; deliberately not every field (provenance may
+        be ``None`` and is verbose to render usefully here).
+        """
+        return f"Baseline(observation_count={self.observation_count})"
 
     def record(self, result: ScoringResult) -> None:
         """Record a scoring result as a new observation.

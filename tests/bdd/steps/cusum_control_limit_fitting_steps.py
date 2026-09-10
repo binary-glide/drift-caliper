@@ -34,13 +34,19 @@ from pytest_bdd import given, parsers, then, when
 from caliper.baseline import (
     DEFAULT_REFERENCE_VALUE,
     DEFAULT_SUFFICIENCY_THRESHOLD,
+    Baseline,
+    FittedCUSUM,
+    fit_cusum,
+)
+
+# MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
+# re-exported from caliper.baseline, so steps that need the exact bound
+# values import them from the owning submodule directly.
+from caliper.baseline.domain.cusum_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_REFERENCE_VALUE,
     MIN_MEANINGFUL_ARL,
     MIN_REFERENCE_VALUE,
-    Baseline,
-    FittedCUSUM,
-    fit_cusum,
 )
 from caliper.errors import (
     CaliperError,
