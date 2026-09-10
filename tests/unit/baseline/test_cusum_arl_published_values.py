@@ -113,6 +113,45 @@ error in the ``-1-2kb`` term (which would NOT cancel correctly in this
 limit) fails this test even though it might still coincidentally pass the
 SAS-anchored check above for a different (k, h) pair.
 
+## Fourth link: Monte Carlo, which shares no assumptions with the closed form
+
+Siegmund's approximation reached this file through two hops of secondary
+sources (the primary is paywalled). A citation chain is thin evidence for the
+numbers a control chart is built on, so both the formula **and** the two-sided
+combination rule were checked against a direct simulation of the CUSUM
+recursion -- no shared algebra, just counting steps to the first boundary
+crossing with x ~ N(0, 1):
+
+    k     h     Siegmund two-sided   Monte Carlo (200k runs)   ratio
+    0.5   3.0              59.29                     58.76     0.991
+    0.5   4.0             169.05                    167.29     0.990
+    0.25  5.0              70.96                     70.73     0.997
+    1.0   3.0            1036.35                    984.39     0.950
+
+Within 1% for small k, widening to 5% at k = 1.0. That is the **known**
+behaviour of Siegmund's approximation rather than a defect -- it is derived
+from a Brownian-motion limit and is most accurate for small reference values,
+which is also the regime CUSUM is chosen for. Worth knowing before anyone
+reads a 5% gap at large k as a bug.
+
+This also independently confirms the two-arm combination, `1/ARL_two =
+2/ARL_one`, which no published table in the chain states directly.
+
+## `target_arl` means the COMBINED two-sided ARL0
+
+`backend-test-writer` flagged this as unpinned by ADR-004 and took the
+combined reading. The Monte Carlo above settles it, and the reasoning is worth
+stating so it is not re-opened:
+
+**For a two-sided chart the combined ARL0 is the only quantity an engineer
+observes.** A per-arm reading would mean someone requesting ARL0 = 500 sees a
+false alarm roughly every 250 observations -- the chart signalling at twice the
+rate they asked for. The per-arm figure is an internal step, not something
+anyone experiences.
+
+So `fit_cusum(target_arl=500, direction="two_sided")` calibrates `h` such that
+the **chart as a whole** signals once per 500 in-control observations.
+
 ## Tolerance
 
 The published-value assertions below use a 2% relative tolerance --
