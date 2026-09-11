@@ -91,6 +91,8 @@ Two bounded contexts, visible in the feature-file directory layout (`tests/bdd/f
 
 **Boundary convention (ADR-009 §5, resolving BIN-69 OQ-3 / BIN-112):** every comparison is strict — a point exactly at a control limit, or a CUSUM statistic exactly equal to the decision interval, is in control, not out of control. Verified against convergent secondary corroboration of all three primary sources (Montgomery, Lucas & Saccucci 1990, Siegmund 1985 via NIST's restatement); primary texts remain paywalled and this must be re-checked against their actual page text before `BIN-84`'s property-based tests treat it as permanently settled.
 
+**Full field-level treatment (this pass, domain-modeller, BIN-69 + BIN-72):** `Monitor` and `MonitoringResult` now have complete Object Map and Value Object Inventory entries below — invariants, structure, operations, the constructor-validation decision, and the `__bool__` decision ADR-009 §4 deliberately delegated to this pass (`MonitoringResult.__bool__` raises `TypeError`; see the Value Object Inventory entry for the full reasoning, not just the conclusion). The accumulator-reset-after-signal question is explicitly left open — see Open Questions, `BIN-113`.
+
 ### Cross-context dependency
 
 Baseline depends on Measurement. Measurement is independent. Monitoring depends on both Baseline and Measurement. The shared vocabulary between Measurement and Baseline is `ScoringResult` and `Provenance`; Monitoring additionally shares `FittedControlLimits` with Baseline. All are immutable value objects or (Baseline, and now the `Monitor` accumulator's private internals) mutable state deliberately confined to one owning object — so every cross-context dependency is on stable, frozen types except where a context's own single mutable object (`Baseline`, `Monitor`) is that context's entire reason to exist.
@@ -168,6 +170,50 @@ onto four more types. The rule is: truthiness is forbidden unless a yes/no
 field already carries the meaning.
 
 **Design note:** The Baseline has aggregate-like properties (enforces invariants on its contents, controls access to its observations) without the transactional semantics that define an aggregate in DDD. No transaction wraps a `record()` call; the invariant is enforced synchronously in a single-threaded library call.
+
+---
+
+### Monitor — the domain's second mutable object
+
+**What it is:** an engineer-held object constructed from exactly one fitted control-limit artefact (`FittedControlLimits` — any of `FittedEWMA`, `FittedCUSUM`, `FittedShewhart`). It records Phase II `ScoringResult` observations against that artefact one at a time, returning a `MonitoringResult` per call, and — unless opted out — retains a session-scoped, ordered history of those results.
+
+**Invariants:**
+
+1. **Provenance consistency with its fitted artefact.** Every recorded observation's provenance must match the artefact's provenance on both dimensions (model version, scoring criteria) — checked via `compare_provenance()` (BIN-68, reused unmodified) before any chart-specific comparison runs (ADR-009 §2). A mismatch raises `ProvenanceMismatchError`; the observation is not recorded and never enters history.
+
+2. **Recording requires a complete `ScoringResult`.** An incomplete or malformed input is rejected with `InvalidObservationError` before any comparison runs and before anything is appended to history — reuses Baseline's Phase I category (BIN-63); no new taxonomy entry (ADR-009 §3).
+
+3. **Accumulator state is private, chart-specific, and belongs to exactly one `Monitor` instance.** Nothing for Shewhart (memoryless by design — BR-4); the EWMA smoothed statistic; CUSUM's two one-sided running sums (`S_hi`, `S_lo`). State is never read from or written to the fitted artefact (the artefact remains immutable per ADR-004/BIN-108) and is never shared between two `Monitor` instances, even two constructed from the same artefact — each holds an entirely independent accumulator, initialised fresh at construction (ADR-009 §1, resolving BIN-69's A1 feasibility risk and SC5's "first observation needs no prior history").
+
+4. **A genuine signal is never raised.** An out-of-control determination is a normal, successful return value (`MonitoringResult.is_in_control = False`), never an exception (BR-7, ratified project-wide — "signals are not errors"). Only the two precondition violations above are exceptional.
+
+5. **History is append-only and insertion-ordered.** Every successfully recorded `MonitoringResult` — one that did not raise — is appended to history in the order `record()` was called; a refused attempt never appears, by construction (invariants 1 and 2 both gate before any append happens — there is no separate "don't record refused attempts" check to forget).
+
+6. **Strict-inequality boundary convention, uniform across chart types.** A point exactly at a control limit (EWMA/Shewhart) or exactly at the decision interval (CUSUM) is in control, not out (ADR-009 §5). One convention, not three independently-chosen ones.
+
+**Structure:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `artefact` (private) | `FittedControlLimits` | The fitted artefact this monitor was constructed from — referenced, never copied or mutated |
+| accumulator (private, chart-specific) | implementation detail, not public | Nothing for Shewhart; EWMA's smoothed statistic; CUSUM's `(S_hi, S_lo)` pair. Not part of the public surface (ADR-009 §1) |
+| `retain_history` (constructor parameter) | `bool` | Default `True`. `False` opts this monitor out of retaining any history at all (ADR-009 §7) |
+| history (private backing store) | implementation detail, not public — a `list[MonitoringResult]` is the obvious choice, per ADR-009's own "What domain-modeller still owns" | Append-only; exposed publicly only via `.history`, which returns a fresh `tuple` view — never the backing store itself |
+
+**Operations on Monitor:**
+
+| Operation | Input | Output | Errors |
+|-----------|-------|--------|--------|
+| `Monitor(artefact, retain_history=True)` | `FittedControlLimits`, optional `retain_history: bool` | `Monitor` | See "Constructor validation" below |
+| `record(observation)` | `ScoringResult` | `MonitoringResult` | `ProvenanceMismatchError`, `InvalidObservationError` |
+| `history` (property) | — | `tuple[MonitoringResult, ...]` | — |
+| `clear_history()` | — | `None` | — |
+
+**Constructor validation (domain-modeller decision, not escalated — no scenario exercises this path):** `Monitor.__init__` checks `isinstance(artefact, FittedControlLimits)`, the same pattern already used for `Judge.provider: JudgeProviderPort` — both are `@runtime_checkable` Protocols, so this is a structural check, not a new mechanism. On failure, raise `InvalidParameterError` (`context["parameter"] == "artefact"`, `context["kind"] == "invalid"`), consistent with every other constructor-time rejection in the taxonomy. None of BIN-69's nine scenarios or BIN-72's nine scenarios constructs a `Monitor` from something that is not a real fitted artefact, so this is not a tested requirement — it is offered as the obvious, taxonomy-consistent default for `backend-test-writer`/`domain-implementer` to confirm, not a product decision requiring escalation.
+
+**Design note:** Like `Baseline`, `Monitor` has aggregate-like properties — it enforces invariants on what it accepts and encapsulates its own accumulator and history — without the transactional semantics that define an aggregate in DDD: no unit of work wraps a `record()` call, no commit, no rollback (see "Structural Departures from Service-Oriented DDD" above, which already establishes this for `Baseline` and applies identically here). `Monitor` is **not** an aggregate root in the strict DDD sense; it is the domain's second, and — after this pass — only other, mutable single-owner object, alongside `Baseline`. Unlike `Baseline`, `Monitor` is not itself a collection: `.history` returns a plain `tuple`, and `Monitor` defines no `__len__`/`__iter__`/`__repr__` of its own — an engineer inspects `monitor.history`, never `monitor` directly (ADR-009 §6, deliberately rejecting a bespoke `MonitoringHistory` collection type to avoid a second, structurally-identical-to-`Baseline` type on the public surface — see BIN-72's review finding M3).
+
+⚠️ **Open — not settled by this pass (`BIN-113`):** what happens to a chart's accumulator *after* a signal — reset to zero, reset to a head-start/FIR level (Lucas & Crosier 1982), or continue unchanged — is explicitly undecided. ADR-009 did not settle it and this domain model does not invent an answer. The only thing invariant 3 above commits to is that the accumulator persists *across* `record()` calls (so BR-3/SC3's accumulation behaviour holds) — not what value it takes immediately following a signal. Do not assume any of the three options when implementing; `BIN-113` owns this.
 
 ---
 
@@ -645,6 +691,50 @@ This is a presentational grouping, not necessarily a separate type. The three va
 | `lcl` | `float` | Lower control limit |
 | `cl` | `float` | Centre line |
 
+### `MonitoringResult`
+
+**Carried by:** returned from `Monitor.record()`; each entry of `Monitor.history`
+**Equality:** by value (all three fields)
+**Constraints:**
+- All three fields required — enforced by the type signature; no additional content constraint (mirrors `ScoringResult.reasoning`'s treatment: no emptiness check, since no scenario in either feature file tests one)
+- Immutable after creation (mirrors every other result/VO type — `pydantic_core.ValidationError` on reassignment attempt, not a `CaliperError`)
+- `chart_type` mirrors the producing artefact's own `FittedControlLimits.chart_type` — not independently re-validated against a closed set here, since the artefact already constrains it
+
+**Structure:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `is_in_control` | `bool` | Explicit field carrying the determination (BIN-110's truthiness rule). `True` = the observation (Shewhart) or the accumulated pattern (EWMA/CUSUM) is within the calibrated boundary; `False` = a signal |
+| `observation` | `ScoringResult` | The Phase II observation just passed to `record()` — satisfies BIN-69 SC2 ("what they see identifies the observation that triggered it") with no separate lookup or correlation id, because `record()` is called once per observation and returns once per call |
+| `chart_type` | `str` | Which chart type produced this determination (e.g. `"ewma"`) — satisfies BIN-69 SC9 (checking is uniform across chart types from the engineer's side) by making the chart type inspectable on every result, the same field name as `FittedControlLimits.chart_type` |
+
+**Construction:** built internally by `Monitor.record()` only — no scenario in either feature file constructs one directly, so no public factory is specified.
+**Rejects:** nothing beyond field presence and type — no numeric constraint the way `ScoringResult.score` has finiteness.
+
+#### `MonitoringResult.__bool__` — decided: raises `TypeError` (ADR-009's delegated decision)
+
+ADR-009 §4 identified two BIN-110-legal resolutions and explicitly delegated the choice to this pass rather than picking one itself. Both are legal because `MonitoringResult` has an explicit yes/no field (`is_in_control`), which is BIN-110's precondition for allowing truthiness at all — leaving `__bool__` undefined was never one of the options, because Pydantic's inherited object-identity truthiness would make `bool(result)` unconditionally `True`, the exact P0 defect BIN-110 fixed on `SufficiencyResult`.
+
+**Decision: `__bool__` raises `TypeError`, the same treatment as `ScoringResult` and the three `Fitted*` artefacts.** `bool(result)` is forbidden; callers read `result.is_in_control` explicitly.
+
+```python
+def __bool__(self) -> NoReturn:
+    raise TypeError(
+        "MonitoringResult has no True/False meaning; check `is_in_control` "
+        "directly instead of using it in a boolean context"
+    )
+```
+
+**Why — engaging with both options rather than inheriting ADR-009's recommendation unexamined:**
+
+`SufficiencyResult.__bool__` returning `is_sufficient` works precisely because "is this baseline ready?" has exactly one natural reading, and the field name states it positively — `bool()` and the field can never disagree about which reading was intended. `MonitoringResult` does not have that property. An engineer writing `if monitor.record(observation):` is really asking one of two different questions depending on which word they are mentally emphasising — "is everything still fine?" (→ truthy-on-in-control, matching the field) or "did something notable just happen?" (→ truthy-on-signal, the opposite). A monitoring signal is, definitionally, the notable event; nothing about the call site disambiguates which reading the author intended, unlike `SufficiencyResult` where only one reading exists in the first place.
+
+Making `__bool__` return `is_in_control` (the alternative) does not just risk the same "always `True`" failure BIN-110 fixed — it risks something distinct, and arguably worse: a **silently inverted** monitoring loop. `if monitor.record(observation): alert(...)` under that alternative alerts on the boring, in-control majority of calls and stays silent on the rare, genuine signal — the exact case this library exists to surface. That bug would not look broken: false alerts would likely get noticed and the condition "fixed" back to correct, or dismissed as noise, while real degradations passed through unalerted the whole time. This is a materially worse failure mode than a no-op always-`True`, which at least fails the same way every time and is easier to notice as clearly wrong.
+
+Raising forecloses both failure modes at once, at the one call site — `monitor.record()` — used far more densely than any single scoring or fitting call in the library (once per production observation, indefinitely, in a long-running process). Every occurrence of the DX snippet across ADR-009, both architecture.md summaries, and both feature files already reads `outcome.is_in_control` (or an equivalent observable-outcome Gherkin phrasing), never a bare truth test — so raising costs the common case nothing; it only removes a way to write code that reads correctly and behaves backwards.
+
+**Reversibility — the same asymmetry ADR-009 names, applied here explicitly:** loosening a raise into a meaningful `__bool__` later is backward-compatible for every existing caller (none can be calling `bool()` today, since it currently raises). Tightening a working `bool()` into a raise later would break any caller who had started relying on it — the same direction every other close call in this project has resolved (empty-output rejection, score-range, criteria equality): start strict, loosen only on evidence of real need.
+
 ---
 
 ## Ubiquitous Language Glossary
@@ -660,10 +750,15 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 | **Provenance signature** | The provenance established by the first observation in a baseline. All subsequent observations must match. | Baseline | BIN-63 SC8 |
 | **Scoring result** | The immutable output of a single scoring operation: a float score, textual reasoning, and provenance. The unit of measurement. | Measurement | BIN-59 |
 | **Score** | A scalar `float` quality value produced by an LLM judge. Higher is better (ADR-001): a falling score indicates degradation (lower arm); a rising score indicates improvement or stale baseline (upper arm). | Both | ADR-001, BIN-59 |
-| **Observation** | A scoring result recorded into a baseline. Observations are the unit of baseline data. In R1, an observation IS a `ScoringResult` — no additional fields. **OQ-8 (open)** may add a timestamp or sequence index — see Open Questions; this is also the recorded trigger for adding `whenever` as a dependency (CLAUDE.md, "Stack Members Not Yet Used" — zero `datetime` usage anywhere in `src/caliper` today; a timestamp on `Observation` is named as the first plausible caller). | Baseline | BIN-63 |
+| **Observation** | A scoring result recorded into a baseline. Observations are the unit of baseline data. In R1, an observation IS a `ScoringResult` — no additional fields. **OQ-8 (open)** may add a timestamp or sequence index — see Open Questions; this is also the recorded trigger for adding `whenever` as a dependency (CLAUDE.md, "Stack Members Not Yet Used" — zero `datetime` usage anywhere in `src/caliper` today; a timestamp on `Observation` is named as the first plausible caller). The same term is reused for Phase II: a "Phase II observation" is a `ScoringResult` recorded via `Monitor.record()` rather than `Baseline.record()` — same underlying type, different context, different invariants enforced on recording (ADR-009). | Baseline, Monitoring | BIN-63, BIN-69 |
+| **Monitor** | The engineer-held object that records Phase II observations against one fitted control-limit artefact, holds that artefact's chart-specific accumulator state privately, and (unless opted out) retains a session-scoped history of what it has recorded. The domain's second, and only other, mutable single-owner object alongside `Baseline` — but not itself a collection; see its Object Map entry. | Monitoring | ADR-009, BIN-69, BIN-72 |
+| **Monitoring result** | The immutable, per-call outcome of `Monitor.record()`: an explicit in-control/out-of-control determination, the observation that produced it, and which chart type produced it. Never raised for a genuine signal — a signal is simply a `MonitoringResult` with `is_in_control=False`. `bool()` is forbidden; see the Value Object Inventory. | Monitoring | ADR-009 §4, BIN-69 |
+| **Monitoring history** | The ordered, session-scoped sequence of `MonitoringResult`s a `Monitor` has recorded, returned as a plain `tuple[MonitoringResult, ...]` via `Monitor.history` — deliberately not a bespoke collection type, to avoid a second `Baseline`-shaped type on the public surface. Retained automatically by default; `retain_history=False` opts out; `clear_history()` is the manual escape hatch. Never durable across process runs — that is `BIN-73`'s, unbuilt, concern. Distinct from `Baseline.observations` — different collection, different owning type, never mixed (BIN-72 SC9). | Monitoring | ADR-009 §6-§8, BIN-72 |
+| **Accumulator** | A `Monitor`'s private, chart-specific carried-forward state between `record()` calls: none for Shewhart (memoryless), the smoothed statistic for EWMA, the two one-sided running sums for CUSUM. Lives on `Monitor`, never on the immutable fitted artefact. What happens to it immediately after a signal is open — see `BIN-113` in Open Questions. | Monitoring | ADR-009 §1 |
+| **Session** | Informal term (used throughout BIN-72's feature file) for the lifetime of one running Python process holding one `Monitor` instance. Not a domain type — there is no `Session` object. A new process constructing a new `Monitor` starts with empty history by construction, which is what "does not carry over between runs" (BIN-72 SC5) means concretely. | Monitoring | BIN-72 |
 | **Baseline** (Phase I baseline) | An ordered, provenance-consistent collection of observations from which control limits are fitted. The only mutable object in the domain. | Baseline | BIN-63 |
 | **Phase I** | The baseline collection and fitting phase. The engineer collects observations, checks sufficiency, and fits control limits. | Baseline | BIN-63, BIN-65/94/95 |
-| **Phase II** | The ongoing monitoring phase. Partially in scope: BIN-68 covers provenance comparison across the phase boundary. Phase II monitoring logic (BIN-69) is not yet specified. | Baseline | BIN-68 |
+| **Phase II** | The ongoing monitoring phase. BIN-68 covers provenance comparison across the phase boundary; BIN-69/BIN-72 (ADR-009) now cover Phase II monitoring logic itself — recording an observation against a fitted artefact, checking it for a signal, and reviewing the session's history of what was recorded. | Baseline, Monitoring | BIN-68, ADR-009, BIN-69, BIN-72 |
 | **Sufficiency** | Whether a baseline has enough observations for reliable control limit fitting. The check is advisory (reports status); fitting is where enforcement occurs. | Baseline | BIN-64 |
 | **Sufficiency threshold** | The minimum number of observations required. Configurable per engineer and per chart type (BIN-64 BR-3, BR-5). Library default: 100 individual observations (ADR-005). Must be positive (BIN-64 BR-8). | Baseline | BIN-64, ADR-005 |
 | **Degenerate baseline** | A baseline that meets the count threshold but is statistically unusable. The primary case is zero variance — all scores identical, causing sigma to collapse to zero and limits to collapse to the mean. | Baseline | BIN-65 SC6, BIN-94 SC6, BIN-95 SC6 |
@@ -683,7 +778,7 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 | **Chart type** | One of EWMA, CUSUM, or Shewhart I-chart in R1. Reported on every fitted artefact. | Baseline | ADR-004 |
 | **Direction** (CUSUM) | Which direction(s) of drift are monitored. `"two_sided"` (default): both arms. `"lower"`: degradation only (score drifts down). `"upper"`: improvement only (baseline staleness). Two-sided default, configurable to one-sided (ADR-004 section 6). | Baseline | ADR-004 |
 | **Higher-is-better** | Caliper's score orientation (ADR-001). A falling score = degradation (lower CUSUM arm). A rising score = improvement / stale baseline (upper CUSUM arm). This mapping holds throughout the library. | Both | ADR-001 |
-| **Signal** | An out-of-control indication from Phase II monitoring. E4 (BIN-75 through BIN-81) has no written requirements. Not modelled in R1. | — | context.md (sketch only) |
+| **Signal** | An out-of-control determination from Phase II monitoring — concretely, a `MonitoringResult` with `is_in_control=False`. The determination itself is now modelled (ADR-009, BIN-69); its *delivery* — handlers, callbacks, severity, webhooks — is E4 (BIN-75 through BIN-81), which still has no written requirements and remains unmodelled. | Monitoring | ADR-009, context.md (delivery sketch only) |
 | **SPCPort** | The port interface for the SPC engine (ADR-001). The boundary between the domain and the statistical computation layer. Fitting operations are behind this port. | Baseline | ADR-001 |
 | **Agent output** | The text produced by the engineer's agent, the subject being scored. Required, rejected if empty or whitespace-only (**settles former OQ-10**). Named `agent_output`, not `output`, to keep the `agent_` prefix consistent with `agent_input` and the feature files' own wording. | Measurement | BIN-59, ADR-006 §3, §6 |
 | **Agent input** | The input that produced the agent output, when the caller has it. Optional, not validated for emptiness (a proactively-acting agent may legitimately have none), and **not** carried onto `Provenance` or `ScoringResult` — it is the subject being measured, not the measurement configuration. Named `agent_input`, not `input`, because bare `input` shadows a Python builtin and this project's `ruff` config (`flake8-builtins`, rule `A002`) rejects it. | Measurement | BIN-59, ADR-006 §3 |
@@ -694,6 +789,7 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 - "Spread measure" in BIN-66 SC1 refers to `baseline_spread` (shared core sample standard deviation). "Sigma estimate" in BIN-95 SC2 refers to `sigma_estimate` (shared core MR-based estimate). These are explicitly different quantities, both in the shared core.
 - "Observation" and "scoring result" are the same data — the term shifts at the context boundary. A "scoring result" becomes an "observation" when recorded into a baseline.
 - "Output"/"input" in earlier drafts of the PRD and feature file text are the informal predecessors of the canonical `agent_output`/`agent_input` terms ADR-006 settled on. Same concepts, more precise names.
+- "History" (`Monitor.history`, Phase II `MonitoringResult`s) is distinct from "observations" (`Baseline.observations`, Phase I `ScoringResult`s) — different collections, different owning types, different invariants, never mixed (BIN-72 SC9).
 
 ---
 
@@ -712,6 +808,8 @@ The signal handler chain (E4: BIN-75 through BIN-81) is the natural location for
 **When this changes:** E4 requirements will introduce events. The `SignalEvent` sketch in `context.md` (signal, judgement result, consecutive signal count, severity) is indicative but not contractual. The domain model should be extended when E4 requirements are written.
 
 **Confirmed still true after E1 shipped (BIN-100 refresh):** ADR-006 introduced no events. `Judge.score()` is a synchronous call-and-return, exactly as this section already described.
+
+**Confirmed still true after ADR-009 (BIN-69/BIN-72, this pass):** `Monitor.record()` is likewise a synchronous call-and-return — it returns a `MonitoringResult` directly, never publishes an event. The new Monitoring context introduces no domain events in R1, for the same reason as Measurement and Baseline: E4's signal-delivery mechanism (BIN-75 through BIN-81) remains unspecified, and modelling events for unspecified behaviour would be speculative rather than derived from requirements.
 
 ---
 
@@ -754,10 +852,10 @@ These are the operations the ten feature files establish. They replace the "serv
 | Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline — **implemented** (BIN-95) |
 | Review artefact | BIN-66 | Any `FittedControlLimits` | Read properties; `audit_summary()` | Baseline — **implemented** (BIN-66) |
 | Compare provenance | BIN-68 | `ScoringResult`, `FittedControlLimits` | Confirms compatibility or raises `ProvenanceMismatchError` | Baseline — **implemented** (BIN-68) |
-| Create monitor | BIN-69 | `FittedControlLimits`, optional `retain_history: bool` | `Monitor` | Monitoring — **architecture settled (ADR-009)**, not yet implemented |
-| Record Phase II observation | BIN-69 | `ScoringResult` | `MonitoringResult` | Monitoring — **architecture settled (ADR-009)**, not yet implemented. Raises `ProvenanceMismatchError`, `InvalidObservationError`; never raises for a signal. |
-| Review monitoring history | BIN-72 | (none) | `tuple[MonitoringResult, ...]` | Monitoring — **architecture settled (ADR-009)**, not yet implemented. Zero-config by default. |
-| Clear monitoring history | BIN-72 | (none) | `None` | Monitoring — **architecture settled (ADR-009)**, not yet implemented. Manual escape hatch, no automatic eviction policy in R1. |
+| Create monitor | BIN-69 | `FittedControlLimits`, optional `retain_history: bool` | `Monitor` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented |
+| Record Phase II observation | BIN-69 | `ScoringResult` | `MonitoringResult` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented. Raises `ProvenanceMismatchError`, `InvalidObservationError`; never raises for a signal. |
+| Review monitoring history | BIN-72 | (none) | `tuple[MonitoringResult, ...]` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented. Zero-config by default. |
+| Clear monitoring history | BIN-72 | (none) | `None` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented. Manual escape hatch, no automatic eviction policy in R1. |
 
 **Fitting parameter semantics (ADR-004 section 5):**
 - `target_arl`: **optional in Python signature** (default `None`), **required by Caliper validation**. Omitting raises `InvalidParameterError(kind="missing")`.
@@ -781,6 +879,11 @@ carve an exception into Caliper's strictest integrity rule rather than how
 to implement a story. All eleven original questions now have an owner and a
 disposition.
 
+**Three new questions, added this pass (domain-modeller, BIN-69 + BIN-72,
+following ADR-009) — numbered 12-14, continuing on from the original eleven
+rather than belonging to that original set.** Two are settled here; one
+(#12) is explicitly not this pass's to close.
+
 | # | Question | Owner | Blocks | Source | Status |
 |---|----------|-------|--------|--------|--------|
 | 1 | ~~Where do scoring criteria attach? At judge creation, at monitoring setup, or per-call?~~ | — | — | BIN-58 OQ-3 | **SETTLED** — ADR-006 §2: judge creation *and/or* per-call; per-call wins for that call only, without mutating the frozen `Judge`. "Monitoring setup" explicitly rejected as a third point in R1 (no `Monitor` construct exists). |
@@ -794,6 +897,9 @@ disposition.
 | 9 | ~~Explicit override for known provenance change between phases.~~ | — | — | BIN-68 OQ-3 | **SETTLED** — product owner, 2026-09-10: **no override. The engineer refits.** `ProvenanceMismatchError` raises unconditionally; `compare_provenance()` takes no acknowledgement or force parameter. See "Provenance change requires a refit" below. |
 | 10 | ~~Whether scoring accepts empty agent output.~~ | — | — | BIN-59 OQ-5 | **SETTLED** — ADR-006 §6: rejected. Empty or whitespace-only `agent_output` raises `InvalidParameterError` before any provider call. An engineer who wants "no response" scored passes their own sentinel string. |
 | 11 | ~~Dual mismatch representation. When both provenance dimensions differ, what shape does the error context take?~~ | — | — | BIN-68 OQ-1 | **SETTLED** — system-architect, 2026-09-10: `context["mismatches"]`, a `dict[str, dict[str, str]]` keyed by dimension name (`"model_version"`, `"scoring_criteria"`), each holding `{"expected": ..., "received": ...}`. Replaces `dimension`/`expected`/`received`. `Baseline.record()` (BIN-63) and `compare_provenance()` (BIN-68) both produce this shape — required by the merged dual-mismatch scenario. See ADR-002 Amendment (2026-09-10). |
+| 12 | **What happens to a `Monitor`'s chart-specific accumulator immediately after a signal** — reset to zero, reset to a head-start/FIR level (Lucas & Crosier 1982), or continue unchanged? | Whoever picks up `BIN-113` | `Monitor`'s per-`record()` accumulator update logic for EWMA/CUSUM | ADR-009 §1 (deliberately left unsettled) | **Open — explicitly not this pass's to close.** ADR-009 delegates it to `BIN-113`. This model commits only to the accumulator persisting *across* `record()` calls (BR-3/SC3); not to its value immediately after a signal. Background: Lucas & Crosier (1982) on the FIR feature, held at `Projects/caliper/references/papers/`. |
+| 13 | ~~Whether `Monitor`'s constructor validates the fitted artefact beyond its type.~~ | — | — | ADR-009, "What domain-modeller still owns" | **SETTLED, this pass** — `isinstance(artefact, FittedControlLimits)`, mirroring `Judge.provider`'s existing structural check against a `@runtime_checkable` Protocol; raises `InvalidParameterError` (`kind="invalid"`) on failure. Not scenario-tested by either feature file — offered as the taxonomy-consistent default, not a product decision. See Object Map — Monitor. |
+| 14 | ~~`MonitoringResult.__bool__` — return `is_in_control`, or raise?~~ | — | — | ADR-009 §4 (explicitly delegated to domain-modeller) | **SETTLED, this pass** — raises `TypeError`, the same treatment as `ScoringResult`/`Fitted*`. See Value Object Inventory — `MonitoringResult`, "Truthiness decision" for the full reasoning, including why this pass did not simply inherit ADR-009's recommendation without engaging with it. |
 
 ### Criteria equality is exact (OQ-2, settled 2026-09-10)
 
@@ -900,11 +1006,16 @@ is proceeding on the old baseline with the new judge.
 - [x] Identity question addressed honestly: not needed in R1
 - [x] BIN-104's known gap (wrong-typed constructor args leak `pydantic_core.ValidationError`) recorded, not silently left for a reader to discover
 - [x] Repo (`docs/domain-model.md`) and vault (`Projects/caliper/domain-model.md`) copies reconciled — vault now points here; this file is canonical
+- [x] `Monitor` given full field-level Object Map treatment; not modelled as a DDD aggregate, same discipline as `Baseline` (this pass)
+- [x] `MonitoringResult.__bool__` explicitly decided, not left undefined — resolves ADR-009 §4's delegated decision, with reasoning engaging both options, not just adopting the ADR's recommendation (this pass)
+- [x] All 18 scenarios across `phase-ii-observation-signal-check.feature` (9) and `in-memory-observation-store.feature` (9) verified bindable against this model, with no `.feature` file changes needed (this pass)
+- [x] Accumulator-reset-after-signal left open, not invented — `BIN-113` (this pass)
 
 ---
 
 ## Changelog
 
+- 2026-09-11 (domain-modeller, combined BIN-69 + BIN-72 pass, following ADR-009): Added full field-level Object Map treatment for `Monitor` (invariants, structure, operations table, constructor-validation decision, and a design note distinguishing it from a DDD aggregate — same discipline already applied to `Baseline`). Added a Value Object Inventory entry for `MonitoringResult` (structure, construction, and the `__bool__` decision ADR-009 §4 explicitly delegated to this pass — raises `TypeError`, with reasoning that engages both options rather than inheriting the ADR's recommendation unexamined). Added five Ubiquitous Language Glossary entries (Monitor, Monitoring result, Monitoring history, Accumulator, Session) and updated three existing ones (Signal, Phase II, Observation) to reflect that Phase II monitoring is now modelled, not merely anticipated. Confirmed the Monitoring context introduces no domain events, for the same reason as Measurement and Baseline (E4 unspecified). Updated the four Monitoring rows in Library Operations from "architecture settled, not yet implemented" to "domain-modelled, ready for backend-test-writer". Added three new Open Questions (12: accumulator-reset-after-signal, deliberately left open, tracked as `BIN-113`; 13 and 14: constructor validation and `__bool__`, both settled this pass). Verified all 18 scenarios across both feature files (`phase-ii-observation-signal-check.feature`, `in-memory-observation-store.feature`) bind against this model exactly as written, with no `.feature` file changes required — matching ADR-009's own scenario-by-scenario verification.
 - 2026-09-11 (ADR-009, combined BIN-69 + BIN-72 architecture pass): Added the **Monitoring** bounded context (E3), depending on Baseline and Measurement. Introduced `Monitor` and `MonitoringResult` at the architecture level (full field-level domain-modeller treatment still to come). Settled BIN-69's OQ-1 (operation lives on `Monitor`), A1 (accumulator state lives privately on `Monitor`, keyed to the artefact), A2 (provenance checked internally via `compare_provenance()`), OQ-2 (`MonitoringResult` with explicit `is_in_control: bool`), OQ-3/**BIN-112** (strict inequality at control limits/decision interval — a boundary point is in control, uniformly across EWMA/CUSUM/Shewhart, corroborated against Montgomery/Lucas & Saccucci/Siegmund via secondary sources, primary text verification still pending for BIN-84), and OQ-4 (reuses `InvalidObservationError`, no new category). Settled BIN-72's A1 (no store port in R1, concrete-only), A2 (zero-config default, `retain_history=False` opt-out), OQ-1 (`Monitor.history` is a plain `tuple[MonitoringResult, ...]`, not a bespoke collection type — deliberately resolves the "second `Baseline`" discoverability risk BIN-72's review flagged), and OQ-2 (no automatic eviction/bounding mechanism in R1, but a manual `clear_history()` escape hatch ships and the unbounded-growth risk is documented as an accepted R1 risk, not left open indefinitely). Updated Library Operations and the Error Contract Reference's raised-by column accordingly. No `.feature` file required any change — both were written mechanism-neutrally and bind against this design as verified scenario-by-scenario in each story's `architecture.md`.
 - 2026-09-10 (BIN-100 refresh): Reconciled against ADR-006 (scoring API surface and judge provider port), ADR-007 (two type checkers), ADR-008 (error assertions over message text), and the merged, tested E1 implementation in `src/caliper/measurement/`. Settled OQ-1 (criteria attachment), OQ-5 (score range), OQ-6 (scoring input shape), OQ-10 (empty agent output) — each marked SETTLED with ADR section and resolution, not deleted. Corrected the `Result[...]`-returning VO factories (VOs raise `InvalidParameterError` directly; explained why the `returns`-standard's own "single-failure-point" exception applies here, not a misapplication of house style). Rewrote the `Judge` section for `provider`/`criteria`/`score()`. Added `JudgeProviderPort` and `JudgeProviderResponse` as a real hexagonal port and its response VO. Documented BIN-103's module layout (`measurement/domain/`, `measurement/ports/`, top-level `errors.py`). Recorded BIN-104's known gap (wrong-typed constructor args bypass the value-object boundary). Corrected immutability-violation exception type (`pydantic_core.ValidationError`, not `FrozenInstanceError`/`AttributeError`) per the BIN-103 dataclass→Pydantic migration. Reconciled the vault copy (`Projects/caliper/domain-model.md`), which had drifted into a lossier condensation of this file, into a pointer — this file is now the single canonical copy. Left untouched, as instructed: OQ-2/3/4/7/8/9/11 (still open at the time of this entry), all numerical constants (still unpinned), the dual-spread finding (still prominent), and the absence of domain events (E4 still unspecified).
 - 2026-09-10 (BIN-100 gate): OQ-9 settled by the product owner — a changed judge requires a refit; `compare_provenance()` gains no acknowledgement or force parameter. See "Provenance change requires a refit". The cost this imposes (ADR-005's 100-observation minimum, reset in full) is recorded rather than soft-pedalled, and making the refit *easier* stays open — BIN-105 (refit by re-scoring retained outputs) and BIN-106 (paired judge-difference report). **All eleven original open questions now have an owner and a disposition.**
