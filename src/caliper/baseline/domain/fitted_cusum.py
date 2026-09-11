@@ -25,11 +25,13 @@ this. Do not read ``decision_interval`` as a UCL/LCL analogue.
 
 from __future__ import annotations
 
+import math
 from typing import NoReturn
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.baseline.domain.audit_summary import render_audit_summary
+from caliper.errors import InvalidParameterError
 
 
 class FittedCUSUM(BaseModel):
@@ -82,6 +84,52 @@ class FittedCUSUM(BaseModel):
     direction: str
     """``"two_sided"`` (default), ``"lower"`` (degradation only), or
     ``"upper"`` (improvement only, i.e. baseline staleness)."""
+
+    @field_validator("sigma_estimate")
+    @classmethod
+    def must_be_finite_and_positive(cls, v: float) -> float:
+        """Reject a non-finite or non-positive ``sigma_estimate`` (BIN-119).
+
+        Raises ``InvalidParameterError`` (``context["parameter"] ==
+        "sigma_estimate"``, ``context["kind"] == "invalid"``) for ``NaN``,
+        ``+/-inf``, ``0.0``, or a negative value. Mirrors
+        ``ScoringResult.must_be_finite`` and ``FittedEWMA``'s identical
+        validator -- an invariant of this type itself, enforced no matter
+        how an instance is constructed, not only through ``fit_cusum``.
+
+        Distinct from -- and does not replace -- the
+        ``DegenerateBaselineError`` guard
+        ``caliper.baseline.domain.spc_numerics._moving_range_sigma``
+        already raises before this constructor is ever reached in the
+        normal fitting path: that guard diagnoses *the baseline* ("this
+        data cannot be fitted"), which is also the guard that stops a
+        zero ``sigma_estimate`` from reaching CUSUM's
+        ``record()``-time standardisation as a raw
+        ``ZeroDivisionError`` (BIN-119). This validator protects *the
+        type* ("no ``FittedCUSUM`` may exist with an unusable sigma"),
+        which matters even for a value that reaches this constructor by
+        some other route than ``fit_cusum`` -- there is no baseline in
+        scope here to raise a baseline-shaped error about.
+        """
+        if not math.isfinite(v) or v <= 0.0:
+            raise InvalidParameterError(
+                "sigma_estimate must be a finite, strictly positive number",
+                context={
+                    "parameter": "sigma_estimate",
+                    "constraint": "must be a finite float greater than 0.0",
+                    "kind": "invalid",
+                    "provided": v,
+                },
+                recovery_hint=(
+                    "A FittedCUSUM cannot hold a sigma_estimate that is "
+                    "NaN, infinite, zero, or negative -- the standardised "
+                    "CUSUM statistic computed from it would be meaningless "
+                    "or divide by zero. Construct FittedCUSUM via "
+                    "fit_cusum(), which already rejects an unusable "
+                    "baseline before reaching this point."
+                ),
+            )
+        return v
 
     def __bool__(self) -> NoReturn:
         """Forbid truthiness -- see the class docstring's BIN-110 note."""

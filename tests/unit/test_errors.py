@@ -107,3 +107,64 @@ def test_a_subclass_that_omits_its_category_fails_at_definition_time() -> None:
 
         class UncategorisedError(CaliperError):
             pass
+
+
+# --- The Pydantic interaction that five field validators depend on ---------
+#
+# Pydantic v2 converts a `ValueError` or `AssertionError` raised inside a
+# `@field_validator` into a `ValidationError`. Any other exception type
+# propagates to the caller unchanged.
+#
+# Five validators rely on that second branch to satisfy ADR-002 --
+# `ScoringResult.must_be_finite`, `ModelVersion`'s and `ScoringCriteria`'s
+# blank-text checks, and the `sigma_estimate` invariant on all three
+# `Fitted*` types (BIN-119). Each raises a `CaliperError`, and each reaches
+# the caller as that type *only because* `CaliperError` does not inherit
+# from `ValueError`.
+#
+# Nothing pinned that until now. Rebasing `CaliperError` onto `ValueError`
+# is a plausible-looking tidy-up -- it reads as "these are value errors,
+# after all" -- and it would silently turn every one of those validators
+# into a `ValidationError` leak from the public API. That is BIN-104
+# exactly, reintroduced by a change no reviewer would flag as risky.
+# Raised by code-reviewer on BIN-119, 2026-09-11.
+
+
+@pytest.mark.parametrize(("error_type", "category"), LIBRARY_CATEGORIES)
+def test_library_errors_are_not_value_errors(
+    error_type: type[CaliperError], category: str
+) -> None:
+    """No library error inherits from a type Pydantic re-wraps."""
+    assert not issubclass(error_type, ValueError)
+    assert not issubclass(error_type, AssertionError)
+
+
+def test_a_caliper_error_raised_inside_a_field_validator_is_not_rewrapped() -> None:
+    """A validator's `CaliperError` reaches the caller as itself.
+
+    The end-to-end form of the rule above, asserted against Pydantic itself
+    rather than against our reading of its documentation -- so the test
+    fails if Pydantic's wrapping behaviour ever changes, not only if
+    `CaliperError`'s bases do.
+    """
+    from pydantic import BaseModel, field_validator
+    from pydantic import ValidationError as PydanticValidationError
+
+    class Guarded(BaseModel):
+        value: float
+
+        @field_validator("value")
+        @classmethod
+        def must_be_positive(cls, v: float) -> float:
+            if v <= 0:
+                raise InvalidParameterError(
+                    "value must be positive",
+                    context={"parameter": "value", "kind": "invalid", "provided": v},
+                    recovery_hint="Pass a positive value.",
+                )
+            return v
+
+    with pytest.raises(InvalidParameterError) as exc_info:
+        Guarded(value=-1.0)
+    assert exc_info.value.category == "invalid_parameter"
+    assert not isinstance(exc_info.value, PydanticValidationError)

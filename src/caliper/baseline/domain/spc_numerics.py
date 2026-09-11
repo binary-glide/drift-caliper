@@ -45,6 +45,8 @@ import math
 import statistics
 from collections.abc import Sequence
 
+from caliper.errors import DegenerateBaselineError
+
 # The unbiasing constant d_2 for a moving-range span of 2 (consecutive
 # individual observations).
 #
@@ -72,6 +74,36 @@ from collections.abc import Sequence
 _MOVING_RANGE_D2 = 2.0 / math.sqrt(math.pi)
 _MOVING_RANGE_METHOD = "moving_range"
 
+# BIN-119: two additional degenerate-baseline conditions this estimator must
+# reject, beyond the all-identical-scores case each fit_*() caller already
+# rules out before ever reaching this function. Both are float64 arithmetic
+# artefacts of the moving-range aggregate, not properties either caller's
+# own zero-variance guard can see:
+#
+#   non-finite -- consecutive score differences overflow float64's finite
+#   range (e.g. alternating +/-1e308), so the mean moving range -- and
+#   therefore sigma -- comes back +inf. A chart calibrated from an infinite
+#   sigma has control limits at +/-inf and can never signal: confident,
+#   permanent silence, this library's worst failure mode.
+#
+#   underflow -- consecutive score differences are so small that their mean
+#   underflows to exactly 0.0 despite genuine, non-zero variance existing in
+#   principle (e.g. one subnormal float among otherwise-identical scores).
+#   A chart calibrated from a zero sigma has ucl == lcl == baseline_mean --
+#   collapsed control limits that turn the chart into a false-positive
+#   machine for EWMA/Shewhart, and a raw ZeroDivisionError at CUSUM's
+#   record()-time standardisation. A zero-width interval is never a
+#   plausible value for a real quality characteristic's spread.
+#
+# `reason` is descriptive, not a closed discriminator -- see
+# InvalidParameterError.kind's docstring for why the two keys are
+# deliberately not unified. Distinct from the existing "zero_variance"
+# reason each fit_*() function's own guard raises directly (unaffected --
+# this module never sees an all-identical baseline, since that guard runs
+# first): these are two *additional* guards, not a replacement.
+_NON_FINITE_SIGMA_REASON = "non_finite_sigma_estimate"
+_SIGMA_UNDERFLOW_REASON = "sigma_estimate_underflow"
+
 
 def _moving_range_sigma(scores: Sequence[float]) -> float:
     """Estimate short-term sigma from the mean moving range (span 2).
@@ -81,8 +113,53 @@ def _moving_range_sigma(scores: Sequence[float]) -> float:
     the fitting operation calling it has already rejected an all-identical
     baseline (a baseline containing any two distinct values has at least one
     non-zero consecutive difference, so the mean moving range is strictly
-    positive).
+    positive in exact arithmetic).
+
+    That last clause is the reason this function validates its own result
+    rather than trusting the caller's zero-variance guard to be sufficient:
+    "strictly positive in exact arithmetic" does not imply "finite and
+    strictly positive in float64 arithmetic" -- the aggregate can still
+    overflow to ``inf`` or underflow to exactly ``0.0`` (BIN-119).
+
+    Raises
+    ------
+    DegenerateBaselineError
+        The moving-range aggregate is not finite
+        (``context["reason"] == "non_finite_sigma_estimate"``), or it
+        underflowed to exactly zero despite genuine variance in ``scores``
+        (``context["reason"] == "sigma_estimate_underflow"``).
     """
     moving_ranges = [abs(b - a) for a, b in itertools.pairwise(scores)]
     mean_moving_range = statistics.fmean(moving_ranges)
-    return mean_moving_range / _MOVING_RANGE_D2
+    sigma = mean_moving_range / _MOVING_RANGE_D2
+
+    if not math.isfinite(sigma):
+        raise DegenerateBaselineError(
+            "the moving-range sigma estimate is not finite -- control "
+            "limits calibrated from it would never signal",
+            context={"reason": _NON_FINITE_SIGMA_REASON},
+            recovery_hint=(
+                "One or more consecutive scores in the baseline differ by "
+                "an amount that overflows float64's finite range, so the "
+                "moving-range sigma estimate came back infinite. Control "
+                "limits built from an infinite sigma can never detect a "
+                "deviation. Review the judge's score scale -- this usually "
+                "means implausibly large-magnitude scores reached the "
+                "baseline -- before fitting again."
+            ),
+        )
+    if sigma <= 0.0:
+        raise DegenerateBaselineError(
+            "the moving-range sigma estimate underflowed to zero despite "
+            "genuine variance in the baseline",
+            context={"reason": _SIGMA_UNDERFLOW_REASON},
+            recovery_hint=(
+                "The baseline's consecutive score differences are so small "
+                "that their mean underflowed to exactly 0.0 in float64 "
+                "arithmetic, which would collapse the control limits onto "
+                "the centre line and turn the chart into a false-positive "
+                "machine. Collect observations with more meaningful score "
+                "variation before fitting."
+            ),
+        )
+    return sigma

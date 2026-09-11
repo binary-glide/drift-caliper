@@ -48,35 +48,69 @@ _REQUIRED_OBSERVATION_FIELDS = ("score", "reasoning", "provenance")
 _DIRECTIONS_WITH_UPPER_ARM = frozenset({"two_sided", "upper"})
 _DIRECTIONS_WITH_LOWER_ARM = frozenset({"two_sided", "lower"})
 
-# BIN-118 fallbacks: used only if a receiver's own __repr__ (or, in turn,
-# type(receiver).__name__) raises. Constants, not derived -- there is
-# nothing left to safely introspect about a receiver that fails at every
-# level of description.
+# BIN-118 fallbacks: used only if an object's own __repr__ (or, in turn,
+# type(obj).__name__) raises. Constants, not derived -- there is nothing
+# left to safely introspect about an object that fails at every level of
+# description. One constant per call site so the fallback string still
+# names what could not be described, rather than a single generic label.
 _UNREPRESENTABLE_RECEIVER = "<unrepresentable receiver>"
+_UNREPRESENTABLE_ARTEFACT = "<unrepresentable artefact>"
+
+
+def _safe_repr(obj: object, *, fallback: str) -> str:
+    """``repr(obj)``, falling back to ``type(obj).__name__``, then ``fallback``.
+
+    Shared by every place this module needs to describe a caller-supplied
+    object for an error or a ``DeliveryFailure`` *after* that object has
+    already misbehaved in some way -- a receiver that raised (BIN-118), or
+    an artefact ``Monitor.__init__``/``_check`` is rejecting (BIN-120).
+    Describing the offender must not itself raise: an object whose
+    ``__repr__`` touches a closed file or a detached ORM session is
+    reachable by ordinary third-party code, not just malice --
+    reproduced by external code review, 2026-09-11 (Linear BIN-118), and
+    the identical hazard was found again at a second call site by
+    ``code-reviewer`` on BIN-120's review.
+    """
+    try:
+        return repr(obj)
+    except Exception:
+        try:
+            return type(obj).__name__
+        except Exception:  # pragma: no cover
+            # type()/__name__ read a class attribute and cannot execute
+            # user code for an ordinary class -- unreachable in practice,
+            # but the fallback the ticket specifies still needs a floor.
+            return fallback
 
 
 def _describe_receiver(receiver: SignalReceiver) -> str:
     """Format a receiver for ``DeliveryFailure.receiver`` (BIN-118).
 
-    Tries ``repr(receiver)`` first, falling back to
-    ``type(receiver).__name__``, then to a fixed constant.
     ``Monitor._deliver`` builds ``DeliveryFailure`` from this identifier
     *after* the receiver has already raised -- a receiver whose own
-    ``__repr__`` also raises (e.g. it touches a closed file or a detached
-    ORM session) must not let that second exception escape ``record()`` in
-    turn. Reachable by ordinary third-party code, not just malice --
-    reproduced by external code review, 2026-09-11 (Linear BIN-118).
+    ``__repr__`` also raises must not let that second exception escape
+    ``record()`` in turn. See ``_safe_repr``.
     """
-    try:
-        return repr(receiver)
-    except Exception:
-        try:
-            return type(receiver).__name__
-        except Exception:  # pragma: no cover
-            # type()/__name__ read a class attribute and cannot execute
-            # user code for an ordinary class -- unreachable in practice,
-            # but the fallback the ticket specifies still needs a floor.
-            return _UNREPRESENTABLE_RECEIVER
+    return _safe_repr(receiver, fallback=_UNREPRESENTABLE_RECEIVER)
+
+
+def _describe_artefact(artefact: object) -> str:
+    """Format a rejected artefact for ``context["provided"]`` on an error (BIN-120).
+
+    ``Monitor.__init__``/``_check`` previously stored the live, rejected
+    object directly in ``context["provided"]``. Three problems with that,
+    found by ``code-reviewer`` on BIN-120's review: describing it is not
+    guaranteed safe (an object whose own ``__repr__`` raises turns a caller's
+    ``except InvalidParameterError: log(e.context)`` into an unhandled crash
+    -- the exact BIN-118 hazard, at a second boundary); every other
+    ``"provided"`` value in this codebase already holds a scalar the caller
+    passed, never a live object; and keeping a reference to a caller's
+    object alive inside an exception's ``context`` is both an unnecessary
+    lifetime extension and something a serialiser (e.g. structured logging)
+    cannot always handle. A guarded string description fixes all three at
+    once. See ``_safe_repr``.
+    """
+    return _safe_repr(artefact, fallback=_UNREPRESENTABLE_ARTEFACT)
 
 
 def _describe_exception(exc: Exception) -> str:
@@ -153,12 +187,30 @@ class Monitor:
         Raises
         ------
         InvalidParameterError
-            ``artefact`` does not satisfy the ``FittedControlLimits``
-            protocol.
+            ``artefact`` is not one of the three concrete fitted artefact
+            types this monitor knows how to check (``FittedEWMA``,
+            ``FittedCUSUM``, ``FittedShewhart``) -- including an object
+            that satisfies the ``FittedControlLimits`` protocol
+            structurally but is none of the three (BIN-120).
         """
-        if not isinstance(artefact, FittedControlLimits):
+        # BIN-120: narrowed to the three concrete chart types rather than
+        # `isinstance(artefact, FittedControlLimits)`. That protocol check
+        # alone let any structurally conforming object through the
+        # constructor -- `@runtime_checkable` verifies attribute names, not
+        # chart identity -- and `_check()` below only knows how to dispatch
+        # on these three concrete types. A third-party artefact that merely
+        # satisfied the protocol was accepted here and then failed on its
+        # first `record()` call with a raw `AssertionError`, which is not a
+        # `CaliperError` and is stripped entirely under `python -O`. This is
+        # option A from ADR-004 section 3's polymorphism discussion
+        # (narrow the boundary, not the deliberately chart-specific
+        # protocol) -- do not widen this back to the protocol check without
+        # first giving `FittedControlLimits` a genuine polymorphic
+        # detection operation, which ADR-004 rejected for R1.
+        if not isinstance(artefact, (FittedEWMA, FittedCUSUM, FittedShewhart)):
             raise InvalidParameterError(
-                "artefact must satisfy the FittedControlLimits protocol",
+                "artefact must be one of the three fitted control-limit "
+                "artefact types Monitor supports",
                 context={
                     "parameter": "artefact",
                     "constraint": (
@@ -166,11 +218,14 @@ class Monitor:
                         "value of fit_ewma(), fit_cusum(), or fit_shewhart()"
                     ),
                     "kind": "invalid",
-                    "provided": artefact,
+                    "provided": _describe_artefact(artefact),
                 },
                 recovery_hint=(
                     "Construct Monitor from the return value of fit_ewma(), "
-                    "fit_cusum(), or fit_shewhart() -- not a bare value."
+                    "fit_cusum(), or fit_shewhart() -- not a bare value, and "
+                    "not a custom object that merely satisfies the "
+                    "FittedControlLimits protocol structurally. Monitor only "
+                    "knows how to check EWMA, CUSUM, and Shewhart artefacts."
                 ),
             )
 
@@ -356,8 +411,36 @@ class Monitor:
             return self._check_ewma(artefact, score)
         if isinstance(artefact, FittedCUSUM):
             return self._check_cusum(artefact, score)
-        raise AssertionError(  # pragma: no cover
-            f"unrecognised fitted artefact type: {type(artefact).__name__!r}"
+        # BIN-120: genuinely unreachable now that the constructor narrows
+        # `artefact` to these same three concrete types -- kept only as a
+        # typed fallback for the type checker's exhaustiveness requirement
+        # (`_check` must return a tuple on every path). Previously a raw
+        # `AssertionError`: not a `CaliperError` (no `category`, no
+        # `context`), and `assert` statements are stripped entirely under
+        # `python -O`, so a change that ever did reach this branch would
+        # have produced undefined behaviour instead of an exception. A
+        # typed `CaliperError` costs nothing here and never leaves a
+        # foreign exception type as the only thing standing between a
+        # future defect and an unhandled crash.
+        raise InvalidParameterError(  # pragma: no cover
+            "artefact must be one of the three fitted control-limit "
+            "artefact types Monitor supports",
+            context={
+                "parameter": "artefact",
+                "constraint": (
+                    "must be a fitted control-limit artefact -- the return "
+                    "value of fit_ewma(), fit_cusum(), or fit_shewhart()"
+                ),
+                "kind": "invalid",
+                "provided": _describe_artefact(artefact),
+            },
+            recovery_hint=(
+                "Construct Monitor from the return value of fit_ewma(), "
+                "fit_cusum(), or fit_shewhart() -- not a bare value, and "
+                "not a custom object that merely satisfies the "
+                "FittedControlLimits protocol structurally. Monitor only "
+                "knows how to check EWMA, CUSUM, and Shewhart artefacts."
+            ),
         )
 
     def _check_shewhart(

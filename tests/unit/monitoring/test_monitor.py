@@ -84,6 +84,8 @@ fitting test file.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 
 import caliper
@@ -200,6 +202,71 @@ def _fitted_shewhart(
         count=DEFAULT_SUFFICIENCY_THRESHOLD + 5,
     )
     return fit_shewhart(baseline, target_arl=_SHAPE_TEST_TARGET_ARL)
+
+
+@dataclass(frozen=True)
+class _FakeConformingArtefact:
+    """Satisfies ``FittedControlLimits`` structurally, but not a real chart type.
+
+    BIN-120 (external code review, 2026-09-11, reproduced): exposes every
+    attribute name the ``@runtime_checkable`` ``FittedControlLimits``
+    protocol requires (ADR-004 section 1) -- so
+    ``isinstance(_FakeConformingArtefact(), FittedControlLimits)`` is
+    ``True`` -- but is none of the three concrete types
+    (``FittedEWMA``/``FittedCUSUM``/``FittedShewhart``) ``Monitor._check()``
+    actually knows how to dispatch on. Used only to prove that a structural
+    protocol match must not, by itself, be treated as sufficient for
+    ``Monitor``'s constructor to accept an artefact -- see ADR-004 section 3
+    for why the protocol is deliberately *not* extended with a polymorphic
+    detection operation instead (the fix this class's test exercises is
+    "narrow the constructor", not "widen the protocol").
+    """
+
+    chart_type: str = "unsupported_chart"
+    baseline_mean: float = 0.5
+    baseline_spread: float = 0.1
+    sigma_estimate: float = 0.1
+    sigma_estimation_method: str = "moving_range"
+    observation_count: int = DEFAULT_SUFFICIENCY_THRESHOLD
+    provenance_model_version: str = _MODEL_VERSION
+    provenance_criteria: str = _CRITERIA
+    requested_arl: float = _SHAPE_TEST_TARGET_ARL
+    achieved_arl: float = _SHAPE_TEST_TARGET_ARL
+    calibration_method: str = "unsupported_method"
+
+
+class _ReprRaisingConformingArtefact:
+    """Satisfies ``FittedControlLimits`` structurally; its own ``__repr__`` raises.
+
+    `code-reviewer`'s BIN-120 review (2026-09-11), blocker 2: before the
+    fix, ``Monitor.__init__``'s rejection stored the live, rejected
+    ``artefact`` object directly in
+    ``InvalidParameterError.context["provided"]``. A caller doing exactly
+    what ``ADR-008`` says ``context`` is *for* --
+    ``except InvalidParameterError as e: log.warning(..., **e.context)`` --
+    would crash the moment logging touched ``provided``, for an artefact
+    whose own ``__repr__`` fails. The exact ``BIN-118`` hazard
+    (``_Hostile``/``_ReprRaisingReceiver`` in ``test_signal_delivery.py``),
+    reproduced here at a second boundary. Plain attributes (not a frozen
+    dataclass, unlike ``_FakeConformingArtefact``) so the custom
+    ``__repr__`` below is the only one defined -- a dataclass would still
+    generate its own unless explicitly suppressed.
+    """
+
+    chart_type = "unsupported_chart"
+    baseline_mean = 0.5
+    baseline_spread = 0.1
+    sigma_estimate = 0.1
+    sigma_estimation_method = "moving_range"
+    observation_count = DEFAULT_SUFFICIENCY_THRESHOLD
+    provenance_model_version = _MODEL_VERSION
+    provenance_criteria = _CRITERIA
+    requested_arl = _SHAPE_TEST_TARGET_ARL
+    achieved_arl = _SHAPE_TEST_TARGET_ARL
+    calibration_method = "unsupported_method"
+
+    def __repr__(self) -> str:
+        raise RuntimeError("repr exploded")
 
 
 def _ewma_first_call_in_control_shift(
@@ -558,6 +625,132 @@ def test_constructor_rejects_a_non_artefact() -> None:
     assert error.category == "invalid_parameter"
     assert error.context["parameter"] == "artefact"
     assert error.context["kind"] == "invalid"
+
+
+def test_constructor_rejects_a_structurally_conforming_but_unsupported_artefact() -> (
+    None
+):
+    """A protocol-satisfying object that is not EWMA/CUSUM/Shewhart is still rejected.
+
+    BIN-120 (external code review, 2026-09-11, reproduced). Before this fix,
+    ``isinstance(artefact, FittedControlLimits)`` -- true for
+    ``_FakeConformingArtefact``, since the protocol is ``@runtime_checkable``
+    (ADR-004 section 1) -- was the constructor's *only* gate, so this object
+    was accepted here and only failed later, on its first ``record()`` call,
+    with a raw ``AssertionError`` inside ``Monitor._check()``. That is not a
+    ``CaliperError`` (ADR-002/ADR-008: no ``category``, no ``context``), and
+    it is worse than an ordinary wrong-type error: ``assert`` statements are
+    stripped entirely under ``python -O``, so the failure would become
+    undefined behaviour rather than an exception under optimisation.
+
+    The fix is option A from the ticket (narrowing the constructor to the
+    three supported concrete types, raising ``InvalidParameterError`` on
+    anything else) -- not option B (a genuinely polymorphic protocol),
+    which would reopen ADR-004 section 3's deliberate rejection of shared
+    detection boundaries. This test pins option A's observable contract: an
+    object the constructor rejects now, rather than one ``record()`` fails
+    on later.
+    """
+    # Arrange
+    fake_artefact = _FakeConformingArtefact()
+    # Precondition: this object really does satisfy the protocol
+    # structurally -- otherwise this test would not be exercising the
+    # defect at all (it would just be testing the already-covered
+    # non-artefact case above).
+    assert isinstance(fake_artefact, FittedControlLimits)
+
+    # Act
+    with pytest.raises(InvalidParameterError) as exc_info:
+        Monitor(fake_artefact)
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "invalid_parameter"
+    assert error.context["parameter"] == "artefact"
+    assert error.context["kind"] == "invalid"
+
+
+def test_constructor_accepts_all_three_concrete_fitted_artefact_types() -> None:
+    """The narrowed constructor (BIN-120) still accepts every chart type it supports.
+
+    Direct regression check for the ticket's acceptance criterion "the
+    three built-ins still construct ... exactly as before" -- narrowing the
+    constructor to reject an unsupported structural match (the test above)
+    must not narrow it so far that it also rejects a supported one.
+    """
+    # Act / Assert -- none of these may raise
+    Monitor(_fitted_ewma())
+    Monitor(_fitted_cusum())
+    Monitor(_fitted_shewhart())
+
+
+def test_constructor_rejected_artefact_context_is_a_string_not_the_live_object() -> (
+    None
+):
+    """``context["provided"]`` must hold a description, not the caller's live object.
+
+    `code-reviewer`'s BIN-120 review (2026-09-11), blocker 2: every other
+    ``"provided"`` value in this codebase holds a scalar the caller passed
+    (``measurement/domain/result.py``, ``criteria.py``, ``judge.py``,
+    ``model_version.py``, ``baseline.py``, and all three fitting modules)
+    -- ``Monitor``'s constructor was the one place storing a live object
+    instead. Besides the ``__repr__``-safety hazard the next test covers,
+    keeping a caller's object alive inside a raised exception's context is
+    an unnecessary lifetime extension and can make ``context``
+    unserialisable (e.g. to structured logging).
+    """
+    # Arrange
+    fake_artefact = _FakeConformingArtefact()
+
+    # Act
+    with pytest.raises(InvalidParameterError) as exc_info:
+        Monitor(fake_artefact)
+
+    # Assert
+    error = exc_info.value
+    assert isinstance(error.context["provided"], str)
+    # Identity, not equality -- proves this is a *description*, not the
+    # caller's live object kept alive inside the exception (mypy flags a
+    # str/object `==`/`is` comparison as non-overlapping once the
+    # isinstance check above has narrowed the left side to `str`; `id()`
+    # sidesteps that while asserting the same thing).
+    assert id(error.context["provided"]) != id(fake_artefact)
+
+
+def test_constructor_rejects_an_artefact_whose_repr_itself_raises() -> None:
+    """Describing a rejected artefact for ``context["provided"]`` must not itself raise.
+
+    `code-reviewer`'s BIN-120 review (2026-09-11), blocker 2, reproduced
+    directly: before the fix, building ``InvalidParameterError`` from
+    ``_ReprRaisingConformingArtefact`` would have stored the live object in
+    ``context["provided"]`` without incident (storing a reference never
+    calls ``__repr__``) -- but the instant a caller's own ``except`` block
+    logged or printed ``e.context``, ``repr()`` would run implicitly and
+    raise, crashing code that was only trying to handle the error Caliper
+    had already raised correctly. ``Monitor.__init__`` itself must still
+    raise ``InvalidParameterError`` cleanly, with ``context["provided"]``
+    already a safe string.
+    """
+    # Arrange
+    fake_artefact = _ReprRaisingConformingArtefact()
+    # Precondition: this object really does satisfy the protocol
+    # structurally -- otherwise this test would not be exercising the
+    # rejection path at all.
+    assert isinstance(fake_artefact, FittedControlLimits)
+
+    # Act
+    with pytest.raises(InvalidParameterError) as exc_info:
+        Monitor(fake_artefact)
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "invalid_parameter"
+    assert error.context["parameter"] == "artefact"
+    assert error.context["kind"] == "invalid"
+    assert isinstance(error.context["provided"], str)
+    # The description itself must be safely obtainable -- proof that no
+    # exception from `__repr__` escaped while building the error.
+    str(error.context)
 
 
 # --- DX surface: top-level promotion ---------------------------------------------

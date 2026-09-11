@@ -29,10 +29,13 @@ is expected to fail with that error, not to pass, until then.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD
 from caliper.baseline.domain.spc_numerics import _moving_range_sigma
+from caliper.errors import DegenerateBaselineError
 
 # The unbiasing constant d_2 for a moving-range span of 2. Same citation
 # chain as ewma_fitting.py's _MOVING_RANGE_D2 (Montgomery Appendix VI,
@@ -88,3 +91,130 @@ def test_moving_range_sigma_matches_a_hand_computed_value_for_irregular_diffs() 
     expected_mean_moving_range = (0.30 + 0.10 + 0.40) / 3
     expected_sigma = expected_mean_moving_range / _MOVING_RANGE_D2
     assert sigma == pytest.approx(expected_sigma, rel=1e-9)
+
+
+# --- Sad path: non-finite or zero moving-range aggregate (BIN-119) --------------
+#
+# External code review (Codex), 2026-09-11, reproduced. Both cases below were
+# verified directly against this function, with real float64 arithmetic, before
+# writing these tests -- no hand-computed expected value is asserted, because
+# the point of both tests is that the *aggregate itself* is unusable (+inf or
+# exactly 0.0), not a specific numeric outcome:
+#
+#   Half 1 -- alternating +/-1e308 (each individual value finite; `ScoringResult`
+#   already enforces that -- but each consecutive difference is ~2e308, which
+#   overflows float64's finite range): `_moving_range_sigma` currently returns
+#   `float("inf")`, silently. Left unchecked, this lets `fit_ewma`/`fit_cusum`/
+#   `fit_shewhart` all construct a "successfully fitted" artefact whose control
+#   limits are +/-inf -- a chart that can never signal. That is this library's
+#   worst possible failure mode: not a wrong answer, a confident, permanent
+#   silence.
+#
+#   Half 2 -- one minimum positive subnormal (5e-324) among otherwise-identical
+#   values (two distinct values, so the zero-variance guard in every fit_*()
+#   function does not fire): every consecutive difference is so small that the
+#   *mean* moving range underflows to exactly 0.0 in float64 arithmetic.
+#   `_moving_range_sigma` currently returns `0.0`, silently. Left unchecked,
+#   `Monitor.record()` against a CUSUM artefact fitted from this divides by
+#   `sigma_estimate` and raises a raw `ZeroDivisionError` -- not a
+#   `CaliperError` (ADR-002/ADR-008): no `category`, no `context` to branch
+#   on. See `tests/unit/monitoring/test_monitor.py` for the direct
+#   `Monitor.record()` reproduction, and `tests/unit/baseline/
+#   test_ewma_fitting.py`/`test_cusum_fitting.py`/`test_shewhart_fitting.py`
+#   for the same two cases exercised through each chart's public `fit_*()`
+#   entry point -- confirmed empirically (not assumed) that all three charts
+#   currently construct a bad artefact from both cases, not just CUSUM.
+#
+# This file's own docstring already frames `_moving_range_sigma` as
+# deliberately having "no public entry point" -- its only callers are the
+# three `fit_*()` functions, never an engineer directly -- so a
+# `DegenerateBaselineError` raised here is not a foreign exception type
+# escaping a public boundary; it propagates unchanged through whichever
+# `fit_*()` called this function, exactly like the existing zero-variance
+# guard those functions already apply to the raw scores before ever reaching
+# this estimator.
+#
+# `reason` is descriptive, not a closed discriminator (CLAUDE.md: do not
+# conflate it with `kind`) -- the two values below are this test file's own
+# proposed contract, distinct from the existing `"zero_variance"` reason
+# (which stays a separate, working guard -- see the existing test above:
+# these are two *additional* guards, catching a different thing each,
+# not a replacement for it). `domain-implementer` should confirm these two
+# exact strings against `docs/domain-model.md`'s Error Contract Reference
+# (neither is named there yet) or choose different ones and update this
+# file plus every sibling fitting test file that also asserts on them,
+# identically -- all four files must agree, since they all name the same
+# guard, reused by all three chart types through this one shared module.
+_NON_FINITE_SIGMA_REASON = "non_finite_sigma_estimate"
+_SIGMA_UNDERFLOW_REASON = "sigma_estimate_underflow"
+
+
+def test_raises_degenerate_baseline_error_when_aggregate_overflows_to_infinity() -> (
+    None
+):
+    """Alternating near-float-max scores overflow the moving-range aggregate to +inf.
+
+    Reproduces BIN-119 Half 1 directly against the shared estimator, not
+    only through a fitting function's round-trip -- the same reasoning
+    ``test_moving_range_sigma_matches_a_hand_computed_value`` above already
+    gives for testing this function directly (a helper shared by three
+    callers divides itself out of any assertion made only against one
+    caller's public output).
+    """
+    # Arrange -- every individual value is finite; every consecutive
+    # difference overflows float64's finite range.
+    scores = [1e308, -1e308] * (DEFAULT_SUFFICIENCY_THRESHOLD // 2)
+
+    # Act
+    with pytest.raises(DegenerateBaselineError) as exc_info:
+        _moving_range_sigma(scores)
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "degenerate_baseline"
+    assert error.context["reason"] == _NON_FINITE_SIGMA_REASON
+
+
+def test_raises_degenerate_baseline_error_when_aggregate_underflows_to_zero() -> None:
+    """A real-but-tiny amount of variance underflows the moving-range aggregate to 0.0.
+
+    Reproduces BIN-119 Half 2 directly against the shared estimator. Two
+    distinct values are present (0.0 and the smallest positive subnormal
+    float) -- this is not the zero-variance case
+    (``test_moving_range_sigma_matches_a_hand_computed_value``'s siblings
+    in the fitting test files cover that separately); the aggregate is
+    unusable despite genuine variance existing in principle.
+    """
+    # Arrange -- one subnormal among otherwise-identical values.
+    half = DEFAULT_SUFFICIENCY_THRESHOLD // 2
+    scores = [0.0] * half + [5e-324] + [0.0] * (half - 1)
+    assert len(set(scores)) == 2  # precondition: not the zero-variance case
+
+    # Act
+    with pytest.raises(DegenerateBaselineError) as exc_info:
+        _moving_range_sigma(scores)
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "degenerate_baseline"
+    assert error.context["reason"] == _SIGMA_UNDERFLOW_REASON
+
+
+def test_does_not_raise_for_an_ordinary_finite_positive_aggregate() -> None:
+    """Guard: the new checks must not false-positive on an ordinary baseline.
+
+    Regression check that the non-finite/underflow guards above are
+    additional conditions, not a tightening of what counts as valid --
+    this file's own existing hand-computed-value tests already prove this
+    implicitly, but this test pins it as an explicit, named assertion of
+    the negative case.
+    """
+    # Arrange
+    scores = [0.50, 0.60] * (DEFAULT_SUFFICIENCY_THRESHOLD // 2)
+
+    # Act
+    sigma = _moving_range_sigma(scores)
+
+    # Assert
+    assert math.isfinite(sigma)
+    assert sigma > 0.0

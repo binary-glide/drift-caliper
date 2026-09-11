@@ -182,6 +182,7 @@ from caliper.errors import (
     InsufficientBaselineError,
     InvalidParameterError,
 )
+from caliper.measurement import Provenance
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Arbitrary, sufficiently-large target ARL0 and reference value used across
@@ -200,6 +201,19 @@ _CUSTOM_REFERENCE_VALUE = 0.8
 
 _IDENTICAL_SCORE = 0.62
 _ZERO_VARIANCE_REASON = "zero_variance"
+
+# BIN-119: two additional `DegenerateBaselineError.context["reason"]` values,
+# for a moving-range aggregate that overflows to +inf or underflows to 0.0 --
+# distinct from `_ZERO_VARIANCE_REASON` above, which stays a separate,
+# working guard over the *raw scores*. See
+# `tests/unit/baseline/test_spc_numerics.py`'s identically-named constants
+# and its "Sad path: non-finite or zero moving-range aggregate" section for
+# the full reasoning -- this file's values must agree with that file's and
+# with `test_ewma_fitting.py`'s/`test_shewhart_fitting.py`'s, since all four
+# name the same guard, reused by all three chart types through the one
+# shared `spc_numerics` module.
+_NON_FINITE_SIGMA_REASON = "non_finite_sigma_estimate"
+_SIGMA_UNDERFLOW_REASON = "sigma_estimate_underflow"
 
 # The three-member closed direction set ADR-004 section 6 specifies. Pinned
 # once, here, rather than repeated as a magic literal across every test that
@@ -229,6 +243,21 @@ def _baseline_with_observations(count: int, *, score: float | None = None) -> Ba
             baseline.record(
                 ScoringResultFactory(provenance=shared_provenance, score=score)
             )
+    return baseline
+
+
+def _baseline_from_scores(scores: list[float], provenance: Provenance) -> Baseline:
+    """Build a ``Baseline`` recording exactly ``scores``, in the given order.
+
+    Mirrors ``test_shewhart_fitting.py``'s identically-named/-shaped helper
+    -- needed here (BIN-119) because the overflow/underflow scenarios
+    require an exact, ordered sequence of scores, which
+    ``_baseline_with_observations``'s single-repeated-``score`` shape
+    cannot express.
+    """
+    baseline = Baseline()
+    for score in scores:
+        baseline.record(ScoringResultFactory(provenance=provenance, score=score))
     return baseline
 
 
@@ -507,6 +536,73 @@ def test_does_not_raise_degenerate_baseline_error_when_exactly_one_score_differs
 
     # Assert
     assert isinstance(result, FittedCUSUM)
+
+
+# --- Sad path: non-finite or zero moving-range sigma (BIN-119) ------------------
+#
+# External code review (Codex), 2026-09-11, reproduced against this exact
+# function -- and this is the chart where the review's Half 2 crash was
+# actually observed: `Monitor.record()` against a `FittedCUSUM` fitted from
+# a zero-underflowed baseline divides by `sigma_estimate` and raises a raw
+# `ZeroDivisionError`, not a `CaliperError`. See
+# `tests/unit/baseline/test_spc_numerics.py`'s identically reasoned section
+# for the full citation of what was verified (including that EWMA and
+# Shewhart also construct a bad artefact from both cases, even though only
+# CUSUM crashes downstream at `record()`) and why `DegenerateBaselineError`
+# is the right type; and `tests/unit/monitoring/test_monitor.py` for the
+# direct `Monitor.record()` reproduction of the `ZeroDivisionError` this fix
+# must prevent from ever being reachable, by rejecting at fit time instead.
+
+
+def test_raises_degenerate_baseline_error_when_moving_range_is_non_finite() -> None:
+    """Alternating near-float-max scores overflow the moving-range aggregate to +inf.
+
+    Must be rejected at fit time -- no ``FittedCUSUM`` with
+    ``sigma_estimate=inf`` may ever be constructed.
+    """
+    # Arrange -- two distinct values, so the zero-variance guard above does
+    # not fire first.
+    provenance = ProvenanceFactory()
+    scores = [1e308, -1e308] * (DEFAULT_SUFFICIENCY_THRESHOLD // 2)
+    baseline = _baseline_from_scores(scores, provenance)
+
+    # Act
+    with pytest.raises(DegenerateBaselineError) as exc_info:
+        fit_cusum(baseline, target_arl=_SHAPE_TEST_TARGET_ARL)
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "degenerate_baseline"
+    assert error.context["reason"] == _NON_FINITE_SIGMA_REASON
+
+
+def test_raises_degenerate_baseline_error_when_moving_range_underflows_to_zero() -> (
+    None
+):
+    """A baseline with real variance still underflows the moving-range aggregate to 0.0.
+
+    Two distinct values (0.0 and the smallest positive subnormal float), so
+    the zero-variance guard above does not fire. Must be rejected at fit
+    time -- this is the exact baseline shape that, unpatched, lets
+    ``Monitor.record()`` raise a raw ``ZeroDivisionError`` later (see the
+    section docstring above); rejecting here at fit time means no
+    ``FittedCUSUM`` with ``sigma_estimate=0.0`` can ever reach a ``Monitor``
+    in the first place.
+    """
+    # Arrange -- one subnormal among an otherwise-identical baseline.
+    provenance = ProvenanceFactory()
+    half = DEFAULT_SUFFICIENCY_THRESHOLD // 2
+    scores = [0.0] * half + [5e-324] + [0.0] * (half - 1)
+    baseline = _baseline_from_scores(scores, provenance)
+
+    # Act
+    with pytest.raises(DegenerateBaselineError) as exc_info:
+        fit_cusum(baseline, target_arl=_SHAPE_TEST_TARGET_ARL)
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "degenerate_baseline"
+    assert error.context["reason"] == _SIGMA_UNDERFLOW_REASON
 
 
 # --- Sad path: invalid reference value --------------------------------------
