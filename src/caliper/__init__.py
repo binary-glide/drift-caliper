@@ -7,10 +7,12 @@ trusted Phase I baseline, then monitor Phase II observations against them.
 ``Judge``, the value objects it produces, ``JudgeProviderPort`` and the
 response type an adapter returns, ``Baseline``, the three ``fit_*`` functions
 and the fitted artefact types they return, ``Monitor`` and
-``MonitoringResult`` for Phase II recording, and the full ``CaliperError``
-taxonomy an engineer catches. Subpackage imports (``caliper.measurement``,
-``caliper.baseline``, ``caliper.monitoring``) keep working unconditionally --
-this front door only adds a shorter path alongside them, it replaces nothing.
+``MonitoringResult`` for Phase II recording, ``DeliveryFailure``,
+``SignalReceiver`` and the built-in ``log_receiver`` for signal delivery
+(ADR-010), and the full ``CaliperError`` taxonomy an engineer catches.
+Subpackage imports (``caliper.measurement``, ``caliper.baseline``,
+``caliper.monitoring``) keep working unconditionally -- this front door
+only adds a shorter path alongside them, it replaces nothing.
 
 ``__all__`` was ``[]`` until BIN-110, and that was a deliberate deferral
 rather than an oversight: promoting names one story at a time would have
@@ -60,13 +62,20 @@ from caliper.measurement import (
     ScoringCriteria,
     ScoringResult,
 )
-from caliper.monitoring import Monitor, MonitoringResult
+from caliper.monitoring import (
+    DeliveryFailure,
+    Monitor,
+    MonitoringResult,
+    SignalReceiver,
+    log_receiver,
+)
 
 __all__ = [
     "Baseline",
     "CaliperError",
     "DataQualityConcern",
     "DegenerateBaselineError",
+    "DeliveryFailure",
     "FittedCUSUM",
     "FittedControlLimits",
     "FittedEWMA",
@@ -88,9 +97,11 @@ __all__ = [
     "ProviderError",
     "ScoringCriteria",
     "ScoringResult",
+    "SignalReceiver",
     "SufficiencyResult",
     "compare_provenance",
     "fit_cusum",
     "fit_ewma",
     "fit_shewhart",
+    "log_receiver",
 ]

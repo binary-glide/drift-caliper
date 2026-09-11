@@ -14,9 +14,15 @@ chart-specific accumulator state: nothing meaningful for Shewhart
 (memoryless by design), the smoothed statistic for EWMA, and the two
 one-sided running sums for CUSUM. Two ``Monitor``s constructed from the same
 artefact hold entirely independent accumulators (ADR-009 section 1).
+
+Extended by ``docs/architecture/adr/010-signal-delivery-and-absorb-but-surface.md``
+with a ``receivers`` constructor parameter and a synchronous delivery step
+inside ``record()`` -- see that method's docstring.
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 from caliper.baseline.domain.compare_provenance import compare_provenance
 from caliper.baseline.domain.fitted_control_limits import FittedControlLimits
@@ -25,7 +31,9 @@ from caliper.baseline.domain.fitted_ewma import FittedEWMA
 from caliper.baseline.domain.fitted_shewhart import FittedShewhart
 from caliper.errors import InvalidObservationError, InvalidParameterError
 from caliper.measurement import ScoringResult
+from caliper.monitoring.domain.delivery_failure import DeliveryFailure
 from caliper.monitoring.domain.monitoring_result import MonitoringResult
+from caliper.monitoring.domain.signal_receiver import SignalReceiver
 
 # Fields a candidate observation must expose to be treated as a complete
 # ScoringResult. Mirrors caliper.baseline.domain.baseline's identically-named
@@ -65,7 +73,11 @@ class Monitor:
     """
 
     def __init__(
-        self, artefact: FittedControlLimits, *, retain_history: bool = True
+        self,
+        artefact: FittedControlLimits,
+        *,
+        retain_history: bool = True,
+        receivers: Sequence[SignalReceiver] = (),
     ) -> None:
         """Construct a ``Monitor`` from a fitted control-limit artefact.
 
@@ -86,6 +98,12 @@ class Monitor:
             (ADR-009 section 7). Pass ``False`` to opt out entirely, or
             call ``clear_history()`` periodically to bound growth
             manually.
+        receivers
+            Callables invoked, in order, with the ``MonitoringResult``
+            whenever ``record()`` produces a genuine signal (ADR-010
+            section 3). Defaults to ``()`` -- no receivers configured.
+            Fixed for this monitor's entire lifetime -- there is no
+            add/remove method in R1.
 
         Raises
         ------
@@ -113,6 +131,7 @@ class Monitor:
 
         self._artefact = artefact
         self._retain_history = retain_history
+        self._receivers = tuple(receivers)
         self._history: list[MonitoringResult] = []
 
         # Chart-specific accumulator state -- private, per-instance, never
@@ -150,8 +169,16 @@ class Monitor:
         ``ScoringResult``; that its provenance matches this monitor's
         fitted artefact (``compare_provenance()``, BIN-68). Only once both
         checks pass does the chart-specific comparison run and the
-        accumulator (if any) update. A refused attempt never appears in
-        ``.history``.
+        accumulator (if any) update.
+
+        On a genuine signal (``is_in_control is False``), every configured
+        receiver is then invoked, in order, with the result -- each inside
+        its own ``try``/``except`` so one receiver's failure never stops
+        the next from being attempted (ADR-010 section 4, "absorb, but
+        surface"). A receiver's exception is captured into the returned
+        result's ``delivery_failures``, never re-raised and never silently
+        discarded. A refused attempt (the two precondition violations
+        below) never appears in ``.history`` and never reaches delivery.
 
         Parameters
         ----------
@@ -162,9 +189,11 @@ class Monitor:
         Returns
         -------
         MonitoringResult
-            Describes whether the process remains in control. Never
-            raised for a genuine out-of-control determination -- that is
-            a normal, successful return value (BR-7).
+            Describes whether the process remains in control, and, on a
+            signal, the direction of departure and any delivery failures.
+            Never raised for a genuine out-of-control determination, and
+            never raised for a delivery failure -- both are normal,
+            successful return values (BR-7; ADR-010 section 1).
 
         Raises
         ------
@@ -193,17 +222,61 @@ class Monitor:
 
         compare_provenance(observation, self._artefact)
 
-        is_in_control = self._check(observation.score)
-        outcome = MonitoringResult(
+        is_in_control, direction = self._check(observation.score)
+        provisional = MonitoringResult(
             is_in_control=is_in_control,
             observation=observation,
             chart_type=self._artefact.chart_type,
+            direction=direction,
+            fitted_artefact=self._artefact,
         )
+
+        outcome = provisional
+        if not is_in_control:
+            outcome = self._deliver(provisional)
+
         if self._retain_history:
             self._history.append(outcome)
         return outcome
 
-    def _check(self, score: float) -> bool:
+    def _deliver(self, signal: MonitoringResult) -> MonitoringResult:
+        """Invoke every configured receiver with ``signal``, in order.
+
+        Mirrors ADR-010 section 4's delivery sequence exactly:
+
+        1. (Step 2, done by the caller) ``signal`` is the provisional
+           result -- ``delivery_failures=()`` -- built by ``record()``.
+        2. (Step 3) Every receiver is called with that *same* unmodified
+           ``signal``, each inside its own ``try``/``except`` so one
+           receiver's failure never stops the next from being attempted.
+           A failure is recorded as a ``DeliveryFailure`` built entirely
+           from the caught exception (``type(exc).__name__``, ``str(exc)``)
+           -- never by consulting anything the receiver itself reports
+           (ADR-010 section 1). No receiver ever observes another
+           receiver's failure: each sees the same pristine, empty
+           ``delivery_failures`` regardless of position in ``receivers``.
+        3. (Step 4) If any failures were collected, exactly one
+           ``model_copy`` produces the final result after the loop --
+           never per-failure. That final result is what ``record()``
+           returns and retains in history.
+        """
+        failures: list[DeliveryFailure] = []
+        for receiver in self._receivers:
+            try:
+                receiver(signal)
+            except Exception as exc:
+                failures.append(
+                    DeliveryFailure(
+                        receiver=repr(receiver),
+                        error_type=type(exc).__name__,
+                        error_message=str(exc),
+                    )
+                )
+        if not failures:
+            return signal
+        return signal.model_copy(update={"delivery_failures": tuple(failures)})
+
+    def _check(self, score: float) -> tuple[bool, str | None]:
         """Dispatch to the chart-specific comparison for this monitor's artefact.
 
         Narrows ``self._artefact`` to its concrete chart type via
@@ -211,6 +284,14 @@ class Monitor:
         deliberately excludes detection boundaries (ADR-004 section 3), so
         the chart-specific fields (``ucl``/``lcl``, ``decision_interval``,
         etc.) are only reachable on the concrete type.
+
+        Returns
+        -------
+        tuple[bool, str | None]
+            ``(is_in_control, direction)``. ``direction`` is ``"upper"``
+            or ``"lower"`` when a signal occurred (never
+            ``"two_sided"`` -- see ``MonitoringResult.direction``'s field
+            comment), or ``None`` when in control.
         """
         artefact = self._artefact
         if isinstance(artefact, FittedShewhart):
@@ -223,16 +304,24 @@ class Monitor:
             f"unrecognised fitted artefact type: {type(artefact).__name__!r}"
         )
 
-    def _check_shewhart(self, artefact: FittedShewhart, score: float) -> bool:
+    def _check_shewhart(
+        self, artefact: FittedShewhart, score: float
+    ) -> tuple[bool, str | None]:
         """Memoryless: compares ``score`` directly against ``ucl``/``lcl``.
 
         Strict inequality throughout (ADR-009 section 5, verified against
         Montgomery 7th ed.): a point exactly at a control limit is in
         control, not out.
         """
-        return not (score > artefact.ucl or score < artefact.lcl)
+        if score > artefact.ucl:
+            return False, "upper"
+        if score < artefact.lcl:
+            return False, "lower"
+        return True, None
 
-    def _check_ewma(self, artefact: FittedEWMA, score: float) -> bool:
+    def _check_ewma(
+        self, artefact: FittedEWMA, score: float
+    ) -> tuple[bool, str | None]:
         """Recursive: update the smoothed statistic, then compare to ``ucl``/``lcl``.
 
         Notes
@@ -254,11 +343,15 @@ class Monitor:
             artefact.smoothing_param * score
             + (1.0 - artefact.smoothing_param) * self._ewma_statistic
         )
-        return not (
-            self._ewma_statistic > artefact.ucl or self._ewma_statistic < artefact.lcl
-        )
+        if self._ewma_statistic > artefact.ucl:
+            return False, "upper"
+        if self._ewma_statistic < artefact.lcl:
+            return False, "lower"
+        return True, None
 
-    def _check_cusum(self, artefact: FittedCUSUM, score: float) -> bool:
+    def _check_cusum(
+        self, artefact: FittedCUSUM, score: float
+    ) -> tuple[bool, str | None]:
         """Recursive: update both one-sided sums, then compare the relevant one(s).
 
         Notes
@@ -273,7 +366,11 @@ class Monitor:
         history (BIN-69 SC5). A signal is ``S_hi > h`` or ``S_lo > h`` --
         strict inequality (ADR-009 section 5) -- gated by ``direction``:
         ``"two_sided"`` checks both arms, ``"upper"``/``"lower"`` checks
-        only its own.
+        only its own. The reported direction is always the arm that
+        actually crossed ``h`` -- never ``artefact.direction`` itself,
+        which would leak the three-valued configuration vocabulary onto
+        this two-valued outcome (``MonitoringResult.direction``'s field
+        comment; domain-model.md's explicit warning).
 
         Both sums are always updated regardless of ``direction``, so
         switching which arm(s) are *checked* never depends on which
@@ -289,9 +386,8 @@ class Monitor:
         self._cusum_s_hi = max(0.0, self._cusum_s_hi + standardised - k)
         self._cusum_s_lo = max(0.0, self._cusum_s_lo - standardised - k)
 
-        signalled = False
-        if artefact.direction in _DIRECTIONS_WITH_UPPER_ARM:
-            signalled = signalled or self._cusum_s_hi > h
-        if artefact.direction in _DIRECTIONS_WITH_LOWER_ARM:
-            signalled = signalled or self._cusum_s_lo > h
-        return not signalled
+        if artefact.direction in _DIRECTIONS_WITH_UPPER_ARM and self._cusum_s_hi > h:
+            return False, "upper"
+        if artefact.direction in _DIRECTIONS_WITH_LOWER_ARM and self._cusum_s_lo > h:
+            return False, "lower"
+        return True, None

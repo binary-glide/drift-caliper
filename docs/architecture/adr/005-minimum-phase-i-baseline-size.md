@@ -526,6 +526,41 @@ scripts `adr005_study.py` / `adr005_grid.py` alongside it) answers: **no.**
 Required baseline size scales with `target_arl`. This amendment corrects the
 model, not just the number.
 
+⚠️ **THRESHOLDS UNDER REVIEW — added 2026-09-11, hours after this amendment
+merged.** An OCR'd extract of **Jones, Champ & Rigdon (2001)** — this
+amendment's own stated exit condition — was obtained the same day, and it
+suggests `adequate()`'s figures below are **too low**:
+
+- JCR require **300 subgroups of size 5 (= 1500 observations)** at *r* = 0.2,
+  Caliper's `DEFAULT_SMOOTHING_PARAM`, versus the **500 individual
+  observations** this amendment adopts.
+- 🚨 They state their figures are a **best case**: they use the *most*
+  efficient unbiased σ estimator (`S_p/c₄ₘ`), note
+  `var[S_p/c₄ₘ] ≤ var[S/c₄] ≤ var[R/d₂]`, and warn that *"using a less
+  efficient estimator will result in charts that perform worse … a larger
+  sample size may be required."* **Caliper uses moving-range estimation —
+  the `R/d₂` family, the least efficient of the three.**
+
+**What is NOT in doubt:** the *model* — target-dependent adequacy, three tiers,
+the hard floor at 100. That structure is unaffected and remains correct.
+
+**Why this is not corrected here and now.** Three things are unresolved, and
+guessing any of them would repeat the error this ADR already fixed once:
+
+1. JCR's figures are **subgroups of size 5**; Caliper monitors **individuals**
+   (*n* = 1). The comparable quantity is degrees of freedom in the σ estimate,
+   and that conversion has not been done. **This is the exact trap of
+   Montgomery's 20–25.**
+2. The **criteria differ** — JCR bound the false-alarm rate at *t* = 20 to a
+   10% rise; this amendment bounds the share of baselines delivering under half
+   the requested ARL₀. Neither subsumes the other.
+3. The source is an **OCR'd extract with a known transcription error**, not the
+   paper.
+
+**Do not adjust the numbers below until a clean copy is held and the *n* = 1
+conversion is done.** Recorded on `BIN-114`. Treat `adequate()` as a
+provisional floor that is more likely to rise than fall.
+
 ### The risk-appetite parameter — RATIFIED 2026-09-11
 
 🚨 **Caliper's stated risk appetite: at most 5% of Phase I baselines may

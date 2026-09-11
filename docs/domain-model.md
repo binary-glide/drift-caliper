@@ -77,21 +77,23 @@ Two bounded contexts, visible in the feature-file directory layout (`tests/bdd/f
 
 **Boundary:** begins where a `ScoringResult` enters the baseline; ends at the fitted artefact and Phase II provenance comparison. The Baseline context depends on Measurement's `ScoringResult` and `Provenance` value objects.
 
-### Monitoring (new, ADR-009)
+### Monitoring (extended, ADR-009 + ADR-010)
 
-**Responsible for:** recording Phase II observations against a fitted control-limit artefact, checking each one for an out-of-control signal (chart-type-specific: recursive for EWMA/CUSUM, memoryless for Shewhart), and making a session's recording history reviewable in-memory.
+**Responsible for:** recording Phase II observations against a fitted control-limit artefact, checking each one for an out-of-control signal (chart-type-specific: recursive for EWMA/CUSUM, memoryless for Shewhart), making a session's recording history reviewable in-memory, and — as of ADR-010 — delivering a signal's full content to zero or more engineer-supplied receivers, absorbing but surfacing any receiver failure.
 
-**Stories:** BIN-69 (record and check), BIN-72 (in-memory history).
+**Stories:** BIN-69 (record and check), BIN-72 (in-memory history), BIN-75 (signal content + delivery mechanism), BIN-76 (built-in log receiver).
 
-**Boundary:** begins where a `ScoringResult` and a `FittedControlLimits` artefact meet at Phase II; ends at the `MonitoringResult` returned per call and the in-memory `history` of those results. Depends on both Measurement (`ScoringResult`, `Provenance`) and Baseline (`FittedControlLimits`, `compare_provenance()`).
+**Boundary:** begins where a `ScoringResult` and a `FittedControlLimits` artefact meet at Phase II; ends at the `MonitoringResult` returned per call (now carrying direction, the fitted artefact, and any delivery failures — ADR-010), the in-memory `history` of those results, and delivery to any configured `SignalReceiver`s. Depends on both Measurement (`ScoringResult`, `Provenance`) and Baseline (`FittedControlLimits`, `compare_provenance()`).
 
-**Established by ADR-009** (`docs/architecture/adr/009-phase-ii-monitor-and-observation-store.md`), settling BIN-69's OQ-1/A1/A2/OQ-3/OQ-4 and BIN-72's A1/A2/OQ-1/OQ-2 together, since both stories' requirements reviews found them to be one coupled decision, not several independent ones. Architecture-level design only — full field-level object-map and glossary treatment is `domain-modeller`'s next output, not finished here.
+**Established by ADR-009** (`docs/architecture/adr/009-phase-ii-monitor-and-observation-store.md`), settling BIN-69's OQ-1/A1/A2/OQ-3/OQ-4 and BIN-72's A1/A2/OQ-1/OQ-2 together. **Extended by ADR-010** (`docs/architecture/adr/010-signal-delivery-and-absorb-but-surface.md`), settling BIN-75's A1/A2/OQ-1(where)/OQ-2/OQ-3 and BIN-76's OQ-1(shared)/OQ-2/OQ-3 together, for the same reason: both stories' requirements reviews found them to be one coupled decision (BIN-76 consumes what BIN-75 defines), not two.
 
-**Central type:** `Monitor(fitted_artefact)` — a new domain type, not a service. Holds the fitted artefact reference and private, chart-specific accumulator state (nothing for Shewhart — memoryless by design; the smoothed statistic for EWMA; the two running one-sided sums for CUSUM). `Monitor.record(observation: ScoringResult) -> MonitoringResult` checks provenance internally (reusing BIN-68's `compare_provenance()`, unmodified), raises `ProvenanceMismatchError`/`InvalidObservationError` (the latter reused from Baseline's taxonomy, no new category) for the two precondition violations, and otherwise never raises — an out-of-control determination is a normal return value (`MonitoringResult.is_in_control: bool`, an explicit field per BIN-110's truthiness rule, never a `__bool__`). `Monitor.history` is a plain `tuple[MonitoringResult, ...]` (deliberately not a bespoke collection type — see ADR-009 §6, resolving the "second `Baseline`" discoverability risk BIN-72's review flagged), retained automatically unless `retain_history=False`; `Monitor.clear_history()` is the manual escape hatch for the accepted, documented unbounded-growth risk in a long-running process (ADR-009 §7). No store `Protocol`/port exists in R1 (ADR-009 §8) — the public surface is designed so BIN-73 can add one additively.
+**Central type:** `Monitor(fitted_artefact, *, retain_history=True, receivers=())` — a new domain type, not a service. Holds the fitted artefact reference, private chart-specific accumulator state (nothing for Shewhart — memoryless by design; the smoothed statistic for EWMA; the two running one-sided sums for CUSUM), and — as of ADR-010 — a sequence of `SignalReceiver` callables supplied at construction. `Monitor.record(observation: ScoringResult) -> MonitoringResult` checks provenance internally (reusing BIN-68's `compare_provenance()`, unmodified), raises `ProvenanceMismatchError`/`InvalidObservationError` (the latter reused from Baseline's taxonomy, no new category) for the two precondition violations, and otherwise never raises — an out-of-control determination is a normal return value (`MonitoringResult.is_in_control: bool`, an explicit field per BIN-110's truthiness rule, never a `__bool__`). On a genuine signal (`is_in_control is False`), `record()` synchronously invokes every configured receiver with the result, absorbing any exception a receiver raises into `MonitoringResult.delivery_failures` rather than letting it propagate or discarding it (ADR-010 §§1, 4 — "absorb, but surface", ratified by the product owner 2026-09-11). `Monitor.history` is a plain `tuple[MonitoringResult, ...]` (deliberately not a bespoke collection type — see ADR-009 §6, resolving the "second `Baseline`" discoverability risk BIN-72's review flagged), retained automatically unless `retain_history=False`; `Monitor.clear_history()` is the manual escape hatch for the accepted, documented unbounded-growth risk in a long-running process (ADR-009 §7). No store `Protocol`/port exists in R1 (ADR-009 §8) — the public surface is designed so BIN-73 can add one additively; the receiver surface follows the same discipline (ADR-010 §3) — no `Protocol`/base class for a receiver, a plain `Sequence[SignalReceiver]` instead, chosen specifically so BIN-80 (fan-out, R2) and BIN-81 (formal handler interface, R2) can build on it additively rather than requiring a breaking rewrite.
 
 **Boundary convention (ADR-009 §5, resolving BIN-69 OQ-3 / BIN-112):** every comparison is strict — a point exactly at a control limit, or a CUSUM statistic exactly equal to the decision interval, is in control, not out of control. Verified against convergent secondary corroboration of all three primary sources (Montgomery, Lucas & Saccucci 1990, Siegmund 1985 via NIST's restatement); primary texts remain paywalled and this must be re-checked against their actual page text before `BIN-84`'s property-based tests treat it as permanently settled.
 
-**Full field-level treatment (this pass, domain-modeller, BIN-69 + BIN-72):** `Monitor` and `MonitoringResult` now have complete Object Map and Value Object Inventory entries below — invariants, structure, operations, the constructor-validation decision, and the `__bool__` decision ADR-009 §4 deliberately delegated to this pass (`MonitoringResult.__bool__` raises `TypeError`; see the Value Object Inventory entry for the full reasoning, not just the conclusion). The accumulator-reset-after-signal question is explicitly left open — see Open Questions, `BIN-113`.
+**Full field-level treatment (domain-modeller pass, BIN-69 + BIN-72; extended by this system-architect pass, BIN-75 + BIN-76):** `Monitor` and `MonitoringResult` have complete Object Map and Value Object Inventory entries below — invariants, structure, operations, the constructor-validation decision, the `__bool__` decision ADR-009 §4 delegated (`MonitoringResult.__bool__` raises `TypeError`), and now (ADR-010) the delivery mechanism, the three new `MonitoringResult` fields, and the new `DeliveryFailure` value object. The accumulator-reset-after-signal question remains explicitly open — see Open Questions, `BIN-113`; ADR-010 does not touch it.
+
+**Signal delivery (ADR-010, new this pass):** `MonitoringResult` gains `direction: str | None`, `fitted_artefact: FittedControlLimits`, and `delivery_failures: tuple[DeliveryFailure, ...]`. A receiver is any `Callable[[MonitoringResult], None]` (type-aliased as `SignalReceiver`, no formal `Protocol`) supplied via `Monitor(artefact, receivers=[...])`. Delivery is synchronous, inside `record()`, after the chart-specific check and before the history append, and only on a genuine signal. `caliper.monitoring.log_receiver` is R1's one built-in receiver — stdlib `logging.getLogger("caliper.monitoring")` at `WARNING` (required by BIN-76 SC4's zero-config-visibility scenario, not a style choice — see ADR-010 §6), carrying the full signal content via `extra=`.
 
 ### Cross-context dependency
 
@@ -191,6 +193,10 @@ field already carries the meaning.
 
 6. **Strict-inequality boundary convention, uniform across chart types.** A point exactly at a control limit (EWMA/Shewhart) or exactly at the decision interval (CUSUM) is in control, not out (ADR-009 §5). One convention, not three independently-chosen ones.
 
+7. **Delivery is attempted only for a genuine signal, and never lets an exception escape `record()`.** *(New, ADR-010 §4.)* Every configured receiver is invoked, in order, with the result, only when `is_in_control is False`. A receiver that raises does not stop the next receiver from being attempted, and never propagates out of `record()` — "absorb, but surface" (ratified by the product owner, 2026-09-11): the failure is captured into `MonitoringResult.delivery_failures`, not raised and not silently discarded.
+
+8. **A `Monitor`'s receivers are fixed at construction.** *(New, ADR-010 §3.)* No method adds or removes a receiver after `Monitor.__init__` returns — R1 needs exactly this, and it keeps `record()`'s delivery step free of any mutable-configuration-during-iteration hazard.
+
 **Structure:**
 
 | Field | Type | Notes |
@@ -198,14 +204,15 @@ field already carries the meaning.
 | `artefact` (private) | `FittedControlLimits` | The fitted artefact this monitor was constructed from — referenced, never copied or mutated |
 | accumulator (private, chart-specific) | implementation detail, not public | Nothing for Shewhart; EWMA's smoothed statistic; CUSUM's `(S_hi, S_lo)` pair. Not part of the public surface (ADR-009 §1) |
 | `retain_history` (constructor parameter) | `bool` | Default `True`. `False` opts this monitor out of retaining any history at all (ADR-009 §7) |
+| `receivers` (constructor parameter) | `Sequence[SignalReceiver]` | Default `()` — no receivers configured. `SignalReceiver = Callable[[MonitoringResult], None]`, a plain type alias, not a `Protocol` (ADR-010 §3). Fixed for the `Monitor`'s lifetime — no add/remove method in R1 |
 | history (private backing store) | implementation detail, not public — a `list[MonitoringResult]` is the obvious choice, per ADR-009's own "What domain-modeller still owns" | Append-only; exposed publicly only via `.history`, which returns a fresh `tuple` view — never the backing store itself |
 
 **Operations on Monitor:**
 
 | Operation | Input | Output | Errors |
 |-----------|-------|--------|--------|
-| `Monitor(artefact, retain_history=True)` | `FittedControlLimits`, optional `retain_history: bool` | `Monitor` | See "Constructor validation" below |
-| `record(observation)` | `ScoringResult` | `MonitoringResult` | `ProvenanceMismatchError`, `InvalidObservationError` |
+| `Monitor(artefact, retain_history=True, receivers=())` | `FittedControlLimits`, optional `retain_history: bool`, optional `receivers: Sequence[SignalReceiver]` | `Monitor` | See "Constructor validation" below |
+| `record(observation)` | `ScoringResult` | `MonitoringResult` (now carrying `direction`, `fitted_artefact`, `delivery_failures` — ADR-010) | `ProvenanceMismatchError`, `InvalidObservationError`. Never raises for a delivery failure — absorbed into the returned result (ADR-010) |
 | `history` (property) | — | `tuple[MonitoringResult, ...]` | — |
 | `clear_history()` | — | `None` | — |
 
@@ -700,11 +707,12 @@ This is a presentational grouping, not necessarily a separate type. The three va
 ### `MonitoringResult`
 
 **Carried by:** returned from `Monitor.record()`; each entry of `Monitor.history`
-**Equality:** by value (all three fields)
+**Equality:** by value (all six fields)
 **Constraints:**
-- All three fields required — enforced by the type signature; no additional content constraint (mirrors `ScoringResult.reasoning`'s treatment: no emptiness check, since no scenario in either feature file tests one)
+- All fields required by the type signature except `direction` (nullable) and `delivery_failures` (defaults to `()`); no additional content constraint (mirrors `ScoringResult.reasoning`'s treatment: no emptiness check, since no scenario in either feature file tests one)
 - Immutable after creation (mirrors every other result/VO type — `pydantic_core.ValidationError` on reassignment attempt, not a `CaliperError`)
 - `chart_type` mirrors the producing artefact's own `FittedControlLimits.chart_type` — not independently re-validated against a closed set here, since the artefact already constrains it
+- `direction` is `None` exactly when `is_in_control` is `True` — no scenario tests the inverse being enforced as a hard invariant (i.e. nothing constructs an in-control result with a non-`None` direction directly), so this is a construction-discipline expectation on `Monitor.record()`, not a `@field_validator`-enforced cross-field constraint (ADR-010 §2)
 
 **Structure:**
 
@@ -713,9 +721,114 @@ This is a presentational grouping, not necessarily a separate type. The three va
 | `is_in_control` | `bool` | Explicit field carrying the determination (BIN-110's truthiness rule). `True` = the observation (Shewhart) or the accumulated pattern (EWMA/CUSUM) is within the calibrated boundary; `False` = a signal |
 | `observation` | `ScoringResult` | The Phase II observation just passed to `record()` — satisfies BIN-69 SC2 ("what they see identifies the observation that triggered it") with no separate lookup or correlation id, because `record()` is called once per observation and returns once per call |
 | `chart_type` | `str` | Which chart type produced this determination (e.g. `"ewma"`) — satisfies BIN-69 SC9 (checking is uniform across chart types from the engineer's side) by making the chart type inspectable on every result, the same field name as `FittedControlLimits.chart_type` |
+| `direction` | `str \| None` | *(New, ADR-010 §2.)* `"upper"` or `"lower"`, reusing `FittedCUSUM.direction`'s existing vocabulary. `None` when `is_in_control` is `True`. `"upper"`: process departed above the calibrated upper boundary. `"lower"`: departed below the lower boundary. Satisfies BIN-75 SC1/SC3, BIN-76 SC1. ⚠️ **Domain-modeller note, this pass: only two of `FittedCUSUM.direction`'s three words are legal here.** `FittedCUSUM.direction` is a *configuration* field with three values (`"two_sided"`, `"lower"`, `"upper"` — which arm(s) `Monitor` checks). `MonitoringResult.direction` is an *outcome* field with only three legal states in total: `"upper"`, `"lower"`, or `None` — `"two_sided"` is never a legal value here, even when the underlying artefact's `direction` is configured `"two_sided"`, because a specific departure is always uni-directional (whichever arm actually crossed `h`). ADR-010's "reusing the existing vocabulary" phrasing is correct in spirit (same two words, same meaning) but could mislead an implementer into treating this as a direct pass-through of the three-valued configuration field. `Monitor._check_cusum` already gets this right in practice (`signalled` is derived per-arm, not from echoing `artefact.direction`) — this note exists so `backend-test-writer`/`domain-implementer` do not "simplify" the eventual `direction=` assignment on `MonitoringResult` into `direction=artefact.direction` for the CUSUM case, which would leak `"two_sided"` onto a signal result and break BIN-75 SC1/SC3's "identifies the direction" requirement (a signal that says "two_sided" identifies no direction at all). |
+| `fitted_artefact` | `FittedControlLimits` | *(New, ADR-010 §2.)* The same immutable artefact `Monitor` was constructed from — referenced, never copied. Present on every result, signal or not. Satisfies BIN-75 SC1/SC3 (calibrated parameters "in the same form" regardless of chart type) and BIN-76 SC1, without duplicating any chart-specific field ADR-004 already places on the concrete artefact type |
+| `delivery_failures` | `tuple[DeliveryFailure, ...]` | *(New, ADR-010 §1.)* Empty when every configured receiver succeeded (or none were configured, or no signal occurred to attempt delivery for). One entry per receiver that raised during this `record()` call. Populated by `Monitor`'s own delivery loop, never by the receiver reporting on itself — satisfies BIN-75 SC9 / BIN-76 SC6's "does not depend on the [receiver/logging] mechanism that just failed" |
 
-**Construction:** built internally by `Monitor.record()` only — no scenario in either feature file constructs one directly, so no public factory is specified.
+**Construction:** built internally by `Monitor.record()` only — no scenario in either feature file constructs one directly, so no public factory is specified. As of ADR-010, construction is two-step internally: a provisional result (with `delivery_failures=()`) is built first and passed to each receiver, then — only if any receiver raised — `model_copy(update={"delivery_failures": ...})` produces the final, returned/stored result (ADR-010 §4). This is an implementation detail of `Monitor.record()`, not a second public construction path.
 **Rejects:** nothing beyond field presence and type — no numeric constraint the way `ScoringResult.score` has finiteness.
+
+### `DeliveryFailure`
+
+*(New, ADR-010 §1.)* **Carried by:** `MonitoringResult.delivery_failures` — never constructed or held anywhere else.
+**Equality:** by value (all three fields)
+**Constraints:** immutable after creation; no content constraint on any field beyond type — `receiver`, `error_type`, `error_message` are all free-form strings, since a receiver is arbitrary engineer-supplied (or `caliper.monitoring.log_receiver`'s built-in) code and its raised exception is not assumed to be a `CaliperError`.
+
+**Structure:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `receiver` | `str` | Identifies which receiver failed (e.g. its `repr`/`__qualname__`). Meaningful once more than one receiver exists (BIN-80, R2); in R1 there is at most one configured receiver, so this is forward-compatible metadata, not yet load-bearing for disambiguation |
+| `error_type` | `str` | `type(exc).__name__` — the machine-branchable "why". Deliberately a string, not the live exception object, to avoid retaining tracebacks/closures in `Monitor.history`'s already-accepted unbounded-growth risk (ADR-009 §7; ADR-010 §1) |
+| `error_message` | `str` | `str(exc)` — the human-readable "why" |
+
+**Construction:** built internally by `Monitor.record()`'s delivery step only — no public factory.
+**Rejects:** nothing — see Constraints.
+
+### Domain-modeller verification, this pass (BIN-75 + BIN-76, following ADR-010)
+
+ADR-010 was written as a combined system-architect pass and already carried its
+domain-model updates through to this file directly (see the 2026-09-11
+"system-architect" changelog entry below) — an efficient departure from the
+usual architecture → domain-modeller handoff, but one the pipeline still asks
+this pass to check, not rubber-stamp. Three judgement calls were named
+explicitly as this pass's to make, not inherited from the ADR. Verified/decided
+below; none change any field, type, or scenario binding ADR-010 already
+established.
+
+**1. Is `DeliveryFailure` a value object in the inventory, or an implementation
+detail of `MonitoringResult`? — Confirmed: a value object, correctly given full
+inventory treatment.** It fails the "implementation detail" test on every axis
+that matters: it is reachable from `MonitoringResult.delivery_failures`, a
+field on the public result every `record()` call returns, with no private
+prefix and no accessor gate; an engineer is expected to read it directly
+(BIN-75 SC9 / BIN-76 SC6's whole point is that this information is public and
+mechanism-independent); it has value equality and immutability like every
+other VO in this inventory; and `code-reviewer`/`domain-implementer` need a
+named type to type-hint `receiver`/`error_type`/`error_message` against
+without falling back to an untyped tuple or dict. The one thing that would
+have argued for "implementation detail" — that it is only ever constructed
+internally by `Monitor.record()`, with no public factory — is already true of
+`MonitoringResult` itself (Value Object Inventory, "Construction" note above)
+and has never disqualified a type from this inventory before. Confirmed
+correct as written; no change.
+
+**2. Does `fitted_artefact` on `MonitoringResult` create a reference cycle or
+memory concern given `Monitor.history` retains every result? — Checked, not
+assumed: no cycle exists, and the marginal cost is one pointer per result, not
+a duplicated artefact.** Tracing the actual reference graph:
+`Monitor._artefact` → the `FittedControlLimits`-satisfying artefact (a frozen
+Pydantic model of scalars — chart type, means, sigma, ARL figures, calibration
+method, and chart-specific fields such as `ucl`/`lcl` or `decision_interval`).
+`Monitor._history` → a list of `MonitoringResult`s, each now also holding
+`fitted_artefact` pointing at that *same* artefact instance (ADR-010 §2:
+"referenced, never copied"). For a cycle to exist, the artefact would need to
+hold a reference back to `Monitor` or to any `MonitoringResult` — it does not:
+every field on `FittedControlLimits` and its three concrete types is a scalar
+(`float`/`str`/`int`), per the Fitted Artefact Protocol above, with no
+back-reference of any kind. The graph is a DAG (`Monitor` → history entries →
+shared artefact), not a cycle: CPython's refcounting alone can reclaim it, the
+cycle-collector is never needed for this structure, and there is no
+traceback/frame-retention risk of the kind that made holding a live exception
+on `DeliveryFailure` the wrong call (§1 above) — an artefact is inert data, not
+a raised exception carrying closures. On marginal memory cost: because the
+artefact is referenced, not copied, adding `fitted_artefact` to every
+historical `MonitoringResult` costs one pointer (~8 bytes plus a refcount
+increment) per entry, regardless of how large the artefact itself is — it does
+not multiply the artefact's own footprint across history the way embedding a
+copy of its fields would. This does not compound `Monitor.history`'s
+already-accepted unbounded-growth risk (ADR-009 §7) in any material way; it is
+a rounding error against the per-entry cost `MonitoringResult` already carries
+via `observation: ScoringResult` (three fields, one of them a nested
+`Provenance`). No action needed — `fitted_artefact` is safe to keep as a plain
+reference field exactly as ADR-010 §2 specifies.
+
+**3. Does `direction: str | None` want a closed discriminator like `kind`, or
+does it track `FittedCUSUM.direction`'s vocabulary semi-openly? — Semi-open
+plain `str`, matching this codebase's established convention for
+chart-specific vocabulary — and explicitly *not* the same axis as `kind`
+vs. `reason`.** CLAUDE.md's warning not to unify `kind` (closed
+discriminator, `invalid_parameter`'s two fixed values) with `reason`
+(descriptive, open text on `invalid_observation`/`degenerate_baseline`) is
+about two *error-context* keys serving different jobs; `direction` is neither
+— it is a result field, not an error context key, so it is not a candidate for
+unifying with either. The real comparison is to this codebase's other
+enumerable-but-not-`Literal` string fields: `chart_type`, `calibration_method`,
+`sigma_estimation_method`, and `FittedCUSUM.direction` itself are all plain
+`str` despite each having a small, closed value set in practice — ADR-004
+established no `Literal` precedent anywhere in the Fitted Artefact Protocol,
+and a `Literal` on `MonitoringResult.direction` would be the first
+introduction of that pattern into a codebase that has deliberately avoided it
+everywhere else, for a value set no less likely to be extended carefully than
+`chart_type`'s own three values. Plain `str | None` is correct, and ADR-010's
+choice stands — but see the ⚠️ note on the `direction` field row above: the
+"reuses the vocabulary" framing needs the caveat that only two of
+`FittedCUSUM.direction`'s three words are ever legal outcomes here, which is
+a distinction worth keeping explicit precisely because CLAUDE.md's `kind`/
+`reason` precedent already established that this project polices this kind of
+flattening deliberately.
+
+---
 
 #### `MonitoringResult.__bool__` — decided: raises `TypeError` (ADR-009's delegated decision)
 
@@ -785,7 +898,10 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 | **Chart type** | One of EWMA, CUSUM, or Shewhart I-chart in R1. Reported on every fitted artefact. | Baseline | ADR-004 |
 | **Direction** (CUSUM) | Which direction(s) of drift are monitored. `"two_sided"` (default): both arms. `"lower"`: degradation only (score drifts down). `"upper"`: improvement only (baseline staleness). Two-sided default, configurable to one-sided (ADR-004 section 6). | Baseline | ADR-004 |
 | **Higher-is-better** | Caliper's score orientation (ADR-001). A falling score = degradation (lower CUSUM arm). A rising score = improvement / stale baseline (upper CUSUM arm). This mapping holds throughout the library. | Both | ADR-001 |
-| **Signal** | An out-of-control determination from Phase II monitoring — concretely, a `MonitoringResult` with `is_in_control=False`. The determination itself is now modelled (ADR-009, BIN-69); its *delivery* — handlers, callbacks, severity, webhooks — is E4 (BIN-75 through BIN-81), which still has no written requirements and remains unmodelled. | Monitoring | ADR-009, context.md (delivery sketch only) |
+| **Signal** | An out-of-control determination from Phase II monitoring — concretely, a `MonitoringResult` with `is_in_control=False`, carrying `direction` and `fitted_artefact` (ADR-010 §2). The determination itself was modelled by ADR-009 (BIN-69); its R1 *delivery* — a `SignalReceiver` callable invoked synchronously on a genuine signal, absorbing but surfacing any receiver failure — is modelled by ADR-010 (BIN-75, BIN-76). Severity, webhooks, `RaiseOnSignal`, fan-out, and a formal handler interface remain unmodelled — BIN-77 through BIN-82, Release 2. | Monitoring | ADR-009, ADR-010 |
+| **Signal receiver** / **`SignalReceiver`** | Any `Callable[[MonitoringResult], None]` supplied to `Monitor(artefact, receivers=[...])`. A plain type alias, not a `Protocol` or base class — no formal interface exists in R1 (ADR-010 §3). Invoked synchronously by `Monitor.record()`, once per configured receiver, only when a genuine signal occurs. A receiver that raises does not stop the recording call or the next receiver; its exception is captured, not propagated (see Delivery failure, below). | Monitoring | ADR-010 §§3–4 |
+| **`log_receiver`** | R1's one built-in `SignalReceiver` (`caliper.monitoring.log_receiver`). Logs to `logging.getLogger("caliper.monitoring")` at `WARNING` — the level is required, not stylistic, to satisfy BIN-76 SC4's zero-configuration visibility guarantee against Python's `logging.lastResort` default. Carries the full signal content (`direction`, `fitted_artefact`, `observation`) via the stdlib `LogRecord`'s `extra=` mapping. Uses no third-party structured-logging library (BR-1, CLAUDE.md's ratified stdlib-`logging` decision). | Monitoring | ADR-010 §6 |
+| **Delivery failure** / **`DeliveryFailure`** | The record of one `SignalReceiver` raising during delivery: which receiver (`receiver: str`), and why (`error_type: str`, `error_message: str`). Never raised itself — absorbed by `Monitor.record()` into `MonitoringResult.delivery_failures`, "absorb, but surface" (ratified by the product owner, 2026-09-11). Reachable only through the public result the recording call already returns — never through the receiver mechanism that just failed (ADR-010 §1). | Monitoring | ADR-010 §1 |
 | **SPCPort** | The port interface for the SPC engine (ADR-001). The boundary between the domain and the statistical computation layer. Fitting operations are behind this port. | Baseline | ADR-001 |
 | **Agent output** | The text produced by the engineer's agent, the subject being scored. Required, rejected if empty or whitespace-only (**settles former OQ-10**). Named `agent_output`, not `output`, to keep the `agent_` prefix consistent with `agent_input` and the feature files' own wording. | Measurement | BIN-59, ADR-006 §3, §6 |
 | **Agent input** | The input that produced the agent output, when the caller has it. Optional, not validated for emptiness (a proactively-acting agent may legitimately have none), and **not** carried onto `Provenance` or `ScoringResult` — it is the subject being measured, not the measurement configuration. Named `agent_input`, not `input`, because bare `input` shadows a Python builtin and this project's `ruff` config (`flake8-builtins`, rule `A002`) rejects it. | Measurement | BIN-59, ADR-006 §3 |
@@ -816,7 +932,9 @@ The signal handler chain (E4: BIN-75 through BIN-81) is the natural location for
 
 **Confirmed still true after E1 shipped (BIN-100 refresh):** ADR-006 introduced no events. `Judge.score()` is a synchronous call-and-return, exactly as this section already described.
 
-**Confirmed still true after ADR-009 (BIN-69/BIN-72, this pass):** `Monitor.record()` is likewise a synchronous call-and-return — it returns a `MonitoringResult` directly, never publishes an event. The new Monitoring context introduces no domain events in R1, for the same reason as Measurement and Baseline: E4's signal-delivery mechanism (BIN-75 through BIN-81) remains unspecified, and modelling events for unspecified behaviour would be speculative rather than derived from requirements.
+**Confirmed still true after ADR-009 (BIN-69/BIN-72):** `Monitor.record()` is likewise a synchronous call-and-return — it returns a `MonitoringResult` directly, never publishes an event.
+
+**Updated after ADR-010 (BIN-75/BIN-76, this pass):** E4's signal-delivery mechanism is now specified for R1 — but it remains a synchronous callback (`SignalReceiver`), not a domain event. `Monitor.record()` invokes each configured receiver directly and synchronously; it does not construct, queue, or publish an event object of any kind, and `context.md`'s `SignalEvent` sketch (signal, judgement result, consecutive signal count, severity) is not adopted — consecutive-signal-count and severity remain unspecified (BIN-77, R2) and a synchronous callable has no need for an event envelope. **The Domain Event Catalogue remains empty for R1** — this is a deliberate, re-confirmed absence, not an oversight: ADR-010 was the natural point at which an event *could* have been introduced, and it was not, because nothing in either BIN-75 or BIN-76's fifteen scenarios requires one. Should BIN-78 (webhook, R2) or BIN-80 (fan-out, R2) later need queuing, retry, or at-least-once delivery semantics, an event-based redesign becomes worth reconsidering then — not pre-emptively here.
 
 ---
 
@@ -859,10 +977,12 @@ These are the operations the ten feature files establish. They replace the "serv
 | Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline — **implemented** (BIN-95) |
 | Review artefact | BIN-66 | Any `FittedControlLimits` | Read properties; `audit_summary()` | Baseline — **implemented** (BIN-66) |
 | Compare provenance | BIN-68 | `ScoringResult`, `FittedControlLimits` | Confirms compatibility or raises `ProvenanceMismatchError` | Baseline — **implemented** (BIN-68) |
-| Create monitor | BIN-69 | `FittedControlLimits`, optional `retain_history: bool` | `Monitor` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented |
-| Record Phase II observation | BIN-69 | `ScoringResult` | `MonitoringResult` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented. Raises `ProvenanceMismatchError`, `InvalidObservationError`; never raises for a signal. |
+| Create monitor | BIN-69, BIN-75 | `FittedControlLimits`, optional `retain_history: bool`, optional `receivers: Sequence[SignalReceiver]` (ADR-010) | `Monitor` | Monitoring — **domain-modelled (ADR-009 + ADR-010)**, ready for backend-test-writer, not yet implemented |
+| Record Phase II observation | BIN-69, BIN-75 | `ScoringResult` | `MonitoringResult` (now carrying `direction`, `fitted_artefact`, `delivery_failures` — ADR-010) | Monitoring — **domain-modelled (ADR-009 + ADR-010)**, ready for backend-test-writer, not yet implemented. Raises `ProvenanceMismatchError`, `InvalidObservationError`; never raises for a signal or a delivery failure. |
 | Review monitoring history | BIN-72 | (none) | `tuple[MonitoringResult, ...]` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented. Zero-config by default. |
 | Clear monitoring history | BIN-72 | (none) | `None` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented. Manual escape hatch, no automatic eviction policy in R1. |
+| Deliver a signal to configured receivers | BIN-75 | (implicit — part of `record()`) | Each configured `SignalReceiver` invoked with the `MonitoringResult`; failures absorbed into `delivery_failures` | Monitoring — **domain-modelled (ADR-010)**, ready for backend-test-writer, not yet implemented. Synchronous, inside `record()`, only on a genuine signal. Never raises. |
+| Log a signal via the built-in receiver | BIN-76 | `MonitoringResult` (as any `SignalReceiver`) | `None` (writes a `WARNING`-level record to `logging.getLogger("caliper.monitoring")`) | Monitoring — **domain-modelled (ADR-010 §6)**, ready for backend-test-writer, not yet implemented. `caliper.monitoring.log_receiver`, stdlib `logging` only. |
 
 **Fitting parameter semantics (ADR-004 section 5):**
 - `target_arl`: **optional in Python signature** (default `None`), **required by Caliper validation**. Omitting raises `InvalidParameterError(kind="missing")`.
@@ -907,6 +1027,11 @@ rather than belonging to that original set.** Two are settled here; one
 | 12 | **What happens to a `Monitor`'s chart-specific accumulator immediately after a signal** — reset to zero, reset to a head-start/FIR level (Lucas & Crosier 1982), or continue unchanged? | Whoever picks up `BIN-113` | `Monitor`'s per-`record()` accumulator update logic for EWMA/CUSUM | ADR-009 §1 (deliberately left unsettled) | **Open — explicitly not this pass's to close.** ADR-009 delegates it to `BIN-113`. This model commits only to the accumulator persisting *across* `record()` calls (BR-3/SC3); not to its value immediately after a signal. Background: Lucas & Crosier (1982) on the FIR feature, held at `Projects/caliper/references/papers/`. |
 | 13 | ~~Whether `Monitor`'s constructor validates the fitted artefact beyond its type.~~ | — | — | ADR-009, "What domain-modeller still owns" | **SETTLED, this pass** — `isinstance(artefact, FittedControlLimits)`, mirroring `Judge.provider`'s existing structural check against a `@runtime_checkable` Protocol; raises `InvalidParameterError` (`kind="invalid"`) on failure. Not scenario-tested by either feature file — offered as the taxonomy-consistent default, not a product decision. See Object Map — Monitor. |
 | 14 | ~~`MonitoringResult.__bool__` — return `is_in_control`, or raise?~~ | — | — | ADR-009 §4 (explicitly delegated to domain-modeller) | **SETTLED, this pass** — raises `TypeError`, the same treatment as `ScoringResult`/`Fitted*`. See Value Object Inventory — `MonitoringResult`, "Truthiness decision" for the full reasoning, including why this pass did not simply inherit ADR-009's recommendation without engaging with it. |
+| 15 | ~~WHERE does a delivery failure surface, given the "absorb, but surface" ratification?~~ | — | — | BIN-75 OQ-1, BIN-76 OQ-1 (shared) | **SETTLED, ADR-010 §1** — an in-band field, `MonitoringResult.delivery_failures`, populated by `Monitor` itself, never by asking the failed receiver to report on itself. Public, carries both "that" and "why" (`error_type`/`error_message`), satisfying the tightened scenario wording both requirements reviews required. |
+| 16 | ~~Where does an engineer arrange to be told about a signal?~~ | — | — | BIN-75 OQ-2 | **SETTLED, ADR-010 §3** — `Monitor(artefact, receivers=[...])`, a keyword-only constructor parameter accepting `Sequence[SignalReceiver]`. No `Protocol`, no registration method, no module-level state. Fixed for the `Monitor`'s lifetime in R1. |
+| 17 | ~~Is signal delivery synchronous within `record()`, or deferred?~~ | — | — | BIN-75 OQ-3 | **SETTLED, ADR-010 §4** — synchronous, required by the ordering guarantees (BIN-75 SC6, BIN-76 SC5) and the "told without separately inspecting the outcome" guarantee (BIN-75 SC4). |
+| 18 | ~~What standard-library logging level does a drift signal use?~~ | — | — | BIN-76 OQ-2 | **SETTLED, ADR-010 §6** — `WARNING`. Required, not stylistic: only `WARNING` and above are visible via Python's `logging.lastResort` default handler, which BIN-76 SC4 requires without any engineer configuration. |
+| 19 | ~~What logger namespace does Caliper log signals under?~~ | — | — | BIN-76 OQ-3 | **SETTLED, ADR-010 §6** — `"caliper.monitoring"`, following CLAUDE.md's ratified `logging.getLogger("caliper")`-family convention, scoped to the Monitoring bounded context specifically. |
 
 ### Criteria equality is exact (OQ-2, settled 2026-09-10)
 
@@ -1017,11 +1142,20 @@ is proceeding on the old baseline with the new judge.
 - [x] `MonitoringResult.__bool__` explicitly decided, not left undefined — resolves ADR-009 §4's delegated decision, with reasoning engaging both options, not just adopting the ADR's recommendation (this pass)
 - [x] All 18 scenarios across `phase-ii-observation-signal-check.feature` (9) and `in-memory-observation-store.feature` (9) verified bindable against this model, with no `.feature` file changes needed (this pass)
 - [x] Accumulator-reset-after-signal left open, not invented — `BIN-113` (this pass)
+- [x] `MonitoringResult` extended (not replaced) with `direction`, `fitted_artefact`, `delivery_failures` — no second, near-identical result type introduced (ADR-010 §2, BIN-75 A1)
+- [x] New `DeliveryFailure` value object given full Value Object Inventory treatment (this pass)
+- [x] Signal receiver surface (`SignalReceiver`, `Monitor(..., receivers=...)`) designed additively — no `Protocol`/base class for a single R1 consumer, but shaped so BIN-80/BIN-81 do not require a breaking rewrite (ADR-010 §3, applying the ADR-009 §8 precedent both PRDs cited)
+- [x] All 15 scenarios across `out-of-control-signal-event.feature` (9) and `drift-signal-log-handler.feature` (6) verified bindable against this model, with no `.feature` file changes needed (this pass) — see ADR-010's Bindability tables
+- [x] Domain Event Catalogue re-confirmed empty for R1, with reasoning for why ADR-010 did not introduce an event despite being the natural point to do so (this pass)
+- [x] Independent second bindability check: all 15 scenarios across `out-of-control-signal-event.feature` (9) and `drift-signal-log-handler.feature` (6) re-verified bindable against this model by reading the actual scenario text directly (not just ADR-010's own table) — no discrepancy found (domain-modeller pass, following ADR-010)
+- [x] Three judgement calls decided explicitly, not inherited from ADR-010 without independent reasoning: `DeliveryFailure`'s VO-vs-implementation-detail status (confirmed VO), `fitted_artefact`'s reference-cycle/memory risk (checked — no cycle, marginal cost is one pointer, does not compound the accepted history-growth risk), and `direction`'s discriminator shape (confirmed plain `str`, not `Literal`, not unified with `kind`/`reason` — with a caveat added that only two of `FittedCUSUM.direction`'s three words are ever legal on `MonitoringResult.direction`) — see "Domain-modeller verification, this pass" above (domain-modeller pass, following ADR-010)
 
 ---
 
 ## Changelog
 
+- 2026-09-11 (domain-modeller, combined BIN-75 + BIN-76 pass, following ADR-010): Reviewed ADR-010's already-applied domain-model updates rather than re-deriving them (the ADR's own system-architect pass wrote them directly into this file — see the entry immediately below). Independently re-verified all 15 scenarios across `out-of-control-signal-event.feature` (9) and `drift-signal-log-handler.feature` (6) bind against the model as written, by reading the actual scenario text rather than taking ADR-010's bindability table on trust — no discrepancy found. Made the three judgement calls the pipeline named as this pass's to decide explicitly: confirmed `DeliveryFailure` is correctly a public Value Object Inventory entry, not an implementation detail (public field, value equality, immutability, no disqualifying trait `MonitoringResult` itself doesn't also have); checked (not assumed) that `fitted_artefact` referenced from every retained `MonitoringResult` creates no reference cycle — traced the actual object graph, confirmed it is a DAG with the artefact as a shared, inert, back-reference-free leaf, and that the marginal memory cost is one pointer per history entry, not a duplicated artefact, so it does not compound ADR-009 §7's already-accepted unbounded-history-growth risk; confirmed `direction: str | None` should stay a semi-open plain `str` (matching `chart_type`/`calibration_method`/`FittedCUSUM.direction`'s own precedent, no `Literal` anywhere in this codebase's Fitted Artefact Protocol) rather than a closed discriminator, and added an explicit caveat to the `direction` field's Notes that only two of `FittedCUSUM.direction`'s three vocabulary words (`"upper"`/`"lower"`) are ever legal outcomes on `MonitoringResult.direction` — `"two_sided"` never is, even when the underlying artefact is configured that way — flagging a risk that `direction=artefact.direction` could leak the wrong value onto a CUSUM signal if implemented carelessly. See "Domain-modeller verification, this pass" under the Value Object Inventory for the full reasoning on all three. No field, type, or scenario binding changed from ADR-010's design.
+- 2026-09-11 (system-architect, combined BIN-75 + BIN-76 pass, ADR-010): Extended `MonitoringResult` with `direction: str | None`, `fitted_artefact: FittedControlLimits`, and `delivery_failures: tuple[DeliveryFailure, ...]` — additive, no field removed or renamed (settles BIN-75 Assumption A1: extend, not a second type). Added a new value object, `DeliveryFailure` (`receiver`, `error_type`, `error_message`). Added `Monitor`'s new `receivers: Sequence[SignalReceiver] = ()` constructor parameter and the `SignalReceiver` type alias (`Callable[[MonitoringResult], None]`, no `Protocol`) — settles BIN-75 OQ-2 (where an engineer arranges to be told). Documented `Monitor.record()`'s new delivery step: synchronous, after the chart-specific check, only on a genuine signal (settles BIN-75 Assumption A2 and OQ-3), absorbing any receiver exception into `delivery_failures` rather than raising or discarding it (settles BIN-75/BIN-76's shared OQ-1 "WHERE" sub-question — the WHAT, "absorb, but surface", was already product-owner-ratified before this pass). Added `caliper.monitoring.log_receiver`, R1's one built-in receiver, logging to `"caliper.monitoring"` at `WARNING` (settles BIN-76 OQ-2, OQ-3 — both grounded in scenario requirements, not stylistic choices: `WARNING` is required for BIN-76 SC4's zero-config visibility guarantee against Python's `logging.lastResort` default). Verified all 15 scenarios across `out-of-control-signal-event.feature` (9) and `drift-signal-log-handler.feature` (6) bind against this model exactly as written, with no `.feature` file changes required. Added five Glossary entries (Signal receiver, `SignalReceiver`, `log_receiver`, Delivery failure, `DeliveryFailure`) and updated the Signal entry to reflect that R1 delivery is now modelled. Re-confirmed the Domain Event Catalogue remains empty for R1, with explicit reasoning for why ADR-010 — the natural point to introduce an event — did not. Updated Library Operations (Create monitor, Record Phase II observation, two new rows for delivery and the log receiver) and Open Questions (three new settled entries, 15–19, continuing the numbering from ADR-009's pass).
 - 2026-09-11 (domain-modeller, combined BIN-69 + BIN-72 pass, following ADR-009): Added full field-level Object Map treatment for `Monitor` (invariants, structure, operations table, constructor-validation decision, and a design note distinguishing it from a DDD aggregate — same discipline already applied to `Baseline`). Added a Value Object Inventory entry for `MonitoringResult` (structure, construction, and the `__bool__` decision ADR-009 §4 explicitly delegated to this pass — raises `TypeError`, with reasoning that engages both options rather than inheriting the ADR's recommendation unexamined). Added five Ubiquitous Language Glossary entries (Monitor, Monitoring result, Monitoring history, Accumulator, Session) and updated three existing ones (Signal, Phase II, Observation) to reflect that Phase II monitoring is now modelled, not merely anticipated. Confirmed the Monitoring context introduces no domain events, for the same reason as Measurement and Baseline (E4 unspecified). Updated the four Monitoring rows in Library Operations from "architecture settled, not yet implemented" to "domain-modelled, ready for backend-test-writer". Added three new Open Questions (12: accumulator-reset-after-signal, deliberately left open, tracked as `BIN-113`; 13 and 14: constructor validation and `__bool__`, both settled this pass). Verified all 18 scenarios across both feature files (`phase-ii-observation-signal-check.feature`, `in-memory-observation-store.feature`) bind against this model exactly as written, with no `.feature` file changes required — matching ADR-009's own scenario-by-scenario verification.
 - 2026-09-11 (ADR-009, combined BIN-69 + BIN-72 architecture pass): Added the **Monitoring** bounded context (E3), depending on Baseline and Measurement. Introduced `Monitor` and `MonitoringResult` at the architecture level (full field-level domain-modeller treatment still to come). Settled BIN-69's OQ-1 (operation lives on `Monitor`), A1 (accumulator state lives privately on `Monitor`, keyed to the artefact), A2 (provenance checked internally via `compare_provenance()`), OQ-2 (`MonitoringResult` with explicit `is_in_control: bool`), OQ-3/**BIN-112** (strict inequality at control limits/decision interval — a boundary point is in control, uniformly across EWMA/CUSUM/Shewhart, corroborated against Montgomery/Lucas & Saccucci/Siegmund via secondary sources, primary text verification still pending for BIN-84), and OQ-4 (reuses `InvalidObservationError`, no new category). Settled BIN-72's A1 (no store port in R1, concrete-only), A2 (zero-config default, `retain_history=False` opt-out), OQ-1 (`Monitor.history` is a plain `tuple[MonitoringResult, ...]`, not a bespoke collection type — deliberately resolves the "second `Baseline`" discoverability risk BIN-72's review flagged), and OQ-2 (no automatic eviction/bounding mechanism in R1, but a manual `clear_history()` escape hatch ships and the unbounded-growth risk is documented as an accepted R1 risk, not left open indefinitely). Updated Library Operations and the Error Contract Reference's raised-by column accordingly. No `.feature` file required any change — both were written mechanism-neutrally and bind against this design as verified scenario-by-scenario in each story's `architecture.md`.
 - 2026-09-10 (BIN-100 refresh): Reconciled against ADR-006 (scoring API surface and judge provider port), ADR-007 (two type checkers), ADR-008 (error assertions over message text), and the merged, tested E1 implementation in `src/caliper/measurement/`. Settled OQ-1 (criteria attachment), OQ-5 (score range), OQ-6 (scoring input shape), OQ-10 (empty agent output) — each marked SETTLED with ADR section and resolution, not deleted. Corrected the `Result[...]`-returning VO factories (VOs raise `InvalidParameterError` directly; explained why the `returns`-standard's own "single-failure-point" exception applies here, not a misapplication of house style). Rewrote the `Judge` section for `provider`/`criteria`/`score()`. Added `JudgeProviderPort` and `JudgeProviderResponse` as a real hexagonal port and its response VO. Documented BIN-103's module layout (`measurement/domain/`, `measurement/ports/`, top-level `errors.py`). Recorded BIN-104's known gap (wrong-typed constructor args bypass the value-object boundary). Corrected immutability-violation exception type (`pydantic_core.ValidationError`, not `FrozenInstanceError`/`AttributeError`) per the BIN-103 dataclass→Pydantic migration. Reconciled the vault copy (`Projects/caliper/domain-model.md`), which had drifted into a lossier condensation of this file, into a pointer — this file is now the single canonical copy. Left untouched, as instructed: OQ-2/3/4/7/8/9/11 (still open at the time of this entry), all numerical constants (still unpinned), the dual-spread finding (still prominent), and the absence of domain events (E4 still unspecified).
