@@ -54,9 +54,13 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_shewhart
+from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_shewhart
 from caliper.baseline.domain.ewma_fitting import MIN_MEANINGFUL_ARL
-from tests.factories import ProvenanceFactory, ScoringResultFactory
+from tests.factories import ProvenanceFactory
+from tests.support.baseline_strategies import (
+    baseline_from_scores,
+    baseline_scores_strategy,
+)
 from tests.support.spc_simulation import (
     derived_relative_tolerance,
     gaussian_baseline,
@@ -121,88 +125,20 @@ def test_shewhart_simulated_mean_run_length_matches_achieved_arl() -> None:
 
 # --- Monotonicity (AC4) --------------------------------------------------------
 
-_PROPERTY_BASELINE_SIZE = DEFAULT_SUFFICIENCY_THRESHOLD
 _MONOTONICITY_ARL_LOW_MAX = 1_000.0
 _MONOTONICITY_ARL_GAP_MAX = 1_000.0
 
 
-def _baseline_from_scores(scores: list[float]) -> Baseline:
-    """Build a ``Baseline`` from an explicit list of scores, one shared provenance."""
-    baseline = Baseline()
-    provenance = ProvenanceFactory()
-    for score in scores:
-        baseline.record(ScoringResultFactory(provenance=provenance, score=score))
-    return baseline
-
-
-# BIN-123: `len(set(scores)) > 1` is no longer a sufficient definition of
-# "non-degenerate". BIN-119 added a second rejection -- a baseline whose
-# *moving-range aggregate* underflows to zero -- and `[0.0] * 149 + [5e-324]`
-# satisfies the old filter (two distinct values) while the library now
-# correctly refuses to fit it.
-#
-# That made this strategy generate inputs that are illegal by construction,
-# so the property test failed whenever Hypothesis happened to find one.
-# It is a latent flake rather than a constant failure: a fresh run passes,
-# and the counterexample only replays deterministically once it is in
-# `.hypothesis/examples`. CI starts with an empty database, which is why
-# PR #46 went green.
-#
-# The floor below is a *test-side sufficient condition*, deliberately not a
-# reimplementation of `_moving_range_sigma` -- duplicating production
-# arithmetic here is the self-cancelling-helper pattern this project has
-# hit five times. It only has to be strict enough that no drawn baseline can
-# underflow, not to agree with the library's exact threshold.
-#
-# Margin, so the constant is not a magic number: by the triangle inequality
-# the sum of consecutive absolute differences is at least `max - min`, so a
-# spread of `1e-6` forces a mean moving range of at least
-# `1e-6 / (n - 1)` -- about `6.7e-9` here, some 300 orders of magnitude above
-# the underflow floor near `4.9e-324`. It does not meaningfully shrink the
-# `[-10.0, 10.0]` space the properties explore.
-#
-# ⚠️ Why a floor rather than catching `DegenerateBaselineError` in the test
-# body and calling `assume(False)`: that alternative defers to the library's
-# own definition of degenerate, which sounds better and is worse. It would
-# silently discard any future case where the library *over-rejects valid
-# data* -- which is exactly the BIN-123 failure class, and exactly what this
-# project most needs to stay visible. An independent floor turns that into a
-# test failure instead of a filtered-away example.
-# (Raised by code-reviewer on BIN-123, 2026-09-11.)
-#
-# ⚠️ Generalisable: every new rejection in `src/` can turn an existing
-# Hypothesis strategy into a generator of illegal inputs. BIN-117 taught
-# this once (its `arl_low` strategy) and BIN-119 repeated it here.
-_MIN_FITTABLE_SPREAD = 1e-6
-
-
-def _is_fittable(scores: list[float]) -> bool:
-    """Reject draws the library legitimately refuses to fit.
-
-    Excludes both the all-identical (zero-variance) draw and the
-    vanishing-spread draw whose mean moving range underflows to zero.
-    """
-    return max(scores) - min(scores) >= _MIN_FITTABLE_SPREAD
-
-
-def _baseline_scores_strategy() -> st.SearchStrategy[list[float]]:
-    """Hypothesis strategy for a fixed-size, non-degenerate list of baseline scores.
-
-    See ``test_ewma_arl_simulated_properties.py``'s identical helper for
-    the full reasoning.
-    """
-    return st.lists(
-        st.floats(
-            min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False
-        ),
-        min_size=_PROPERTY_BASELINE_SIZE,
-        max_size=_PROPERTY_BASELINE_SIZE,
-    ).filter(_is_fittable)
-
-
+# BIN-124: both the strategy and `_baseline_from_scores` used to be defined
+# here, identically in this file's EWMA/CUSUM siblings (and, for
+# `_baseline_from_scores`, this ticket's own meta-test too) -- see
+# ``tests/support/baseline_strategies.py`` for the shared definitions and
+# the full reasoning behind the strategy's floor (moved there rather than
+# paraphrased, so it stays a single source of truth instead of several that
+# can drift).
 @settings(max_examples=25, deadline=None)
 @given(
-    scores=_baseline_scores_strategy(),
+    scores=baseline_scores_strategy(),
     arl_low=st.floats(
         min_value=MIN_MEANINGFUL_ARL,
         max_value=_MONOTONICITY_ARL_LOW_MAX,
@@ -220,7 +156,7 @@ def test_wider_target_arl_never_narrows_the_shewhart_boundary(
     Mirrors the EWMA/CUSUM monotonicity tests above; see their docstrings.
     """
     # Arrange
-    baseline = _baseline_from_scores(scores)
+    baseline = baseline_from_scores(scores)
     arl_high = arl_low + arl_gap
 
     # Act
@@ -239,7 +175,7 @@ _INVARIANCE_TARGET_ARL = 370.0
 
 @settings(max_examples=25, deadline=None)
 @given(
-    scores=_baseline_scores_strategy(),
+    scores=baseline_scores_strategy(),
     scale=st.floats(min_value=0.01, max_value=100.0, allow_nan=False),
     shift=st.floats(min_value=-50.0, max_value=50.0, allow_nan=False),
 )
@@ -251,8 +187,8 @@ def test_affine_transform_of_the_baseline_scales_shewhart_limits_predictably(
     Mirrors the EWMA/CUSUM invariance tests above; see their docstrings.
     """
     # Arrange
-    original_baseline = _baseline_from_scores(scores)
-    transformed_baseline = _baseline_from_scores(
+    original_baseline = baseline_from_scores(scores)
+    transformed_baseline = baseline_from_scores(
         [scale * score + shift for score in scores]
     )
 
