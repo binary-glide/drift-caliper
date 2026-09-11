@@ -45,14 +45,18 @@ class JudgeProviderPort(Protocol):
     Exception contract (part of this Protocol -- cannot be expressed in
     Python's type system, so it is normative here):
 
-    Raises:
-        ProviderError: the call to the provider failed or the provider was
-            unreachable. Required context: ``provider``, ``operation``.
-        MalformedResponseError: the provider responded, but the response
-            cannot be interpreted as a ``(score, reasoning)`` pair.
-            Required context: ``operation``, ``expected_shape``.
-        JudgeRefusalError: the provider declined to score due to a content
-            or safety policy. Required context: ``provider``, ``operation``.
+    Raises
+    ------
+    ProviderError
+        The call to the provider failed or the provider was unreachable.
+        Required context: ``provider``, ``operation``.
+    MalformedResponseError
+        The provider responded, but the response cannot be interpreted as
+        a ``(score, reasoning)`` pair. Required context: ``operation``,
+        ``expected_shape``.
+    JudgeRefusalError
+        The provider declined to score due to a content or safety policy.
+        Required context: ``provider``, ``operation``.
     """
 
     def score(
@@ -65,14 +69,21 @@ class JudgeProviderPort(Protocol):
     ) -> JudgeProviderResponse:
         """Call the provider and return its parsed ``(score, reasoning)``.
 
-        Args:
-            model_version: The judge's pinned model version.
-            criteria: The effective scoring criteria text for this call.
-            agent_output: The agent output being scored.
-            agent_input: The agent input that produced ``agent_output``,
-                when available.
+        Parameters
+        ----------
+        model_version
+            The judge's pinned model version.
+        criteria
+            The effective scoring criteria text for this call.
+        agent_output
+            The agent output being scored.
+        agent_input
+            The agent input that produced ``agent_output``, when
+            available.
 
-        Returns:
+        Returns
+        -------
+        JudgeProviderResponse
             The provider's parsed score and reasoning.
         """
         ...

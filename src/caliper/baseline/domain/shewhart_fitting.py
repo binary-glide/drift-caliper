@@ -145,7 +145,7 @@ def _has_zero_variance(scores: Sequence[float]) -> bool:
 
 
 def _shewhart_arl0(sigma_multiplier: float) -> float:
-    """The exact in-control ARL0 at ``sigma_multiplier`` sigma, two-sided.
+    """Compute the exact in-control ARL0 at ``sigma_multiplier`` sigma, two-sided.
 
     ``ARL0(L) = 1 / (2 * (1 - Phi(L)))`` -- the definition of a two-sided
     normal tail probability inverted into an expected run length. A genuine
@@ -156,7 +156,7 @@ def _shewhart_arl0(sigma_multiplier: float) -> float:
 
 
 def _shewhart_sigma_multiplier(target_arl: float) -> float:
-    """The sigma multiplier ``L`` achieving ``target_arl`` -- direct inversion.
+    """Compute the sigma multiplier ``L`` achieving ``target_arl`` -- direct inversion.
 
     ``L(ARL0) = Phi^-1(1 - 1 / (2 * ARL0))``. No root-find: the relationship
     is already invertible in closed form (module docstring).
@@ -181,25 +181,33 @@ def fit_shewhart(
     closed-form relationship described in the module docstring -- no
     root-finding, no discretisation, no independent tuning parameter.
 
-    Args:
-        baseline: The Phase I baseline to fit from.
-        target_arl: The target in-control ARL0 (false alarm tolerance).
-            Optional in the signature, required by validation -- omitting
-            it raises ``InvalidParameterError`` with
-            ``context["kind"] == "missing"``. Unlike EWMA/CUSUM, there is
-            no second, independently-specifiable tuning parameter (ADR-004
-            section 5, BIN-95 A3/A5).
+    Parameters
+    ----------
+    baseline
+        The Phase I baseline to fit from.
+    target_arl
+        The target in-control ARL0 (false alarm tolerance). Optional in
+        the signature, required by validation -- omitting it raises
+        ``InvalidParameterError`` with ``context["kind"] == "missing"``.
+        Unlike EWMA/CUSUM, there is no second, independently-specifiable
+        tuning parameter (ADR-004 section 5, BIN-95 A3/A5).
 
-    Returns:
-        A ``FittedShewhart`` artefact.
+    Returns
+    -------
+    FittedShewhart
+        The fitted artefact.
 
-    Raises:
-        InvalidParameterError: ``target_arl`` is missing or outside
-            ``[MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL]``.
-        InsufficientBaselineError: ``baseline`` does not meet the
-            sufficiency threshold (BIN-95 A1/BR-1).
-        DegenerateBaselineError: every observation in ``baseline`` has an
-            identical score (BIN-95 A2/BR-2).
+    Raises
+    ------
+    InvalidParameterError
+        ``target_arl`` is missing or outside ``[MIN_MEANINGFUL_ARL,
+        MAX_MEANINGFUL_ARL]``.
+    InsufficientBaselineError
+        ``baseline`` does not meet the sufficiency threshold (BIN-95
+        A1/BR-1).
+    DegenerateBaselineError
+        Every observation in ``baseline`` has an identical score (BIN-95
+        A2/BR-2).
     """
     validated_target_arl = _require_target_arl(target_arl)
 

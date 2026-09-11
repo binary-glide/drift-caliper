@@ -73,27 +73,35 @@ class Judge(BaseModel):
         ``criteria`` is not an error here -- it only becomes
         ``MissingPrerequisiteError`` when ``score()`` actually needs it.
 
-        Args:
-            model_version: The model version string to pin. Must be
-                non-empty and not whitespace-only. Preserved exactly as
-                provided, including surrounding whitespace.
-            provider: The judge provider port used by ``score()``. Optional
-                at creation; required by the time ``score()`` runs.
-            criteria: The judge-level scoring criteria text. Optional at
-                creation; may also be supplied (or overridden) per call to
-                ``score()``. Must be non-empty and not whitespace-only if
-                supplied -- validated by ``ScoringCriteria``.
+        Parameters
+        ----------
+        model_version
+            The model version string to pin. Must be non-empty and not
+            whitespace-only. Preserved exactly as provided, including
+            surrounding whitespace.
+        provider
+            The judge provider port used by ``score()``. Optional at
+            creation; required by the time ``score()`` runs.
+        criteria
+            The judge-level scoring criteria text. Optional at creation;
+            may also be supplied (or overridden) per call to ``score()``.
+            Must be non-empty and not whitespace-only if supplied --
+            validated by ``ScoringCriteria``.
 
-        Returns:
+        Returns
+        -------
+        Judge
             A new, immutable ``Judge`` pinned to ``model_version``.
 
-        Raises:
-            InvalidParameterError: ``model_version`` was omitted (
-                ``context["kind"] == "missing"``), or was supplied but is
-                empty or whitespace-only (``context["kind"] == "invalid"``,
-                raised from ``ModelVersion``'s field validator); or
-                ``criteria`` was supplied but is empty or whitespace-only
-                (raised from ``ScoringCriteria``'s field validator).
+        Raises
+        ------
+        InvalidParameterError
+            ``model_version`` was omitted (``context["kind"] ==
+            "missing"``), or was supplied but is empty or whitespace-only
+            (``context["kind"] == "invalid"``, raised from
+            ``ModelVersion``'s field validator); or ``criteria`` was
+            supplied but is empty or whitespace-only (raised from
+            ``ScoringCriteria``'s field validator).
         """
         if model_version is None:
             raise InvalidParameterError(
@@ -147,28 +155,38 @@ class Judge(BaseModel):
            built from ``self.model_version`` and the resolved
            ``ScoringCriteria`` (ADR-006 section 7).
 
-        Args:
-            agent_output: The agent output to score. Required; must be
-                non-empty and not whitespace-only.
-            agent_input: The agent input that produced ``agent_output``,
-                when available. Not validated for emptiness, not carried
-                onto ``Provenance`` or ``ScoringResult`` (ADR-006 section 3).
-            criteria: Criteria to use for this call only, overriding
-                ``self.criteria`` without mutating it (ADR-006 section 2,
-                resolving BIN-58 OQ-3).
+        Parameters
+        ----------
+        agent_output
+            The agent output to score. Required; must be non-empty and not
+            whitespace-only.
+        agent_input
+            The agent input that produced ``agent_output``, when
+            available. Not validated for emptiness, not carried onto
+            ``Provenance`` or ``ScoringResult`` (ADR-006 section 3).
+        criteria
+            Criteria to use for this call only, overriding
+            ``self.criteria`` without mutating it (ADR-006 section 2,
+            resolving BIN-58 OQ-3).
 
-        Returns:
+        Returns
+        -------
+        ScoringResult
             The structured, immutable scoring result.
 
-        Raises:
-            MissingPrerequisiteError: no provider is configured, or no
-                criteria are resolvable from either this call or the judge.
-            InvalidParameterError: ``agent_output`` is empty or
-                whitespace-only.
-            ProviderError: the provider's call failed.
-            MalformedResponseError: the provider's response could not be
-                interpreted.
-            JudgeRefusalError: the provider declined to score.
+        Raises
+        ------
+        MissingPrerequisiteError
+            No provider is configured, or no criteria are resolvable from
+            either this call or the judge.
+        InvalidParameterError
+            ``agent_output`` is empty or whitespace-only.
+        ProviderError
+            The provider's call failed.
+        MalformedResponseError
+            The provider's response could not be interpreted.
+        JudgeRefusalError
+            The provider declined to score.
         """
         if self.provider is None:
             raise MissingPrerequisiteError(
@@ -203,16 +221,21 @@ class Judge(BaseModel):
         style's ~40-line guideline (`coding-standards/references/python.md`
         Pre-Submit Checklist) -- pure refactor, no behaviour change.
 
-        Args:
-            criteria: Per-call criteria text, or ``None`` to fall back to
-                ``self.criteria``.
+        Parameters
+        ----------
+        criteria
+            Per-call criteria text, or ``None`` to fall back to
+            ``self.criteria``.
 
-        Returns:
-            The resolved, validated ``ScoringCriteria``.
+        Returns
+        -------
+        ScoringCriteria
+            The resolved, validated criteria.
 
-        Raises:
-            MissingPrerequisiteError: neither per-call nor judge-level
-                criteria are available.
+        Raises
+        ------
+        MissingPrerequisiteError
+            Neither per-call nor judge-level criteria are available.
         """
         effective_criteria_raw = (
             criteria
@@ -235,9 +258,10 @@ def _require_non_blank_agent_output(agent_output: str) -> None:
     style's ~40-line guideline -- pure refactor, no behaviour change. A
     module-level function, not a method: it does not touch ``self``.
 
-    Raises:
-        InvalidParameterError: ``agent_output`` is empty or
-            whitespace-only.
+    Raises
+    ------
+    InvalidParameterError
+        ``agent_output`` is empty or whitespace-only.
     """
     if agent_output.strip() == "":
         raise InvalidParameterError(

@@ -64,6 +64,17 @@ the paper's authors to hit ARL0=500 -- reproduce ARL0 of approximately
 tolerance ``test_ewma_arl_published_values.py`` enforces and consistent
 with that file's own independently-recomputed reference figures (499.9,
 499.8) documented in its module docstring.
+
+References
+----------
+.. [1] Lucas, J. M. and Saccucci, M. S. (1990). "Exponentially Weighted
+       Moving Average Control Schemes: Properties and Enhancements."
+       Technometrics, 32(1), 1-12.
+
+The Brook & Evans (1972) Markov-chain approximation this module also relies
+on (see "Calibration method" above) has no full bibliographic entry
+verified anywhere in this repository -- only author/year mentions -- so it
+is deliberately not listed above.
 """
 
 from __future__ import annotations
@@ -290,7 +301,7 @@ def _has_zero_variance(scores: Sequence[float]) -> bool:
 
 
 def _ewma_asymptotic_std_ratio(smoothing_param: float) -> float:
-    """The ratio of the EWMA statistic's asymptotic std dev to the process std dev.
+    """Compute the EWMA statistic's asymptotic std dev as a ratio to process std dev.
 
     ``sqrt(lambda / (2 - lambda))`` -- Roberts (1959); Lucas & Saccucci
     (1990) eq. 3.
@@ -308,15 +319,20 @@ def _in_control_arl(
     process-sigma-standardised units (process mean 0, process std dev 1) --
     see the module docstring's "why sigma does not need to be controlled".
 
-    Args:
-        smoothing_param: The EWMA smoothing parameter (lambda).
-        limit_multiplier: The control-limit multiplier (L). The fixed
-            limits sit at ``+/- limit_multiplier *
-            _ewma_asymptotic_std_ratio(smoothing_param)``.
-        num_states: Number of discretisation cells. Must be odd, so a cell
-            sits exactly on the centre line (the zero-state starting point).
+    Parameters
+    ----------
+    smoothing_param
+        The EWMA smoothing parameter (lambda).
+    limit_multiplier
+        The control-limit multiplier (L). The fixed limits sit at
+        ``+/- limit_multiplier * _ewma_asymptotic_std_ratio(smoothing_param)``.
+    num_states
+        Number of discretisation cells. Must be odd, so a cell sits
+        exactly on the centre line (the zero-state starting point).
 
-    Returns:
+    Returns
+    -------
+    float
         The expected number of in-control observations until the EWMA
         statistic first leaves the control limits, starting from the
         centre line.
@@ -382,7 +398,9 @@ def _calibrate_limit_multiplier(
     target_arl``. In-control ARL0 is monotonically increasing in L (wider
     limits mean fewer false alarms), so the root, when bracketed, is unique.
 
-    Returns:
+    Returns
+    -------
+    tuple[float, float]
         A ``(limit_multiplier, achieved_arl)`` pair -- the solved L and the
         ARL0 this implementation's own calibration computes for it (which
         may differ very slightly from ``target_arl`` due to numerical
@@ -444,27 +462,41 @@ def fit_ewma(
     Markov-chain approximation (see module docstring) and reports both the
     requested and achieved false alarm tolerance on the returned artefact.
 
-    Args:
-        baseline: The Phase I baseline to fit from.
-        target_arl: The target in-control ARL0 (false alarm tolerance).
-            Optional in the signature, required by validation -- omitting
-            it raises ``InvalidParameterError`` with
-            ``context["kind"] == "missing"``.
-        smoothing_param: The EWMA smoothing parameter (lambda). ``None``
-            uses ``DEFAULT_SMOOTHING_PARAM``.
+    Parameters
+    ----------
+    baseline
+        The Phase I baseline to fit from.
+    target_arl
+        The target in-control ARL0 (false alarm tolerance). Optional in
+        the signature, required by validation -- omitting it raises
+        ``InvalidParameterError`` with ``context["kind"] == "missing"``.
+    smoothing_param
+        The EWMA smoothing parameter (lambda). ``None`` uses
+        ``DEFAULT_SMOOTHING_PARAM``.
 
-    Returns:
-        A ``FittedEWMA`` artefact.
+    Returns
+    -------
+    FittedEWMA
+        The fitted artefact.
 
-    Raises:
-        InvalidParameterError: ``target_arl`` is missing or outside
-            ``[MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL]``, or
-            ``smoothing_param`` is supplied but outside
-            ``[MIN_SMOOTHING_PARAM, MAX_SMOOTHING_PARAM]``.
-        InsufficientBaselineError: ``baseline`` does not meet the
-            sufficiency threshold (BIN-65 A1/BR-1).
-        DegenerateBaselineError: every observation in ``baseline`` has an
-            identical score (BIN-65 A2/BR-2).
+    Raises
+    ------
+    InvalidParameterError
+        ``target_arl`` is missing or outside ``[MIN_MEANINGFUL_ARL,
+        MAX_MEANINGFUL_ARL]``, or ``smoothing_param`` is supplied but
+        outside ``[MIN_SMOOTHING_PARAM, MAX_SMOOTHING_PARAM]``.
+    InsufficientBaselineError
+        ``baseline`` does not meet the sufficiency threshold (BIN-65
+        A1/BR-1).
+    DegenerateBaselineError
+        Every observation in ``baseline`` has an identical score (BIN-65
+        A2/BR-2).
+
+    References
+    ----------
+    .. [1] Lucas, J. M. and Saccucci, M. S. (1990). "Exponentially Weighted
+           Moving Average Control Schemes: Properties and Enhancements."
+           Technometrics, 32(1), 1-12.
     """
     validated_target_arl = _require_target_arl(target_arl)
     _validate_smoothing_param(smoothing_param)

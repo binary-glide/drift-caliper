@@ -92,7 +92,7 @@ class FittedCUSUM(BaseModel):
         )
 
     def audit_summary(self) -> str:
-        """A full, labelled, multi-line record suitable for an audit log (BIN-66).
+        """Give a full, labelled, multi-line record suitable for an audit log (BIN-66).
 
         Distinct from ``__repr__``/``__str__`` -- see
         ``caliper.baseline.domain.audit_summary``'s module docstring. The

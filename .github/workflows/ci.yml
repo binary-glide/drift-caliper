@@ -28,6 +28,24 @@ jobs:
       - run: uv run ty check --error-on-warning
       - run: uv run mypy
 
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      # `uv audit` audits the *lockfile*, so a vulnerable pin is caught
+      # whether or not anything is synced -- no install step needed, and no
+      # extra dependency for the project to carry (BIN-87).
+      #
+      # ⚠️ Experimental as of uv 0.11.26: the interface may change without
+      # warning, which is what `--preview-features` acknowledges. If it
+      # churns or is withdrawn, the fallback is `pip-audit` in its own
+      # dependency group. Do not silently drop this job -- replace it.
+      - run: uv audit --preview-features audit-command
+
   test:
     name: test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

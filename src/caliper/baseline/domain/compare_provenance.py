@@ -30,23 +30,28 @@ from caliper.measurement import ScoringResult
 def compare_provenance(result: ScoringResult, artefact: FittedControlLimits) -> None:
     """Compare a Phase II scoring result's provenance against a fitted artefact's.
 
-    Args:
-        result: The Phase II observation whose provenance is being
-            checked.
-        artefact: Any chart type's fitted artefact. Compared uniformly via
-            the shared ``FittedControlLimits`` protocol -- no chart-type-
-            specific branching (BR-6).
+    Parameters
+    ----------
+    result
+        The Phase II observation whose provenance is being checked.
+    artefact
+        Any chart type's fitted artefact. Compared uniformly via the
+        shared ``FittedControlLimits`` protocol -- no chart-type-specific
+        branching (BR-6).
 
-    Returns:
-        ``None`` on success. Mirrors ``Baseline.record()``'s precedent: a
+    Returns
+    -------
+    None
+        On success. Mirrors ``Baseline.record()``'s precedent: a
         validation-gate operation that raises on failure and returns
         nothing meaningful on success.
 
-    Raises:
-        ProvenanceMismatchError: ``result``'s provenance differs from
-            ``artefact``'s on either dimension. Both dimensions are
-            checked before raising, so a dual mismatch is reported in a
-            single raise covering both.
+    Raises
+    ------
+    ProvenanceMismatchError
+        ``result``'s provenance differs from ``artefact``'s on either
+        dimension. Both dimensions are checked before raising, so a dual
+        mismatch is reported in a single raise covering both.
     """
     mismatches = build_mismatches(
         expected_model_version=artefact.provenance_model_version,

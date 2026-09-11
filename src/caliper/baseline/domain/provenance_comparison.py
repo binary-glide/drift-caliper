@@ -39,7 +39,9 @@ def build_mismatches(
     case folding, no Unicode normalisation (`docs/domain-model.md`
     "Criteria equality is exact").
 
-    Returns:
+    Returns
+    -------
+    dict[str, dict[str, str]]
         An empty mapping when both dimensions match; one entry per
         differing dimension otherwise, keyed by ``"model_version"`` and/or
         ``"scoring_criteria"``.

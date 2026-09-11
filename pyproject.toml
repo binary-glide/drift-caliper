@@ -163,7 +163,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.pydocstyle]
-convention = "google"
+convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 # `D`: test functions are named to describe the behaviour they pin, and their

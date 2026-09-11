@@ -69,24 +69,29 @@ class Monitor:
     ) -> None:
         """Construct a ``Monitor`` from a fitted control-limit artefact.
 
-        Args:
-            artefact: The fitted control-limit artefact -- the result of
-                ``fit_ewma()``, ``fit_cusum()``, or ``fit_shewhart()`` --
-                this monitor records Phase II observations against.
-                Referenced, never copied or mutated; remains immutable for
-                this monitor's entire lifetime.
-            retain_history: Whether successfully recorded ``MonitoringResult``s
-                are retained on ``.history``. Defaults to ``True``. **Risk:**
-                a ``Monitor`` that retains history across an indefinitely
-                running production process accumulates entries without
-                bound -- there is no automatic eviction or sizing policy in
-                R1 (ADR-009 section 7). Pass ``False`` to opt out entirely,
-                or call ``clear_history()`` periodically to bound growth
-                manually.
+        Parameters
+        ----------
+        artefact
+            The fitted control-limit artefact -- the result of
+            ``fit_ewma()``, ``fit_cusum()``, or ``fit_shewhart()`` -- this
+            monitor records Phase II observations against. Referenced,
+            never copied or mutated; remains immutable for this monitor's
+            entire lifetime.
+        retain_history
+            Whether successfully recorded ``MonitoringResult``s are
+            retained on ``.history``. Defaults to ``True``. **Risk:** a
+            ``Monitor`` that retains history across an indefinitely
+            running production process accumulates entries without bound
+            -- there is no automatic eviction or sizing policy in R1
+            (ADR-009 section 7). Pass ``False`` to opt out entirely, or
+            call ``clear_history()`` periodically to bound growth
+            manually.
 
-        Raises:
-            InvalidParameterError: ``artefact`` does not satisfy the
-                ``FittedControlLimits`` protocol.
+        Raises
+        ------
+        InvalidParameterError
+            ``artefact`` does not satisfy the ``FittedControlLimits``
+            protocol.
         """
         if not isinstance(artefact, FittedControlLimits):
             raise InvalidParameterError(
@@ -148,22 +153,26 @@ class Monitor:
         accumulator (if any) update. A refused attempt never appears in
         ``.history``.
 
-        Args:
-            observation: The Phase II scoring result to check, typically
-                the return value of ``Judge.score()``.
+        Parameters
+        ----------
+        observation
+            The Phase II scoring result to check, typically the return
+            value of ``Judge.score()``.
 
-        Returns:
-            The ``MonitoringResult`` describing whether the process remains
-            in control. Never raised for a genuine out-of-control
-            determination -- that is a normal, successful return value
-            (BR-7).
+        Returns
+        -------
+        MonitoringResult
+            Describes whether the process remains in control. Never
+            raised for a genuine out-of-control determination -- that is
+            a normal, successful return value (BR-7).
 
-        Raises:
-            InvalidObservationError: ``observation`` is not a complete
-                ``ScoringResult``.
-            ProvenanceMismatchError: ``observation.provenance`` differs from
-                the fitted artefact's baseline provenance on either
-                dimension.
+        Raises
+        ------
+        InvalidObservationError
+            ``observation`` is not a complete ``ScoringResult``.
+        ProvenanceMismatchError
+            ``observation.provenance`` differs from the fitted artefact's
+            baseline provenance on either dimension.
         """
         if not isinstance(observation, ScoringResult):
             raise InvalidObservationError(
@@ -226,6 +235,8 @@ class Monitor:
     def _check_ewma(self, artefact: FittedEWMA, score: float) -> bool:
         """Recursive: update the smoothed statistic, then compare to ``ucl``/``lcl``.
 
+        Notes
+        -----
         ``Z_i = lambda * X_i + (1 - lambda) * Z_(i-1)``, initialised at
         construction to the baseline mean (``cl``) so the very first
         recorded observation is checkable without any prior history
@@ -250,6 +261,8 @@ class Monitor:
     def _check_cusum(self, artefact: FittedCUSUM, score: float) -> bool:
         """Recursive: update both one-sided sums, then compare the relevant one(s).
 
+        Notes
+        -----
         Standardised-CUSUM convention (``src/caliper/baseline/domain/cusum_fitting.py``
         module docstring, citing Siegmund 1985 via Montgomery):
         ``Z_t = (X_t - target_value) / sigma_estimate``,

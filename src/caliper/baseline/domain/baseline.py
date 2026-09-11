@@ -158,7 +158,7 @@ class Baseline:
         return self._provenance_signature
 
     def __len__(self) -> int:
-        """The number of recorded observations (BIN-110 P1).
+        """Report the number of recorded observations (BIN-110 P1).
 
         Agrees with ``observation_count``, which is kept alongside this --
         it reads better in ``SufficiencyResult``'s context and in log
@@ -176,7 +176,7 @@ class Baseline:
         return iter(self.observations)
 
     def __repr__(self) -> str:
-        """A useful REPL/log/debugger representation (BIN-110 P1).
+        """Produce a useful REPL/log/debugger representation (BIN-110 P1).
 
         Before this, ``Baseline`` had no ``__repr__`` and fell back to
         ``object.__repr__`` (``<...Baseline object at 0x...>``) -- useless
@@ -197,17 +197,20 @@ class Baseline:
         the baseline is left completely unchanged -- the observation is
         appended only after every check passes.
 
-        Args:
-            result: The scoring result to record. Only a complete
-                ``ScoringResult`` is accepted; anything else is rejected
-                with ``InvalidObservationError`` before the baseline is
-                modified.
+        Parameters
+        ----------
+        result
+            The scoring result to record. Only a complete ``ScoringResult``
+            is accepted; anything else is rejected with
+            ``InvalidObservationError`` before the baseline is modified.
 
-        Raises:
-            InvalidObservationError: ``result`` is not a complete
-                ``ScoringResult``.
-            ProvenanceMismatchError: ``result.provenance`` differs from the
-                baseline's established provenance signature.
+        Raises
+        ------
+        InvalidObservationError
+            ``result`` is not a complete ``ScoringResult``.
+        ProvenanceMismatchError
+            ``result.provenance`` differs from the baseline's established
+            provenance signature.
         """
         if not isinstance(result, ScoringResult):
             raise InvalidObservationError(
@@ -255,19 +258,35 @@ class Baseline:
         governs the determination, per ADR-005 (all chart types currently
         share the one default until BIN-92's simulation study).
 
-        Args:
-            threshold: Minimum observation count required to be
-                sufficient. ``None`` uses ``DEFAULT_SUFFICIENCY_THRESHOLD``.
-                Must be positive.
-            chart_type: Optional label for which chart type's threshold
-                this check is for. Purely informational in this story --
-                see the docstring above.
+        Parameters
+        ----------
+        threshold
+            Minimum observation count required to be sufficient. ``None``
+            uses ``DEFAULT_SUFFICIENCY_THRESHOLD``. Must be positive.
+        chart_type
+            Optional label for which chart type's threshold this check is
+            for. Purely informational in this story -- see the docstring
+            above.
 
-        Returns:
-            A ``SufficiencyResult`` describing the baseline's readiness.
+        Returns
+        -------
+        SufficiencyResult
+            Describes the baseline's readiness.
 
-        Raises:
-            InvalidParameterError: ``threshold`` is zero or negative.
+        Raises
+        ------
+        InvalidParameterError
+            ``threshold`` is zero or negative.
+
+        Notes
+        -----
+        ``DEFAULT_SUFFICIENCY_THRESHOLD``'s rationale draws on Quesenberry
+        (1993) and Jones, Champ & Rigdon (2001) -- see ADR-005 for the full
+        citations and reasoning. Neither is reproduced as a ``References``
+        entry here: Quesenberry (1993) was verified only through secondary
+        citations, and Jones, Champ & Rigdon (2001) only its abstract was
+        read -- neither was read directly enough to cite as a primary
+        source in published API documentation.
         """
         del chart_type  # informational only in this story -- see docstring
 

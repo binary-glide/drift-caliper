@@ -51,9 +51,11 @@ class ScoringCriteria(BaseModel):
     supplies a value (including the empty string and whitespace-only
     cases), so ``context["kind"]`` is always ``"invalid"`` here.
 
-    Raises:
-        InvalidParameterError: ``value`` is empty or contains only
-            whitespace. ``context["kind"]`` is always ``"invalid"``.
+    Raises
+    ------
+    InvalidParameterError
+        ``value`` is empty or contains only whitespace.
+        ``context["kind"]`` is always ``"invalid"``.
     """
 
     model_config = ConfigDict(frozen=True)

@@ -73,6 +73,13 @@ the auditable commitment ADR-004 describes; the Monte Carlo simulation in
 ``tests/unit/baseline/test_cusum_arl_published_values.py`` independently
 corroborates the harmonic two-arm combination this reading relies on. See
 that file's module docstring for the settled statement.
+
+References
+----------
+.. [1] Montgomery, D. C. (2013). *Introduction to Statistical Quality
+       Control* (7th ed.). Wiley, p. 423, eqs. 9.6-9.7 -- states
+       Siegmund's (1985) approximation, ``b = h + 1.166``, and the
+       two-sided combination formula.
 """
 
 from __future__ import annotations
@@ -317,17 +324,26 @@ def _cusum_arl0(reference_value: float, decision_interval: float) -> float:
     this function directly against a published/independently-computed value
     rather than reading a derived quantity back off a ``FittedCUSUM``.
 
-    Args:
-        reference_value: The CUSUM reference value (*k*), in sigma units.
-            Must be strictly positive -- the formula has a removable
-            singularity at ``k = 0`` (the limit as ``k -> 0`` is ``b **
-            2``, verified separately in the test file) but is not evaluable
-            there directly.
-        decision_interval: The CUSUM decision interval (*h*), in sigma
-            units.
+    Parameters
+    ----------
+    reference_value
+        The CUSUM reference value (*k*), in sigma units. Must be strictly
+        positive -- the formula has a removable singularity at ``k = 0``
+        (the limit as ``k -> 0`` is ``b ** 2``, verified separately in the
+        test file) but is not evaluable there directly.
+    decision_interval
+        The CUSUM decision interval (*h*), in sigma units.
 
-    Returns:
+    Returns
+    -------
+    float
         The one-sided, zero-shift (in-control) ARL0.
+
+    References
+    ----------
+    .. [1] Montgomery, D. C. (2013). *Introduction to Statistical Quality
+           Control* (7th ed.). Wiley, p. 423, eq. 9.6 -- states
+           Siegmund's (1985) approximation, ``b = h + 1.166``.
     """
     b = decision_interval + _SIEGMUND_CORRECTION
     exponent = 2.0 * reference_value * b
@@ -363,7 +379,9 @@ def _calibrate_decision_interval(
     (``target_arl * 2`` for a symmetric two-sided design, per Montgomery
     Eq. 9.7), and ``achieved_arl`` is reported back combined, not per-arm.
 
-    Returns:
+    Returns
+    -------
+    tuple[float, float]
         A ``(decision_interval, achieved_arl)`` pair.
     """
     per_arm_target = target_arl * 2.0 if direction == "two_sided" else target_arl
@@ -432,32 +450,49 @@ def fit_cusum(
     tolerance, the reference value used, and the monitored direction on the
     returned artefact.
 
-    Args:
-        baseline: The Phase I baseline to fit from.
-        target_arl: The target in-control ARL0 (false alarm tolerance), as
-            experienced by the deployed monitor -- the two-sided combined
-            figure when ``direction == "two_sided"`` (see module docstring's
-            flagged reading). Optional in the signature, required by
-            validation -- omitting it raises ``InvalidParameterError`` with
-            ``context["kind"] == "missing"``.
-        reference_value: The CUSUM reference value (*k*), in sigma units.
-            ``None`` uses ``DEFAULT_REFERENCE_VALUE``.
-        direction: ``"two_sided"``, ``"lower"``, or ``"upper"``. ``None``
-            uses ``DEFAULT_DIRECTION`` (``"two_sided"``).
+    Parameters
+    ----------
+    baseline
+        The Phase I baseline to fit from.
+    target_arl
+        The target in-control ARL0 (false alarm tolerance), as experienced
+        by the deployed monitor -- the two-sided combined figure when
+        ``direction == "two_sided"`` (see module docstring's flagged
+        reading). Optional in the signature, required by validation --
+        omitting it raises ``InvalidParameterError`` with
+        ``context["kind"] == "missing"``.
+    reference_value
+        The CUSUM reference value (*k*), in sigma units. ``None`` uses
+        ``DEFAULT_REFERENCE_VALUE``.
+    direction
+        ``"two_sided"``, ``"lower"``, or ``"upper"``. ``None`` uses
+        ``DEFAULT_DIRECTION`` (``"two_sided"``).
 
-    Returns:
-        A ``FittedCUSUM`` artefact.
+    Returns
+    -------
+    FittedCUSUM
+        The fitted artefact.
 
-    Raises:
-        InvalidParameterError: ``target_arl`` is missing or outside
-            ``[MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL]``; ``reference_value``
-            is supplied but outside ``[MIN_REFERENCE_VALUE,
-            MAX_REFERENCE_VALUE]``; or ``direction`` is supplied but not in
-            ``_VALID_DIRECTIONS``.
-        InsufficientBaselineError: ``baseline`` does not meet the
-            sufficiency threshold (BIN-94 A1/BR-1).
-        DegenerateBaselineError: every observation in ``baseline`` has an
-            identical score (BIN-94 A2/BR-2).
+    Raises
+    ------
+    InvalidParameterError
+        ``target_arl`` is missing or outside ``[MIN_MEANINGFUL_ARL,
+        MAX_MEANINGFUL_ARL]``; ``reference_value`` is supplied but outside
+        ``[MIN_REFERENCE_VALUE, MAX_REFERENCE_VALUE]``; or ``direction`` is
+        supplied but not in ``_VALID_DIRECTIONS``.
+    InsufficientBaselineError
+        ``baseline`` does not meet the sufficiency threshold (BIN-94
+        A1/BR-1).
+    DegenerateBaselineError
+        Every observation in ``baseline`` has an identical score (BIN-94
+        A2/BR-2).
+
+    References
+    ----------
+    .. [1] Montgomery, D. C. (2013). *Introduction to Statistical Quality
+           Control* (7th ed.). Wiley, p. 423, eqs. 9.6-9.7 -- states
+           Siegmund's (1985) approximation, ``b = h + 1.166``, and the
+           two-sided combination formula.
     """
     validated_target_arl = _require_target_arl(target_arl)
     _validate_reference_value(reference_value)

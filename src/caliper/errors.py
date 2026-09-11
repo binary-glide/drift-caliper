@@ -32,16 +32,20 @@ class CaliperError(Exception):
     categories are a stable contract -- removing one is a breaking change,
     adding one is a minor-version change.
 
-    Attributes:
-        category: Stable, machine-readable category identifier (e.g.
-            ``"invalid_parameter"``), declared once per concrete subclass.
-            Part of the tested contract.
-        context: Structured fields describing the failure. Required keys
-            per category are documented on each leaf type and in ADR-002.
-            Part of the tested contract.
-        recovery_hint: Human-readable suggested next step, for engineers
-            reading logs or a REPL. Not part of the tested contract --
-            tests must never assert on its content.
+    Attributes
+    ----------
+    category
+        Stable, machine-readable category identifier (e.g.
+        ``"invalid_parameter"``), declared once per concrete subclass.
+        Part of the tested contract.
+    context
+        Structured fields describing the failure. Required keys per
+        category are documented on each leaf type and in ADR-002. Part of
+        the tested contract.
+    recovery_hint
+        Human-readable suggested next step, for engineers reading logs or
+        a REPL. Not part of the tested contract -- tests must never
+        assert on its content.
     """
 
     category: ClassVar[str]

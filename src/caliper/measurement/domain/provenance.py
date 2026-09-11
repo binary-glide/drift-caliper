@@ -45,7 +45,7 @@ class Provenance(BaseModel):
         )
 
     def __repr__(self) -> str:
-        """A reconstructible-looking repr without nesting wrapper reprs.
+        """Produce a reconstructible-looking repr without nesting wrapper reprs.
 
         See ``__str__`` above for the rationale -- this is the same fix
         applied to ``repr()``, since an f-string/log line and a REPL echo

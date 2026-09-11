@@ -40,13 +40,15 @@ class ModelVersion(BaseModel):
     surfaces as ``pydantic_core.ValidationError`` rather than a
     ``CaliperError``. See ``BIN-104``.
 
-    Raises:
-        InvalidParameterError: ``value`` is empty or contains only
-            whitespace. ``context["kind"]`` is always ``"invalid"`` here --
-            a value was supplied, just not one that satisfies the
-            constraint. The ``"missing"`` case (no value supplied at all)
-            is a distinct condition handled by callers such as
-            ``Judge.create`` before a ``ModelVersion`` is ever constructed.
+    Raises
+    ------
+    InvalidParameterError
+        ``value`` is empty or contains only whitespace.
+        ``context["kind"]`` is always ``"invalid"`` here -- a value was
+        supplied, just not one that satisfies the constraint. The
+        ``"missing"`` case (no value supplied at all) is a distinct
+        condition handled by callers such as ``Judge.create`` before a
+        ``ModelVersion`` is ever constructed.
     """
 
     model_config = ConfigDict(frozen=True)
