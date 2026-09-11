@@ -1,6 +1,6 @@
 ---
 created: 2026-09-09
-updated: 2026-09-10
+updated: 2026-09-11
 feature: BIN-100 — Domain model — aggregates, ubiquitous language, value objects
 bounded_context: measurement, baseline
 canonical: true
@@ -392,8 +392,14 @@ class FittedControlLimits(Protocol):
 
     @property
     def achieved_arl(self) -> float:
-        """The ARL_0 actually produced by the calibration.
-        May differ from requested due to numerical approximation."""
+        """The ARL_0 the calibration targets, given the Phase I baseline's
+        *estimate* of the process — not the true process. A finite baseline
+        makes the realised false-alarm rate a random variable around this
+        figure, not a guarantee (Quesenberry 1993; Jones, Champ & Rigdon
+        2001). Smaller baselines relative to the requested target produce
+        more spread; see ADR-005's 2026-09-11 amendment for the measured
+        adequacy tiers and the structured advisory this triggers.
+        May also differ from requested due to numerical approximation."""
         ...
 
     @property
@@ -760,7 +766,8 @@ Every term below appears in at least one feature file or ADR. Where the PRD and 
 | **Phase I** | The baseline collection and fitting phase. The engineer collects observations, checks sufficiency, and fits control limits. | Baseline | BIN-63, BIN-65/94/95 |
 | **Phase II** | The ongoing monitoring phase. BIN-68 covers provenance comparison across the phase boundary; BIN-69/BIN-72 (ADR-009) now cover Phase II monitoring logic itself — recording an observation against a fitted artefact, checking it for a signal, and reviewing the session's history of what was recorded. | Baseline, Monitoring | BIN-68, ADR-009, BIN-69, BIN-72 |
 | **Sufficiency** | Whether a baseline has enough observations for reliable control limit fitting. The check is advisory (reports status); fitting is where enforcement occurs. | Baseline | BIN-64 |
-| **Sufficiency threshold** | The minimum number of observations required. Configurable per engineer and per chart type (BIN-64 BR-3, BR-5). Library default: 100 individual observations (ADR-005). Must be positive (BIN-64 BR-8). | Baseline | BIN-64, ADR-005 |
+| **Sufficiency threshold** | The minimum number of observations required to fit at all — the hard floor. Configurable per engineer and per chart type (BIN-64 BR-3, BR-5). Library default: 100 individual observations (ADR-005). Must be positive (BIN-64 BR-8). Below it, fitting raises `InsufficientBaselineError`. **Distinct from adequacy (below) — see ADR-005 amendment 2026-09-11.** | Baseline | BIN-64, ADR-005 |
+| **Adequate baseline size** *(new, ADR-005 amendment 2026-09-11, BIN-114)* | A second, target-dependent line above the sufficiency threshold: `adequate(target_arl)`, measured (not derived) at ≈300 observations for `target_arl` ≤ 200 and ≈500 for `target_arl` > 200. A baseline at or above the sufficiency threshold but below `adequate(target_arl)` still fits successfully — it is never blocked — but carries a structured, non-raising advisory (`DataQualityConcern`-shaped) naming the gap. Below the sufficiency threshold, fitting is refused regardless of `adequate()`; the two lines are independent. **Provisional**, pending Jones, Champ & Rigdon (2001) — see ADR-005 amendment for the full derivation, caveats, and the still-open exact API carrier (BIN-114 OQ-3). | Baseline | BIN-114, ADR-005 (2026-09-11 amendment) |
 | **Degenerate baseline** | A baseline that meets the count threshold but is statistically unusable. The primary case is zero variance — all scores identical, causing sigma to collapse to zero and limits to collapse to the mean. | Baseline | BIN-65 SC6, BIN-94 SC6, BIN-95 SC6 |
 | **Fitted artefact** / **fitted control limits** | An immutable record produced by fitting. Carries the statistical parameters, provenance, and ARL information needed for Phase II monitoring and auditability. Satisfies the `FittedControlLimits` protocol (ADR-004). | Baseline | BIN-65/66/94/95, ADR-004 |
 | **False alarm tolerance** | The target in-control ARL_0. The expected number of observations before a false alarm when the process is in control. Primary representation: ARL_0. False alarm rate (alpha) accepted as convenience input, converted to ARL_0. Required parameter — no silent default (ADR-004 section 5). | Baseline | ADR-004, BIN-65/94/95 |
@@ -846,7 +853,7 @@ These are the operations the ten feature files establish. They replace the "serv
 | Score agent output | BIN-59 | `agent_output: str` (required), optional `agent_input: str`, optional `criteria: str` | `ScoringResult` | Measurement — **implemented** (ADR-006) |
 | Create baseline | BIN-63 | (none) | `Baseline` (empty) | Baseline — **implemented** |
 | Record observation | BIN-63 | `ScoringResult` | Mutates baseline | Baseline — **implemented** |
-| Check sufficiency | BIN-64 | Optional keyword-only: `threshold`, `chart_type` | `SufficiencyResult` | Baseline — **implemented** (advisory; never raises) |
+| Check sufficiency | BIN-64 | Optional keyword-only: `threshold`, `chart_type` | `SufficiencyResult` | Baseline — **implemented** (advisory; never raises). ⚠️ **Signature does not yet carry `target_arl`** — the target-dependent adequacy advisory ADR-005's 2026-09-11 amendment specifies (`BIN-114`) is domain-modelled at the policy level only; exact carrier (extend this signature vs. a field on `Fitted*`) is still open (`BIN-114` OQ-3), not yet implemented. |
 | Fit EWMA | BIN-65 | `Baseline`, `target_arl`, optional `smoothing_param` | `FittedEWMA` | Baseline — **implemented** (BIN-65) |
 | Fit CUSUM | BIN-94 | `Baseline`, `target_arl`, optional `reference_value`, optional `direction` | `FittedCUSUM` | Baseline — **implemented** (BIN-94) |
 | Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline — **implemented** (BIN-95) |

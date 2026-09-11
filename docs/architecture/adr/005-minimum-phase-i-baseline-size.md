@@ -1,9 +1,16 @@
 # ADR-005: Minimum Phase I baseline size for LLM judge scores
 
-**Status:** Accepted
+**Status:** Accepted, amended twice
 **Date:** 2026-09-09
-**Deciders:** system-architect (BIN-92), ratified by product owner
-**Refs:** BIN-92, BIN-64, BIN-65, BIN-84, BIN-94, BIN-95, ADR-001, ADR-003, ADR-004
+**Amended:** 2026-09-09 (sigma estimator correction — see amendment below),
+2026-09-11 (target-dependent adequacy tiers — see amendment below; **this is
+the amendment that changes the Decision engineers act on today**)
+**Deciders:** system-architect (BIN-92), ratified by product owner. The
+2026-09-11 amendment's risk-appetite parameter (**≤5% under half**) was
+**ratified by the product owner on 2026-09-11** — see that amendment's own
+header for what it means and what it costs.
+**Refs:** BIN-92, BIN-64, BIN-65, BIN-84, BIN-94, BIN-95, BIN-114, ADR-001,
+ADR-003, ADR-004
 
 ## Context
 
@@ -162,6 +169,18 @@ Not applicable. Caliper is a library with no runtime to monitor.
 
 ## Decision
 
+⚠️ **Amended 2026-09-11 — read this before applying the section below.** The
+100-observation figure in this section remains correct as a **hard floor**
+(unchanged: below 100, `InsufficientBaselineError`). But the section's premise
+— that a single global constant fully answers "how much baseline is enough"
+— is **superseded**. A measured study (BIN-114) found the required baseline
+size scales with the requested `target_arl`, which this original Decision
+treated as independent of size. See "Amendment (2026-09-11): target-dependent
+adequacy tiers" at the end of this document for the corrected model. The
+subsections immediately below are preserved for their reasoning (why 100 and
+not 25, why not 300 as a *hard floor*) — that reasoning is **still valid for
+the floor**. It no longer describes the whole policy.
+
 ### Default minimum: 100 observations (uniform across chart types)
 
 The library default for the sufficiency check (BIN-64) is **100** individual
@@ -238,6 +257,14 @@ documentation and in the sufficiency check output:
    At 300, it is reduced. At 500+, it is small.
 
 ### Per-chart-type defaults: not yet, but the mechanism is ready
+
+⚠️ **The simulation study this section defers to has now run (BIN-114,
+amendment 2026-09-11).** Its answer: **no per-chart-type default is
+warranted.** All three chart types need the same order-of-magnitude baseline
+size for a given target — maximum spread across charts in any measured cell
+is 8 percentage points, mean 2.7pp. See the amendment for the full grid. The
+open question this subsection posed is now closed; what replaced it is
+target-dependence, not chart-dependence.
 
 BIN-64 BR-5 requires the mechanism to support per-chart-type thresholds. The
 mechanism is in place. Per-chart-type defaults are **deferred** to the
@@ -358,6 +385,16 @@ The library's baseline fitting documentation must include:
 
 ### What would settle this properly
 
+⚠️ **Partially done (BIN-114, amendment 2026-09-11) — the sample-size axis,
+not the distribution axis.** The study specified below ran for **normal
+data only**, across all three chart types, five baseline sizes, and four
+target ARL₀ values (a superset of the single-target scope this subsection
+originally asked for). It produced the target-dependent adequacy tiers in
+the amendment. The **Beta / discretised / mixture distribution** legs of the
+study below remain **not done** — non-normal robustness is still deferred by
+ADR-003, unchanged by this amendment. Treat the numbers below as the
+completed normal-data slice of this original plan, not the whole plan.
+
 A **Monte Carlo simulation study** over judge-score-like distributions:
 
 1. **Distributions:** Normal (baseline), Beta(8, 2) (moderate left skew in
@@ -469,3 +506,469 @@ contradicted by standard SPC practice.
 
 **No feature files change.** No feature file names a sigma estimator or a per-
 chart-type baseline size. Zero re-review cost.
+
+---
+
+## Amendment (2026-09-11): target-dependent adequacy tiers
+
+**Trigger:** `BIN-84`'s property-based verification surfaced (`BIN-114`) that
+`achieved_arl` is exact only *conditional on the Phase I baseline being the
+true process* — with a finite baseline it is a random variable, and at the
+library's default (*n* = 100) roughly one engineer in seven to one in five
+(depending on target) sees a realised false-alarm interval under half of what
+they were shown. Two exploratory measurements on `BIN-114` narrowed this to a
+single question for ADR-005: **is the required baseline size independent of
+the requested `target_arl`, as the original Decision above assumed?** A third,
+properly powered study (300 baseline draws x 200 Phase II runs per cell, all
+three chart types, five baseline sizes, four target ARL₀ values — the full
+dataset is `Projects/caliper/references/adr005_grid.json` in the vault,
+scripts `adr005_study.py` / `adr005_grid.py` alongside it) answers: **no.**
+Required baseline size scales with `target_arl`. This amendment corrects the
+model, not just the number.
+
+### The risk-appetite parameter — RATIFIED 2026-09-11
+
+🚨 **Caliper's stated risk appetite: at most 5% of Phase I baselines may
+deliver under half the requested ARL₀.** Ratified by the product owner,
+2026-09-11.
+
+**This is a product decision, not a statistical result.** No analysis produces
+it; it is a statement of how much of the tail the project is willing to accept
+before it tells an engineer their baseline is too small. It was first chosen
+by the person who ran the study, who had no authority to set an organisational
+risk tolerance — that gap is now closed by explicit ratification.
+
+**Every threshold in this amendment derives from it.** `adequate(target_arl)`
+is *defined* as the smallest measured baseline size holding the under-half
+rate at or below 5%. Change the appetite and every number moves:
+
+| risk appetite | t=100 | t=200 | t=370 | t=500 |
+|---|---|---|---|---|
+| 10% (looser) | 200 | 300 | 300 | 300 |
+| **5% — ratified** | **300** | **300** | **500** | **500** |
+| 2% (tighter) | 500 | 500 | 1000 | 1000 |
+
+**Why 5% and not the alternatives:**
+
+- **10%** would let `adequate()` collapse to roughly "300 everywhere" — a
+  simpler rule and a lower adoption barrier, at roughly **double** the tail
+  risk. One engineer in ten receiving under half the ARL₀ they were shown is
+  too many for a library whose central claim is a calibrated false alarm rate.
+- **2%** would push high-target adequacy to **1000** — ten times the current
+  default, approaching the "thousands" regime Does et al. (2020) report for
+  S² charts. That is statistically safer and, against an OMTM of Phase I→II
+  conversion, not a library anyone would adopt.
+- **5%** sits between them without forcing `adequate()` into four figures at
+  any target this library realistically serves.
+
+⚠️ **What ratifying 5% does *not* settle.** It fixes the acceptance line, not
+the measurement behind it. The 300/500 figures remain **measured, not
+derived** — simulation on normal data with moving-range σ, 300 draws, ±3pp,
+and a step function over four targets rather than a curve. Jones, Champ &
+Rigdon (2001) would replace them with a closed form (see Exit condition).
+**Ratification makes the threshold authoritative; it does not make the
+numbers exact.**
+
+**To revisit:** changing the appetite requires re-deriving `adequate()` from
+the grid (or from JCR's formula once held) and re-ratifying. It must not be
+adjusted informally to make a given baseline size look sufficient — that
+would invert the whole point of having a stated appetite.
+
+Everything else in this amendment — the existence of target-dependence, the
+measured grid, the case against the PRD's provisional trigger — stands
+independently of this figure.
+
+### The study, briefly
+
+Charts fitted by Caliper's real `fit_ewma`/`fit_cusum`/`fit_shewhart` from a
+finite Phase I baseline drawn from a known N(8.0, 0.5) process. Phase II
+simulated from the **true** process — what an engineer actually experiences,
+not what the fitted artefact assumes. The Phase II simulator is a vectorised
+recursion rather than `Monitor.record()`, purely for the ~10⁹-observation
+scale the grid needs; it was validated against the shipped `Monitor.record()`
+before being trusted (EWMA 157.8 vs 148.6, CUSUM 151.2 vs 158.1, Shewhart
+145.9 vs 140.2 — all within the ~5% sampling error of 400 runs at that
+validation scale).
+
+**Extended validation, 2026-09-11**, closing a weakness the first draft of
+this amendment flagged honestly — the simulator had been checked at only one
+mid-grid configuration, and the grid's conclusion is driven by its *extremes*.
+Re-validated there, 500 runs per point:
+
+| cell | `Monitor.record()` | vectorised | difference |
+|---|---|---|---|
+| EWMA *n*=100, t=500 *(worst case, drives the headline)* | 1015.6 | 1052.3 | +3.6% (0.8 SE) |
+| EWMA *n*=1000, t=100 *(best case)* | 93.2 | 105.6 | +13.3% (3.0 SE) |
+| CUSUM *n*=100, t=500 | 1069.6 | 1158.3 | +8.3% (1.9 SE) |
+| Shewhart *n*=100, t=500 | 1191.0 | 1159.5 | −2.6% (0.6 SE) |
+
+All within 3 SE. ⚠️ **Note the direction**: the vectorised path reads
+*slightly high* in three of four comparisons. If it carries any systematic
+bias it over-estimates run length, which would make the true "under half"
+percentages **higher** than this grid reports. The bias therefore runs
+*against* this amendment's conclusion rather than toward it — the safe
+direction for a finding that says the current default is inadequate.
+
+*n* < 100 could not be studied: `fit_*` already raises
+`InsufficientBaselineError` below the hard floor, so that region is
+unreachable for any real user and there was nothing to measure.
+
+**Percentage of baselines delivering under half the requested ARL₀** (range
+across the three chart types; the amendment's adopted numbers below use the
+mean of the three):
+
+| *n* | target=100 | target=200 | target=370 | target=500 |
+|---|---|---|---|---|
+| **100** *(current default)* | 13-15% | 21-22% | 23-29% | 26-32% |
+| 200 | 5-6% | 9-12% | 13-17% | 13-21% |
+| 300 | 1-3% | 2-7% | 7-9% | 8-10% |
+| 500 | 0-1% | 1-2% | 3-7% | 2-5% |
+| 1000 | 0% | 0% | 0-1% | 0-2% |
+
+### Three findings
+
+**1. All three chart types behave the same.** Maximum spread across chart
+types in any single cell is 8 percentage points; mean spread 2.7pp. This is a
+property of *parameter estimation from a finite sample*, not of chart choice.
+It resolves the "per-chart-type defaults: not yet" question left open above:
+**no per-chart-type default is warranted.** One policy serves EWMA, CUSUM,
+and Shewhart alike.
+
+**2. The median is biased low at the default, not merely noisy.** At *n* =
+100, median delivered ARL₀ as a fraction of the target ranges roughly 72-83%
+across the four measured targets (EWMA: 83% at target=100, falling to 72% at
+target=500). This is worse than an earlier same-day exploratory measurement
+at a single target had suggested, and it means the *typical* engineer at the
+default configuration — not only an unlucky one — gets meaningfully less
+than what `achieved_arl` reports.
+
+**3. Quesenberry was right; ADR-005's compromise went further than the
+evidence now supports.** Smallest measured *n* holding "under half" at or
+below 5% (mean across the three chart types):
+
+| target ARL₀ | *n* needed |
+|---|---|
+| 100 | 300 |
+| 200 | 300 |
+| 370 | 500 |
+| 500 | 500 |
+
+The original Decision above cited Quesenberry (1993) for ~300 individual
+observations and then chose 100 as a deliberate adoption compromise. This
+study, run against Caliper's own implementation rather than against the
+literature in the abstract, lands the "adequate" figure at 300-500 depending
+on target — closer to Quesenberry's figure than to the compromise. The
+literature was right; the compromise is where the gap opened.
+
+### Why the PRD's provisional trigger (`requested_arl > observation_count`) is superseded, not merely refined
+
+`BIN-114`'s PRD (BR-3, labelled explicitly provisional pending this exact
+amendment) proposed advising whenever `target_arl > observation_count`,
+reasoning that this was the only boundary sourceable without inventing a
+ratio. The grid now shows that boundary is **measurably too lax** — it
+fails to fire in exactly the cases where the risk is highest:
+
+- At *n* = 100, target = 100 (equal — the PRD trigger does **not** fire,
+  since it requires strict inequality): **14.1%** of baselines deliver under
+  half the requested ARL₀ anyway.
+- At *n* = 200, target = 200 (also equal, also does not fire): **10.4%**
+  still deliver under half.
+
+Both are double-digit-percent risk of a ≥2x false-alarm-rate miss, silently
+passed through by a trigger keyed on `target_arl` exceeding `n`, because the
+real requirement is not "target exceeds sample size" but "sample size is a
+small multiple of target" — the ratio needs to be roughly 3-5x, not 1x, before
+risk falls to the low single digits. **The measured thresholds in this
+amendment replace BR-3's trigger outright, not adjust it.** BR-5's caveat
+(label the mechanism as provisional, not precision-dressed) still applies to
+the replacement — see "Precision of the adequate() function" below — but the
+replacement itself is now evidence-based rather than a structural guess.
+
+### The amended decision: three tiers
+
+The original single-constant model (`DEFAULT_SUFFICIENCY_THRESHOLD = 100`,
+sufficient or not, nothing else) is replaced with three tiers. The hard floor
+is unchanged; what is new is the middle tier.
+
+| tier | condition | behaviour |
+|---|---|---|
+| **below floor** | `observation_count < 100` | `InsufficientBaselineError` — unchanged. Fitting is refused. |
+| **fits, flagged** | `100 <= observation_count < adequate(target_arl)` | Fitting succeeds and returns usable, correctly-calibrated control limits (the maths is not in question — see `BIN-84`). A structured, non-raising advisory is attached, naming `observation_count`, `target_arl`, and the `adequate()` figure it falls short of. |
+| **fits, clean** | `observation_count >= adequate(target_arl)` | Fitting succeeds. No advisory. |
+
+`DEFAULT_SUFFICIENCY_THRESHOLD` (100) remains the **only** hard floor and is
+**unchanged** — this amendment does not raise it, for the OMTM reasons argued
+below. `adequate(target_arl)` is a **second, new concept**: a non-blocking
+adequacy line that depends on what the engineer is asking the chart to
+achieve, not a replacement for the floor.
+
+### `adequate(target_arl)`, and its precision
+
+From the grid, at the ratified 5%-under-half risk line, mean
+across chart types:
+
+```
+adequate(target_arl):
+    target_arl <= 200   -> 300
+    target_arl  > 200   -> 500   (measured range tops out at target_arl = 500;
+                                   see caveats below for values beyond that)
+```
+
+This is a **coarse two-step function over four measured target values**, not
+a fitted curve. Fitting a continuous function to 20 measured cells (4 targets
+x 5 baseline sizes) would be false precision the data does not support — the
+grid resolves "which side of ~300-500 are you on," not "what is the exact
+number for `target_arl` = 250." `target_arl` values between the measured
+points (e.g. 250, 300) should round up to the next tier rather than
+interpolate, consistent with this project's rule that no numerical constant
+ships beyond what its source supports. `target_arl` above 500 is
+**unmeasured**; treat `adequate() = 500` as a floor, not a validated answer,
+for that range, and have the advisory say so explicitly when it fires there.
+
+**This is the same discipline BR-5 already asked for, applied to a better-
+sourced number.** The original PRD trigger was "provisional… pending Jones,
+Champ & Rigdon (2001)"; so is this one. It is a materially better-evidenced
+provisional answer — measured on Caliper's own fitting code rather than
+inferred from a structural inequality — but it is still simulation, not the
+closed-form result JCR (2001) would provide. See "Exit condition" below.
+
+### Decision-support: what the alternatives would have meant
+
+Retained after ratification so the reasoning stays visible — this is *why* 5%
+was chosen, not an open question:
+
+| risk appetite ("under half" ceiling) | target=100 | target=200 | target=370 | target=500 |
+|---|---|---|---|---|
+| 10% (looser) | 200 | 300 | 300 | 300 |
+| **5% (used above)** | **300** | **300** | **500** | **500** |
+| 2% (tighter) | 500 | 500 | 1000 | 1000 |
+
+A looser appetite (10%) would let `adequate()` collapse to roughly "300
+everywhere," simplifying the function at the cost of accepting roughly twice
+today's tail risk. A tighter appetite (2%) would push high-target adequacy to
+1000 — ten times the current default — which starts to look like the
+"thousands" regime Does et al. (2020) reported for S² charts, cited in the
+original Decision above. **5% was chosen because it sits between these
+without requiring the function to jump to four figures. It is a ratified
+product decision (2026-09-11), not a derived quantity.**
+
+### Engaging with the OMTM this reopens
+
+ADR-005's original compromise (100, not 300) was explicit that Phase I->Phase
+II conversion is the project's One Metric That Matters, and that asking an
+engineer to collect 300+ scored observations before any monitoring begins is
+a real adoption cost at the hardest step in onboarding. This amendment does
+**not** raise that cost at the floor — an engineer can still fit, and still
+get a working chart, at 100 observations, exactly as before. What changes:
+
+- **The advisory will fire for most realistic default configurations, not a
+  minority.** `target_arl` = 370 and 500 are the two classical ARL₀ figures
+  used throughout the SPC literature and already used as test-oracle targets
+  in `BIN-84` (Lucas & Saccucci 1990, Siegmund 1985). An engineer who follows
+  the library's own default (`n` = 100) and picks a classical target will see
+  the advisory almost every time, because `adequate(370)` and `adequate(500)`
+  are both 500 — five times the floor. This was flagged as the central design
+  risk in `BIN-114`'s PRD (OQ-4, warning fatigue) before this amendment
+  existed, and the amendment confirms the concern was correctly weighted: the
+  naive PRD trigger under-fired; the measured one will fire often.
+- **This is treated as the correct outcome, not a defect to design around.**
+  The alternative — staying silent because the advisory would fire "too
+  often" — is exactly the overclaim this investigation exists to correct. A
+  library whose central pitch is calibrated, citable false-alarm rates cannot
+  suppress the one signal that tells an engineer their specific number is
+  less trustworthy than it looks, merely because that signal is common. What
+  protects the OMTM is that **the advisory does not block fitting** — the
+  metric Phase I->II conversion actually measures (does the engineer
+  successfully get a working chart at all) is untouched. What the advisory
+  costs is a quieter, different thing: an engineer can no longer fit at the
+  default and see silence read as "you're fully covered." That silence was
+  false; removing it is the fix `BIN-114` was opened to make.
+- **The alternative that would have genuinely damaged the OMTM — raising
+  `DEFAULT_SUFFICIENCY_THRESHOLD` itself to 300 or 500 — is explicitly
+  rejected**, for the same reason the original Decision rejected it: it
+  would turn "collect 100 observations" into "collect 300-500 observations"
+  *before any chart exists at all*, for every engineer, regardless of their
+  target. The tiered model confines the cost to disclosure, which is cheap,
+  rather than to access, which is expensive. This is the load-bearing
+  difference between this amendment and simply moving the old constant.
+- **Net honest framing:** this amendment does not make Caliper's default
+  configuration more capable. It makes Caliper stop implying, by silence,
+  that the default configuration is more capable than the study shows it to
+  be. That is a real cost to the story the library can currently tell about
+  itself with a bare `achieved_arl` number, and it is the right trade — the
+  project's own foremost rule (every statistical claim cited or derived, never
+  overclaimed) does not have a carve-out for claims that are inconvenient to
+  disclose.
+
+### Methodological caveats — read before treating any number above as exact
+
+- **Normal data, one process, one sigma.** All 60 cells are N(8.0, 0.5).
+  Judge scores are not normal (ADR-003); this amendment does not close that
+  gap, and non-normality can only widen the true requirement, not narrow it,
+  per the original Decision's own reasoning above.
+- **Moving-range sigma estimation only** — Caliper's method (ADR-004
+  amendment). The specific numbers are tied to this estimator.
+- **300 draws per cell -> roughly +/-3 percentage points of sampling noise**
+  on every percentage in the tables above. The 300-vs-500 boundary is soft;
+  do not read either number as exact.
+- **The adopted `adequate()` figures use the *mean* under-half rate across
+  the three chart types, not the worst case.** At the chosen 5% line, some
+  individual chart/target cells exceed 5% even where the mean is at or below
+  it — e.g. CUSUM at *n* = 300/target = 200 measures 7.0% (mean across charts:
+  4.9%, which is why 300 was selected as adequate for that target). Using
+  worst-case-per-chart instead of mean-per-target would push some `adequate()`
+  entries higher. This is a real methodological choice, not an oversight, and
+  it is made here explicitly: **averaging across chart types was chosen
+  because finding 1 above shows chart type is not the source of the
+  variation** — but a reader who wants a worst-case rather than an
+  expected-case guarantee should treat the table in "Decision-support" above
+  as a starting point for a stricter recomputation, not as already covering
+  that case.
+- **Run-length cap at 12x target** truncates the extreme upper tail of the
+  achieved-ARL distribution in each cell, which the raw grid records as
+  `over_double` alongside `under_half`; this does not affect the under-half
+  figures this amendment relies on, but it means the p90-style upper-tail
+  statistics elsewhere in `BIN-114`'s discussion are conservative
+  underestimates of spread.
+- **This is simulation, not the closed-form result.** See "Exit condition"
+  immediately below.
+
+### Exit condition: Jones, Champ & Rigdon (2001)
+
+**Jones, L. A., Champ, C. W. & Rigdon, S. E. (2001). "Performance Analysis of
+Exponentially Weighted Moving Average Charts When Parameters Are Estimated."
+*Technometrics* 43(2), 156-167. DOI 10.1198/004017001750386279.** Already
+cited in this ADR's original Decision section, and already known (via its
+abstract) to derive the run-length distribution of the EWMA chart with
+estimated parameters **analytically** — a formula, not a Monte Carlo
+simulation. It is **not currently held**; full text is paywalled behind
+Taylor & Francis and needs institutional access (tracked alongside `BIN-82`'s
+reference-acquisition list).
+
+**When obtained, JCR (2001) replaces the simulated `adequate()` step function
+in this amendment with a closed-form threshold**, the same pattern ADR-004
+and ADR-009 use for other deferred primary-source verifications. It would
+also let Caliper report an interval around `achieved_arl` rather than a bare
+point estimate — the deeper fix `BIN-114`'s PRD names as its preferred
+post-v0.1 direction (Non-Goals) and defers for exactly this reason. Until
+then, `adequate()` as specified above is this project's best evidenced
+answer, clearly labelled as simulation-derived and provisional.
+
+### Consequences
+
+**`BIN-64` (baseline sufficiency check).** `DEFAULT_SUFFICIENCY_THRESHOLD`
+(100) is unchanged and remains the sole hard floor enforced by
+`check_sufficiency()` / fitting-time `InsufficientBaselineError`. This
+amendment adds a second, independent concept — target-dependent adequacy —
+that `BIN-64`'s existing signature (`threshold?`, `chart_type?`) does not yet
+carry a parameter for. **Exact carrier is out of scope for this amendment**
+(`BIN-114`'s own OQ-3, still open) — candidates remain what `BIN-114`'s PRD
+already proposed: an optional `target_arl` parameter on `check_sufficiency()`,
+or a field populated by `fit_ewma`/`fit_cusum`/`fit_shewhart` at fit time.
+What this amendment settles is the **policy** (the tiers and the numbers);
+the API shape is a separate, smaller decision for whoever implements
+`BIN-114`.
+
+**`BIN-65`, `BIN-94`, `BIN-95` (EWMA, CUSUM, Shewhart fitting).** No change to
+any fitted output, formula, or default (BR-4, unchanged, still holds). The
+advisory this amendment specifies is additive metadata attached at or after
+fit time, mirroring `SufficiencyResult.data_quality_concerns`
+(`DataQualityConcern`-shaped: `kind`, `description`). Applies uniformly to all
+three chart types (finding 1 above; BR-6 in `BIN-114`'s PRD already assumed
+this and is now confirmed rather than merely inferred from Zwetsloot et al.).
+
+**`BIN-84` (property-based verification).** The sensitivity characterisation
+this ADR originally recommended (§ "What would settle this properly") is now
+substantially complete for normal data across all three chart types — the
+`adr005_grid.json` dataset (vault, `Projects/caliper/references/`) is that
+characterisation's output and should be treated as `BIN-84`'s reference
+artefact for this question going forward, superseding the need to re-derive
+it. The Beta / discretised / mixture distribution legs remain undone.
+
+**`BIN-114` (this ADR's direct trigger).** BR-3 and BR-5 of `BIN-114`'s PRD,
+and Open Question OQ-1, are **settled by this amendment**: the trigger is no
+longer "requested_arl > observation_count" but "observation_count <
+adequate(target_arl)" per the table above, and the numeric basis is now the
+measured grid rather than the two-point structural inference the PRD flagged
+as provisional. OQ-3 (exact field/carrier shape) remains open, per
+Consequences/`BIN-64` above. OQ-2 (whether CUSUM/Shewhart deserve the same
+confidence as EWMA) is also settled: yes, with the same evidence weight as
+EWMA, since this amendment's grid measured all three directly rather than
+inferring from EWMA alone.
+
+**Documentation.** The library's baseline-fitting documentation, and
+`FittedControlLimits.achieved_arl`'s own docstring, must state: `achieved_arl`
+is calibrated against the Phase I baseline's *estimate* of the process, not
+the true process; a finite baseline makes the realised false-alarm rate a
+random variable around that figure, citing Quesenberry (1993) and Jones,
+Champ & Rigdon (2001); and that Caliper surfaces a structured advisory when
+`observation_count` falls short of the measured adequacy line for the
+requested target. No unqualified numeric spread (e.g. "+/-2x") belongs in the
+docstring — the existence and direction of the effect, plus the citations,
+per `BIN-114` PRD's Story 1 acceptance criteria.
+
+### Alternatives considered
+
+**Raise `DEFAULT_SUFFICIENCY_THRESHOLD` to 300 or 500 uniformly.** Rejected.
+Quintuples (500) or triples (300) the Phase I barrier for *every* engineer
+regardless of their target, including engineers whose target is modest enough
+that 100 is already adequate (e.g. target=100 needs only 300, not 500; many
+engineers may want a much smaller target than the classical 370/500 figures).
+Directly damages the OMTM for no benefit to the engineers whose configuration
+was never at risk.
+
+**Keep the PRD's provisional `requested_arl > observation_count` trigger
+unchanged.** Rejected — see "Why the PRD's provisional trigger is superseded"
+above. Measurably under-warns at exactly the equal-value boundary case, where
+double-digit-percent risk exists but the trigger is silent.
+
+**Per-chart-type adequacy thresholds.** Considered, following the mechanism
+`BIN-64` BR-5 already supports and the original Decision above already
+flagged as a live possibility. Rejected on the evidence: finding 1 shows
+chart-type spread (2.7pp mean, 8pp max) is small relative to
+target-dependence (tens of percentage points across the target range). One
+policy, keyed on target rather than chart type, is both simpler and better
+supported by the data.
+
+**Continuous/interpolated function of `target_arl` rather than a two-step
+function.** Considered. Rejected as false precision: only four target values
+and five baseline sizes were measured. A fitted curve through 20 sparse,
+noisy (+/-3pp) cells would imply a resolution the data does not have. A coarse
+step function, explicitly labelled provisional, better represents what is
+actually known.
+
+**Report an interval instead of any threshold-based advisory.** This is the
+long-run correct fix (see Exit condition) and is explicitly **not** rejected
+— it is deferred, blocked on obtaining Jones, Champ & Rigdon (2001). The
+tiered advisory in this amendment is the interim, honestly-labelled
+mitigation `BIN-114`'s PRD already scoped as v0.1's Non-Goal boundary.
+
+**Do nothing — leave the original single-constant Decision as the final
+word.** Rejected. The original Decision was reasoned correctly from the
+literature available at the time but rested on an unstated assumption
+(baseline size requirement is independent of target) that this study shows to
+be false. Leaving it uncorrected would mean the ADR continues to certify a
+model contradicted by measurement on the library's own code.
+
+### What did not change
+
+- `DEFAULT_SUFFICIENCY_THRESHOLD` (100) as the hard floor and
+  `InsufficientBaselineError` below it.
+- No change to `fit_ewma`, `fit_cusum`, `fit_shewhart`, or `Monitor`.
+- The normality caveat (ADR-003 still deferred; this amendment's grid is
+  normal-data-only).
+- The recommendation that high-stakes deployments collect well above the
+  floor (this amendment sharpens "well above" into a number that depends on
+  target, rather than leaving it as an unqualified "300+").
+- BIN-64 BR-1 through BR-4 (configurable threshold, library default,
+  advisory-not-raising semantics, no maths change).
+
+### Feature file impact
+
+No existing feature file names a specific baseline-size number, per the
+established convention (`ADR-005`'s original Decision, `BIN-64`, `BIN-65`,
+`BIN-94`, `BIN-95` all use qualitative Gherkin). `BIN-114`'s own new feature
+file (drafted in its PRD, Story 2) already avoids a numeric literal for the
+trigger and is unaffected by this amendment replacing the trigger's
+*definition* — the scenarios assert on the advisory's presence/absence and
+structure, not on the number that decides it.
