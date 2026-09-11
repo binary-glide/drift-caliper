@@ -149,6 +149,12 @@ select = [
   "C4",        # flake8-comprehensions
   "RUF",       # ruff-specific
   "D",         # pydocstyle -- docstrings are a stated project standard
+  # Security and correctness, added 2026-09-11 (BIN-87). `S` is the
+  # substantive one: Bandit's ruleset, in-process, on every lint run.
+  "S",         # flake8-bandit -- security
+  "ASYNC",     # flake8-async
+  "DTZ",       # flake8-datetimez -- naive datetime
+  "LOG",       # flake8-logging
 ]
 ignore = [
   "D107",  # __init__ docstring; covered by the class docstring
@@ -160,7 +166,21 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D"]
+# `D`: test functions are named to describe the behaviour they pin, and their
+# docstrings are prose about *why*, not an API contract -- pydocstyle's
+# structural rules add noise rather than signal here.
+#
+# The `S` exemptions are the standard Bandit-in-tests set: a test suite that
+# could not call `assert` would be useless, and a fake credential in a fixture
+# is the point rather than a leak. Scoped to `tests/` only -- these stay
+# enforced across `src/`, which is what ships.
+"tests/**" = [
+  "D",
+  "S101",  # assert -- the entire mechanism of a test
+  "S105",  # hardcoded password string -- fake judge/model identifiers
+  "S106",  # hardcoded password argument
+  "S108",  # insecure temp path -- fixtures use tmp_path, but scanners flag it
+]
 
 # ---------------------------------------------------------------------------
 # Type checking runs twice, on purpose.

@@ -26,6 +26,7 @@ exercise a scenario, exactly as the feature file itself names none.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 
 from pytest_bdd import given, parsers, then, when
@@ -376,11 +377,11 @@ def attempt_to_mutate_the_fitted_artefact(outcome: FittingOutcome) -> MutationAt
     ]
     raised_every_time = True
     for attribute, replacement in attempted_mutations:
-        try:
+        # Any raise means the mutation was correctly rejected -- that is the
+        # assertion, recorded in `raised_every_time` rather than swallowed.
+        with contextlib.suppress(Exception):
             setattr(result, attribute, replacement)
             raised_every_time = False
-        except Exception:  # any raise here means the attempt was correctly rejected
-            pass
     return MutationAttempt(
         outcome=outcome, snapshot=snapshot, raised_for_every_attempt=raised_every_time
     )
