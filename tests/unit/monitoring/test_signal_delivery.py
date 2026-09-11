@@ -208,6 +208,57 @@ class _FailingReceiver:
         raise RuntimeError("receiver exploded")
 
 
+class _Hostile:
+    """The external review's exact reproduction (BIN-118, 2026-09-11).
+
+    Both `__repr__` and `__call__` raise. `Monitor._deliver()` builds
+    `DeliveryFailure` from `repr(receiver)`/`str(exc)` *outside* the
+    `try`/`except` that catches the receiver's own call -- so before the
+    fix, this receiver's `__repr__` failure propagates out of `record()`
+    itself, destroying an already-successful measurement and preventing
+    any later receiver from running. See
+    `test_bin_118_reproduction_...` below for the full reproduction.
+    """
+
+    def __repr__(self) -> str:
+        raise RuntimeError("repr exploded")
+
+    def __call__(self, result: MonitoringResult) -> None:
+        raise ValueError("receiver failed")
+
+
+class _ReprRaisingReceiver:
+    """A receiver whose `__repr__` raises -- BIN-118's `repr()` hazard in
+    isolation, distinct from `_Hostile` (which also raises inside
+    `__call__`) so each defensive-formatting path is exercised on its own.
+    """
+
+    def __repr__(self) -> str:
+        raise RuntimeError("repr exploded")
+
+    def __call__(self, result: MonitoringResult) -> None:
+        raise ValueError("receiver failed")
+
+
+class _StrRaisingError(Exception):
+    """An exception whose own `__str__` raises -- BIN-118's second hazard.
+
+    `type(exc).__name__` is unaffected (a class attribute, no user code
+    executes) -- only `str(exc)` is hazardous here, per the ticket's own
+    distinction.
+    """
+
+    def __str__(self) -> str:
+        raise RuntimeError("str exploded")
+
+
+class _RaisesStrRaisingExceptionReceiver:
+    """A receiver that raises an exception whose own `__str__` raises."""
+
+    def __call__(self, result: MonitoringResult) -> None:
+        raise _StrRaisingError("irrelevant -- __str__ itself raises")
+
+
 class _SelfMisreportingReceiver:
     """Raises one real exception but exposes deliberately WRONG
     self-reported failure information under the exact attribute names
@@ -477,6 +528,175 @@ def test_delivery_failure_content_comes_from_monitor_not_the_receiver() -> None:
     failure = outcome.delivery_failures[0]
     assert failure.error_type == "ValueError"
     assert failure.error_message == "the actual raised failure"
+
+
+# --- BIN-118: describing a failing receiver/exception must not itself
+# --- escape record(), breaking absorb-but-surface -----------------------------
+#
+# `Monitor._deliver()` catches the receiver's own exception, then calls
+# `repr(receiver)` and `str(exc)` to build `DeliveryFailure` -- outside any
+# protection. Reproduced by external code review, 2026-09-11:
+#
+#   record() PROPAGATED RuntimeError: repr exploded | later receiver ran: 0
+#
+# Three guarantees broken at once: the exception escapes record() (absorb
+# fails), later receivers never run, and no result is returned at all --
+# destroying a measurement that had already succeeded. `type(exc).__name__`
+# is already safe (a class attribute, no user code) -- only `repr()` and
+# `str()` are hazardous, so only those two need a defensive fallback.
+
+
+def test_bin_118_reproduction_a_receiver_that_fails_and_cannot_even_be_described() -> (
+    None
+):
+    """The exact external-review reproduction. `record()` must return
+    normally, the later receiver must still run, and a `DeliveryFailure`
+    with a fallback identifier must be recorded -- all three guarantees
+    the review found broken at once, from a single receiver whose
+    `__repr__` and `__call__` both raise.
+    """
+    # Arrange
+    artefact = _fitted_shewhart()
+    received: list[MonitoringResult] = []
+    monitor = Monitor(artefact, receivers=[_Hostile(), received.append])
+    breach_score = artefact.ucl + 100.0 * artefact.sigma_estimate
+
+    # Act -- must not raise (this is BIN-118: before the fix, `repr(receiver)`
+    # inside `Monitor._deliver` propagates RuntimeError here)
+    outcome = monitor.record(_result(score=breach_score))
+
+    # Assert -- all three guarantees ADR-010 requires
+    assert outcome.is_in_control is False  # a result WAS returned
+    assert len(received) == 1  # the later receiver still ran
+    assert len(outcome.delivery_failures) == 1  # the failure was recorded, not lost
+    failure = outcome.delivery_failures[0]
+    assert isinstance(failure, DeliveryFailure)
+    assert isinstance(failure.receiver, str)
+    assert failure.receiver != ""
+
+
+def test_a_receiver_whose_repr_raises_does_not_prevent_recording_from_completing() -> (
+    None
+):
+    """The `repr()` hazard in isolation (no `__call__`-description confusion
+    from a receiver that also misbehaves some other way)."""
+    # Arrange
+    artefact = _fitted_shewhart()
+    monitor = Monitor(artefact, receivers=[_ReprRaisingReceiver()])
+    breach_score = artefact.ucl + 100.0 * artefact.sigma_estimate
+
+    # Act -- must not raise
+    outcome = monitor.record(_result(score=breach_score))
+
+    # Assert
+    assert outcome.is_in_control is False
+
+
+def test_a_receiver_whose_repr_raises_reports_delivery_failure_with_fallback_id() -> (
+    None
+):
+    """`repr(receiver)` falling back to `type(receiver).__name__` -- the
+    exact fallback the ticket specifies -- and the REAL raised exception's
+    type/message still coming through unaffected by the repr() failure.
+    """
+    # Arrange
+    artefact = _fitted_shewhart()
+    monitor = Monitor(artefact, receivers=[_ReprRaisingReceiver()])
+    breach_score = artefact.ucl + 100.0 * artefact.sigma_estimate
+
+    # Act
+    outcome = monitor.record(_result(score=breach_score))
+
+    # Assert
+    assert len(outcome.delivery_failures) == 1
+    failure = outcome.delivery_failures[0]
+    assert isinstance(failure, DeliveryFailure)
+    assert failure.receiver == type(_ReprRaisingReceiver()).__name__
+    assert failure.error_type == "ValueError"
+    assert failure.error_message == "receiver failed"
+
+
+def test_a_receiver_with_a_raising_repr_does_not_block_the_next_receiver() -> None:
+    """Per-receiver isolation (ADR-010 §4 step 3) must hold even when
+    describing the FIRST receiver's own failure also raises -- the same
+    property `test_one_failing_receiver_does_not_block_the_next_receiver`
+    pins for an ordinary failing receiver, now for one that cannot even be
+    described.
+    """
+    # Arrange
+    artefact = _fitted_shewhart()
+    received: list[MonitoringResult] = []
+    monitor = Monitor(artefact, receivers=[_ReprRaisingReceiver(), received.append])
+    breach_score = artefact.ucl + 100.0 * artefact.sigma_estimate
+
+    # Act
+    outcome = monitor.record(_result(score=breach_score))
+
+    # Assert -- the second receiver still ran, and the final result carries
+    # exactly the one failure.
+    assert len(received) == 1
+    assert received[0].is_in_control is False
+    assert len(outcome.delivery_failures) == 1
+
+
+def test_an_exception_whose_str_raises_does_not_prevent_recording_from_completing() -> (
+    None
+):
+    """The sibling hazard: `str(exc)` raising must not escape `record()`
+    either."""
+    # Arrange
+    artefact = _fitted_shewhart()
+    monitor = Monitor(artefact, receivers=[_RaisesStrRaisingExceptionReceiver()])
+    breach_score = artefact.ucl + 100.0 * artefact.sigma_estimate
+
+    # Act -- must not raise
+    outcome = monitor.record(_result(score=breach_score))
+
+    # Assert
+    assert outcome.is_in_control is False
+
+
+def test_an_exception_whose_str_raises_reports_delivery_failure_with_fallback() -> None:
+    """`str(exc)` falling back to `type(exc).__name__` -- the exact fallback
+    the ticket specifies. `error_type` needs no fallback at all: it is
+    already `type(exc).__name__`, a class attribute that cannot itself
+    raise, and must stay exact here -- this is the ticket's own explicit
+    "only repr() and str() are hazardous" distinction, pinned directly.
+    """
+    # Arrange
+    artefact = _fitted_shewhart()
+    monitor = Monitor(artefact, receivers=[_RaisesStrRaisingExceptionReceiver()])
+    breach_score = artefact.ucl + 100.0 * artefact.sigma_estimate
+
+    # Act
+    outcome = monitor.record(_result(score=breach_score))
+
+    # Assert
+    assert len(outcome.delivery_failures) == 1
+    failure = outcome.delivery_failures[0]
+    assert isinstance(failure, DeliveryFailure)
+    assert failure.error_type == "_StrRaisingError"
+    assert failure.error_message == type(_StrRaisingError()).__name__
+
+
+def test_an_exception_whose_str_raises_does_not_block_the_next_receiver() -> None:
+    """Per-receiver isolation holds even when describing the raised
+    exception itself also raises."""
+    # Arrange
+    artefact = _fitted_shewhart()
+    received: list[MonitoringResult] = []
+    monitor = Monitor(
+        artefact, receivers=[_RaisesStrRaisingExceptionReceiver(), received.append]
+    )
+    breach_score = artefact.ucl + 100.0 * artefact.sigma_estimate
+
+    # Act
+    outcome = monitor.record(_result(score=breach_score))
+
+    # Assert
+    assert len(received) == 1
+    assert received[0].is_in_control is False
+    assert len(outcome.delivery_failures) == 1
 
 
 def test_one_failing_receiver_does_not_block_the_next_receiver() -> None:

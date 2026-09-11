@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from pytest_bdd import given, parsers, then, when
 
 from caliper.baseline import (
+    DEFAULT_DIRECTION,
     DEFAULT_REFERENCE_VALUE,
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
@@ -43,11 +44,20 @@ from caliper.baseline import (
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
 # re-exported from caliper.baseline, so steps that need the exact bound
 # values import them from the owning submodule directly.
+#
+# BIN-117: `_min_attainable_arl0` is imported directly too, for the same
+# reason `tests/unit/baseline/test_cusum_fitting.py` imports
+# `_cusum_arl0`/`_combine_two_sided_arl0` -- this file's two boundary steps
+# below need the exact, computable ARL0 infimum for a given
+# (reference_value, direction) to keep their boundary values legal now that
+# `fit_cusum` rejects an unattainable combination, not to re-verify the
+# calibration formula itself (unchanged, still the job of
+# `test_cusum_arl_published_values.py`).
 from caliper.baseline.domain.cusum_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_REFERENCE_VALUE,
-    MIN_MEANINGFUL_ARL,
     MIN_REFERENCE_VALUE,
+    _min_attainable_arl0,
 )
 from caliper.errors import (
     CaliperError,
@@ -85,8 +95,21 @@ _REFERENCE_VALUE_BOUNDARIES = {
     "the smallest valid value": MIN_REFERENCE_VALUE,
     "the largest valid value": MAX_REFERENCE_VALUE,
 }
+
+# BIN-117: at the largest valid reference value, a fixed _VALID_TARGET_ARL
+# (370.0) is exactly the external review's reproduction case (k=5.0,
+# target=370 -- minimum attainable two-sided ARL0 there is ~1158.3) --
+# `fit_cusum` now (correctly) rejects it rather than silently returning
+# `_MIN_DECISION_INTERVAL`. Mirrors
+# `test_fits_successfully_with_reference_value_at_the_valid_range_boundary`'s
+# identical correction in `tests/unit/baseline/test_cusum_fitting.py`.
+_SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE = (
+    _min_attainable_arl0(DEFAULT_REFERENCE_VALUE, DEFAULT_DIRECTION) * 1.05
+)
 _TARGET_ARL_BOUNDARIES = {
-    "the smallest meaningful value": MIN_MEANINGFUL_ARL,
+    "the smallest meaningful value": (
+        _SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE
+    ),
     "the largest meaningful value": MAX_MEANINGFUL_ARL,
 }
 
@@ -118,6 +141,22 @@ class FittingAttempt:
     """The outcome of a ``fit_cusum()`` call expected to fail."""
 
     baseline: Baseline
+    error: CaliperError
+
+
+@dataclass
+class UnattainableFittingAttempt:
+    """A fitting attempt that failed because ``target_arl`` was unattainable
+    at the chosen ``reference_value``/``direction`` (BIN-117).
+
+    Carries ``reference_value``/``direction`` forward alongside the baseline
+    and the raised error so a later step can refit at the *same* point
+    rather than re-deriving or hard-coding it.
+    """
+
+    baseline: Baseline
+    reference_value: float
+    direction: str
     error: CaliperError
 
 
@@ -349,6 +388,68 @@ def attempt_to_fit_with_unrecognised_direction(baseline: Baseline) -> FittingAtt
     )
 
 
+# --- When/Given: unattainable false alarm tolerance (BIN-117) ----------------------
+#
+# _VALID_TARGET_ARL (370.0) is individually within the meaningful ARL0 range
+# but, combined with MAX_REFERENCE_VALUE, is below the minimum ARL0 any
+# decision interval can reach at that reference value -- the external
+# review's exact reproduction case (see cusum_fitting.py's
+# `_min_attainable_arl0` and `_require_attainable_target_arl` docstrings).
+# Reused as-is rather than introducing a second "individually valid but
+# jointly unattainable" pair.
+
+
+@when(
+    "they attempt to fit CUSUM control limits with a reference value and "
+    "false alarm tolerance that are individually valid but jointly "
+    "unattainable",
+    target_fixture="attempt",
+)
+def attempt_to_fit_with_unattainable_tolerance(baseline: Baseline) -> FittingAttempt:
+    return _capture_fitting_error(
+        baseline, target_arl=_VALID_TARGET_ARL, reference_value=MAX_REFERENCE_VALUE
+    )
+
+
+@given(
+    "a fitting attempt has failed because the false alarm tolerance was "
+    "unattainable at the chosen reference value",
+    target_fixture="unattainable_attempt",
+)
+def a_fitting_attempt_failed_because_unattainable() -> UnattainableFittingAttempt:
+    baseline = _baseline_with_observations(DEFAULT_SUFFICIENCY_THRESHOLD + 5)
+    attempt = _capture_fitting_error(
+        baseline, target_arl=_VALID_TARGET_ARL, reference_value=MAX_REFERENCE_VALUE
+    )
+    return UnattainableFittingAttempt(
+        baseline=baseline,
+        reference_value=MAX_REFERENCE_VALUE,
+        direction=DEFAULT_DIRECTION,
+        error=attempt.error,
+    )
+
+
+@when(
+    "they fit CUSUM control limits with the smallest attainable false alarm "
+    "tolerance that the error reported, at the same reference value",
+    target_fixture="outcome",
+)
+def fit_with_the_reported_minimum_attainable_tolerance(
+    unattainable_attempt: UnattainableFittingAttempt,
+) -> FittingOutcome:
+    # BIN-122: the value under test comes out of the error's own `context` --
+    # never recomputed via `_min_attainable_arl0` and never hard-coded --
+    # so this genuinely round-trips what the library itself reported.
+    reported_minimum = unattainable_attempt.error.context["min_attainable_arl"]
+    result = fit_cusum(
+        unattainable_attempt.baseline,
+        target_arl=reported_minimum,
+        reference_value=unattainable_attempt.reference_value,
+        direction=unattainable_attempt.direction,
+    )
+    return FittingOutcome(baseline=unattainable_attempt.baseline, result=result)
+
+
 # --- Given: three failed fitting attempts, one per category (SC: distinguishability)
 
 
@@ -432,10 +533,16 @@ def attempt_to_mutate_the_fitted_artefact(outcome: FittingOutcome) -> MutationAt
 def fit_with_reference_value_at_boundary(
     baseline: Baseline, boundary: str
 ) -> FittingOutcome:
+    # BIN-117: _VALID_TARGET_ARL alone is not attainable at every reference
+    # value boundary (see the module-level comment above
+    # _TARGET_ARL_BOUNDARIES) -- derive a target that is comfortably
+    # attainable at whichever boundary_value this scenario exercises.
     boundary_value = _REFERENCE_VALUE_BOUNDARIES[boundary]
-    result = fit_cusum(
-        baseline, target_arl=_VALID_TARGET_ARL, reference_value=boundary_value
+    target_arl = max(
+        _VALID_TARGET_ARL,
+        _min_attainable_arl0(boundary_value, DEFAULT_DIRECTION) * 1.5,
     )
+    result = fit_cusum(baseline, target_arl=target_arl, reference_value=boundary_value)
     return FittingOutcome(baseline=baseline, result=result)
 
 
@@ -650,6 +757,21 @@ def error_identifies_target_arl_required(attempt: FittingAttempt) -> None:
     assert isinstance(error, InvalidParameterError)
     assert error.context["kind"] == "missing"
     assert error.context["parameter"] == "target_arl"
+
+
+@then(
+    "the error reports the smallest false alarm tolerance attainable at the "
+    "chosen reference value"
+)
+def error_reports_the_min_attainable_tolerance(attempt: FittingAttempt) -> None:
+    error = attempt.error
+    assert isinstance(error, InvalidParameterError)
+    min_attainable = error.context["min_attainable_arl"]
+    assert isinstance(min_attainable, float)
+    # "Smallest attainable" is only a coherent claim if it is strictly above
+    # what was rejected -- otherwise the rejected value would itself have
+    # been attainable, contradicting the failure.
+    assert min_attainable > error.context["provided"]
 
 
 @then("no control limits are produced")

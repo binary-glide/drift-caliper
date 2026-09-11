@@ -67,6 +67,23 @@ class DeliveryFailure(BaseModel):
     error_message: str   # str(exc) -- human-readable detail
 ```
 
+⚠️ **Amended 2026-09-11 (`BIN-118`): `repr()` and `str()` are themselves
+hazardous and must be guarded.** A receiver whose `__repr__` raises (a closed
+file, a detached ORM session), or a custom exception with a broken `__str__`,
+would let that *second* exception escape `record()` — absorbing the receiver's
+failure and then propagating its description defeats the whole decision. The
+two fields above are therefore populated by `_describe_receiver()` and
+`_describe_exception()`, each wrapping exactly one hazardous call with a
+fallback: `repr(receiver)` falls back to `type(receiver).__name__` then to a
+constant; `str(exc)` falls back to `type(exc).__name__`.
+
+`error_type` needs no guard — `type(exc).__name__` reads a class attribute and
+never executes caller code. **Only `repr()` and `str()` are hazardous.** The
+fallbacks must never become a route to receiver-supplied content; section 1's
+rule that failure content comes from the `Monitor`, never from the receiver,
+is unchanged and pinned by
+`test_delivery_failure_content_comes_from_monitor_not_the_receiver`.
+
 **Why this satisfies the scenario's binding assertion.** Both feature files require: *"the
 engineer can determine, through Caliper's public interface, both that delivery ... failed and
 why"* and *"that information does not depend on the [receiver/logging] mechanism that just
@@ -248,8 +265,10 @@ already applies to rejecting `structlog`'s process-wide formatting).
 3. **Only if `is_in_control is False`** (settles BIN-75 Assumption A2 — a receiver is told about
    a signal only when one genuinely occurs, never for a routine observation): for each receiver
    in `self._receivers`, call `receiver(provisional_result)` inside its own `try`/`except
-   Exception`. On success, continue. On failure, append a `DeliveryFailure(receiver=..., error_
-   type=type(exc).__name__, error_message=str(exc))` to a local list — one receiver's failure
+   Exception`. On success, continue. On failure, append a `DeliveryFailure(receiver=_describe_
+   receiver(receiver), error_type=type(exc).__name__, error_message=_describe_exception(exc))`
+   to a local list — the two helpers guard `repr()`/`str()`, which can raise in turn (see the
+   `BIN-118` amendment in section 1) — one receiver's failure
    never prevents the next receiver from being attempted (per-receiver isolation, not one
    `try` around the whole loop).
 4. If any failures were collected, produce the final result via `provisional_result.model_copy

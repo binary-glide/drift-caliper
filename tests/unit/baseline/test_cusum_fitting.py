@@ -63,6 +63,76 @@ this list does not re-argue where it applies identically):
    in ``test_fitting_accepts_every_member_of_the_documented_direction_set``,
    rather than repeated as a magic literal across every direction-happy-path
    test.
+6. **BIN-117 (external code review, 2026-09-11): an unattainable
+   ``(reference_value, direction, target_arl)`` combination raises
+   ``InvalidParameterError``, category ``invalid_parameter``, rather than
+   ``fit_cusum`` silently returning ``_MIN_DECISION_INTERVAL`` with an
+   ``achieved_arl`` far above what was requested.** The minimum ARL0
+   actually attainable for a given ``(reference_value, direction)`` is
+   computed by production's own ``_min_attainable_arl0`` -- imported
+   directly here, not reimplemented, per ``memory/vector-search.md``'s
+   "pattern found -- use it" and to remove the drift risk a second, private
+   copy of this same formula turned out to create (see the "Second-pass
+   correction" note below). ``_min_attainable_arl0`` evaluates
+   ``_cusum_arl0(reference_value, h)`` at ``h = _MIN_DECISION_INTERVAL`` --
+   the smallest decision interval ``_calibrate_decision_interval`` will
+   ever return, not the mathematical (open, unattained) limit at ``h = 0``
+   -- one-sided, halved via ``_combine_two_sided_arl0`` for
+   ``"two_sided"``. This file's tests are about the *unattainability
+   contract* (does ``fit_cusum`` correctly detect and reject this, and is
+   what it reports genuinely usable?), not Siegmund's formula's own
+   correctness, which ``test_cusum_arl_published_values.py`` already
+   verifies independently against Montgomery's (2013) worked example and
+   SAS's independently-computed figure (see that file's module docstring).
+   The new error's ``context`` reuses the existing ``invalid_parameter``
+   required keys (``parameter="target_arl"``, ``kind="invalid"``,
+   ``provided``, ``constraint``) plus additional fields the ticket
+   specifically asks for so the engineer can see what to change:
+   ``reference_value``, ``direction``, ``min_attainable_arl``. No new
+   category is introduced (ADR-002 section 2 already covers "a supplied
+   value violates a constraint" -- this is exactly that, the constraint
+   just depends on two other parameters instead of one).
+
+   ⚠️ **Residual tension flagged by ``backend-test-writer``, resolved by
+   ``domain-implementer``.** The unattainable-ARL0 zone is not unique to the
+   external review's extreme ``reference_value=5.0`` example -- it exists
+   at *every* reference value, including the library default
+   (``DEFAULT_REFERENCE_VALUE=0.5``, two-sided infimum ~1.043), whenever
+   ``target_arl`` sits below that chart's own infimum. This file's
+   pre-existing
+   ``test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_boundary``
+   (``smallest_meaningful`` case) originally fixed ``target_arl`` at
+   ``MIN_MEANINGFUL_ARL=1.0`` at the default reference value, which sits
+   **inside** that zone by a small margin (~4.3%) -- a genuinely
+   unattainable combination BIN-117's fix now (correctly) rejects.
+   ``MIN_MEANINGFUL_ARL`` is a library-wide mathematical floor (``E[N] >=
+   1`` for any stopping time), not a per-chart-parameter guarantee that
+   every meaningful ARL0 is attainable at every reference value, so this
+   was a boundary the test was conflating, not a case the fix should carve
+   an exception for. Resolved by deriving the ``smallest_meaningful`` case
+   from the actual per-``k`` infimum
+   (``_SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE``) instead
+   of the library-wide floor -- a strategy/boundary correction, not a
+   weakened assertion: the test still asserts the identical success
+   properties it always did, just against an input that is actually
+   attainable at this reference value.
+
+   ⚠️ **Second-pass correction, found in review of the first fix.**
+   ``_min_attainable_arl0`` originally evaluated at the mathematical limit
+   ``h = 0`` -- an *open* bound, approached but never itself attained by
+   ``_calibrate_decision_interval``, whose search bracket floors at
+   ``_MIN_DECISION_INTERVAL`` (1e-6), not 0. That left a narrow band of
+   genuinely-unattainable ``target_arl`` values just above the ``h=0``
+   figure but below the true floor able to pass the pre-check and still
+   silently bottom out during calibration -- the identical defect class
+   BIN-117 exists to close, one level down. Fixed by evaluating
+   ``_min_attainable_arl0`` at ``h = _MIN_DECISION_INTERVAL`` instead (see
+   that function's docstring in ``cusum_fitting.py``), which makes it
+   genuinely attainable -- proven directly by
+   ``test_fits_successfully_when_target_arl_equals_the_minimum_attainable_exactly``
+   below, and by this file no longer keeping its own duplicate copy of the
+   helper (imported from production instead, removing the drift risk that
+   let the two versions disagree in the first place).
 
 Uses ``ScoringResultFactory``/``ProvenanceFactory`` (``tests/factories.py``)
 for observations where the specific score does not matter, per that
@@ -72,7 +142,7 @@ module's own guidance.
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -88,11 +158,23 @@ from caliper.baseline import (
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
 # re-exported from caliper.baseline, so tests that need the exact bound
 # values import them from the owning submodule directly.
+#
+# BIN-117: `_min_attainable_arl0` is imported directly too -- see the module
+# docstring's "Decisions this file makes" point 6. This file previously
+# duplicated its own copy of this helper (computing the *open* h=0 bound),
+# which review found let a narrow band of genuinely-unattainable
+# `target_arl` values slip past `fit_cusum`'s pre-check -- the same defect
+# class, one level removed. Importing the production function directly
+# (now fixed to evaluate at `h = _MIN_DECISION_INTERVAL`, the true
+# attainable floor) instead of re-deriving it here removes that drift risk
+# entirely: this file and `fit_cusum` now cannot disagree about what "the
+# minimum attainable ARL0" means, because they call the same function.
 from caliper.baseline.domain.cusum_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_REFERENCE_VALUE,
     MIN_MEANINGFUL_ARL,
     MIN_REFERENCE_VALUE,
+    _min_attainable_arl0,
 )
 from caliper.errors import (
     CaliperError,
@@ -173,6 +255,34 @@ def _capture_fitting_error(
     except CaliperError as exc:
         return exc
     raise AssertionError("expected fit_cusum() to raise for this scenario")
+
+
+# BIN-117: at the library default reference value, MIN_MEANINGFUL_ARL (1.0)
+# itself sits inside the unattainable zone -- the two-sided minimum
+# attainable ARL0 at DEFAULT_REFERENCE_VALUE (0.5) is ~1.0431, not 1.0.
+# This is the residual tension this file's own module docstring ("Decisions
+# this file makes" point 6) flagged rather than resolved: MIN_MEANINGFUL_ARL
+# is a library-wide mathematical floor (E[N] >= 1 for any stopping time),
+# not a per-reference-value guarantee that every meaningful ARL0 is
+# attainable. `fit_cusum` now (correctly) rejects
+# target_arl=MIN_MEANINGFUL_ARL at the default reference value, so the
+# "smallest meaningful" boundary this file exercises must be redefined as
+# the actual per-k minimum attainable value, not the library-wide floor --
+# otherwise this test would assert success for an input BIN-117's own fix
+# now (correctly) rejects.
+#
+# No margin above the minimum: `_min_attainable_arl0` now reports a
+# genuinely-attainable value (evaluated at h=_MIN_DECISION_INTERVAL, not
+# the unattained h=0 limit -- see that function's docstring), so sitting
+# exactly on it is itself a stronger boundary test than a value some
+# distance away, and is the same value
+# `test_fits_successfully_when_target_arl_equals_the_minimum_attainable_exactly`
+# proves succeeds for MAX_REFERENCE_VALUE. The complementary "some margin
+# above the boundary" case is already covered separately by
+# `test_fits_successfully_when_target_arl_is_just_above_the_minimum_attainable`.
+_SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE = _min_attainable_arl0(
+    DEFAULT_REFERENCE_VALUE, "two_sided"
+)
 
 
 # --- Happy path: core fitting -------------------------------------------------
@@ -502,6 +612,186 @@ def test_raises_invalid_parameter_error_for_an_unrecognised_direction() -> None:
     assert error.context["constraint"] != ""
 
 
+# --- Sad path: unattainable false alarm tolerance (BIN-117) -----------------
+#
+# When target_arl sits below the minimum ARL0 actually attainable for the
+# given (reference_value, direction) -- computed by `_min_attainable_arl0`
+# (imported from production) at h=_MIN_DECISION_INTERVAL, the smallest
+# decision interval `_calibrate_decision_interval` will ever return -- no
+# non-negative decision interval can reach it. Before the BIN-117 fix,
+# `_calibrate_decision_interval` silently returned `_MIN_DECISION_INTERVAL`
+# and reported the (far higher) achieved figure as `achieved_arl` -- a
+# silent 3.1x/6.3x miscalibration reproduced by external code review,
+# 2026-09-11 (Linear BIN-117):
+#
+#   k=5.0 two_sided   requested=370   achieved=1158.3   h=0.000001
+#   k=5.0 upper       requested=370   achieved=2316.7   h=0.000001
+#
+# `fit_cusum` must instead raise `InvalidParameterError` before ever
+# treating that bound-hit as a usable result.
+#
+# ⚠️ A second review pass found the first fix's own pre-check compared
+# against the wrong quantity -- the *open* h=0 limit, not the *attainable*
+# h=_MIN_DECISION_INTERVAL floor -- which let a narrow band of genuinely
+# unattainable target_arl values slip through and still bottom out during
+# calibration, and made the error's own `min_attainable_arl` a value the
+# library would not actually accept back. `test_raises_invalid_parameter_`
+# `error_when_target_arl_is_below_the_minimum_attainable` below did not
+# catch this because it only ever probed comfortably below the (wrong)
+# reported floor, never in the gap between the two -- exactly why the
+# round-trip test after it exists now.
+
+
+@pytest.mark.parametrize("direction", _VALID_DIRECTIONS)
+def test_raises_invalid_parameter_error_when_target_arl_is_below_the_minimum_attainable(
+    direction: str,
+) -> None:
+    """A target_arl below the (reference_value, direction) infimum is rejected.
+
+    Reproduces the external review's exact finding: reference_value=5.0
+    (MAX_REFERENCE_VALUE) with target_arl=370 is unattainable in every
+    direction -- the true minimum attainable ARL0 at k=5.0 is far higher
+    (~2316.6 one-sided / ~1158.3 two-sided), so no non-negative decision
+    interval can reach 370.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+    min_attainable = _min_attainable_arl0(MAX_REFERENCE_VALUE, direction)
+    assert (
+        _SHAPE_TEST_TARGET_ARL < min_attainable
+    )  # precondition: genuinely unattainable
+
+    # Act
+    error = _capture_fitting_error(
+        baseline,
+        target_arl=_SHAPE_TEST_TARGET_ARL,
+        reference_value=MAX_REFERENCE_VALUE,
+        direction=direction,
+    )
+
+    # Assert -- reuses the existing invalid_parameter required keys
+    assert isinstance(error, InvalidParameterError)
+    assert error.category == "invalid_parameter"
+    assert error.context["kind"] == "invalid"
+    assert error.context["parameter"] == "target_arl"
+    assert error.context["provided"] == _SHAPE_TEST_TARGET_ARL
+    assert isinstance(error.context["constraint"], str)
+    assert error.context["constraint"] != ""
+
+    # Assert -- additional context the ticket specifically asks for, so the
+    # engineer can see what to change without re-deriving the infimum
+    # themselves.
+    assert error.context["reference_value"] == MAX_REFERENCE_VALUE
+    assert error.context["direction"] == direction
+    assert isinstance(error.context["min_attainable_arl"], float)
+    assert error.context["min_attainable_arl"] == pytest.approx(
+        min_attainable, rel=1e-6
+    )
+    # The reported minimum must itself be a coherent ARL0 -- and, since the
+    # whole point is that it exceeds what was requested, strictly greater
+    # than the (rejected) provided value.
+    assert error.context["min_attainable_arl"] > _SHAPE_TEST_TARGET_ARL
+
+
+def test_unattainable_arl_error_distinct_recovery_hint_from_out_of_range() -> None:
+    """The unattainable-combination error is still classifiable the same way
+    as an ordinary out-of-range target_arl (same category, same required
+    keys) -- ADR-002 does not need a new category for this -- but its
+    recovery guidance differs, since the fix is "pick a reachable target",
+    not "pick a value inside the meaningful range" (the target here IS
+    inside [MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL])."""
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    unattainable = _capture_fitting_error(
+        baseline, target_arl=_SHAPE_TEST_TARGET_ARL, reference_value=MAX_REFERENCE_VALUE
+    )
+    out_of_range = _capture_fitting_error(baseline, target_arl=0.0)
+
+    # Assert -- both classifiable identically...
+    assert unattainable.category == out_of_range.category == "invalid_parameter"
+    # ...but distinct, non-empty recovery guidance.
+    assert unattainable.recovery_hint != out_of_range.recovery_hint
+    assert unattainable.recovery_hint != ""
+
+
+# --- Boundary: the reported minimum is itself genuinely attainable (BIN-117) --
+#
+# The test review that found the first fix's pre-check compared against the
+# wrong (open, h=0) bound asked for exactly this: the value the error
+# reports in `context["min_attainable_arl"]` must itself succeed when
+# passed straight back as `target_arl` -- "errors are UX" means a caller
+# who does exactly what the error tells them must not get the same error
+# again. This is the assertion that would have caught the second-pass
+# defect; its prior absence is why 526 green tests did not.
+
+
+@pytest.mark.parametrize("direction", _VALID_DIRECTIONS)
+def test_fits_successfully_when_target_arl_equals_the_minimum_attainable_exactly(
+    direction: str,
+) -> None:
+    """The exact ``min_attainable_arl`` an unattainable-target error reports
+    is itself a value ``fit_cusum`` accepts -- round-tripping the error's
+    own ``context`` back in as input must succeed, not raise again.
+    """
+    # Arrange -- first, trigger the error and capture the value it reports,
+    # exactly as an engineer following its recovery_hint would.
+    baseline = _sufficient_baseline()
+    unattainable_error = _capture_fitting_error(
+        baseline,
+        target_arl=_SHAPE_TEST_TARGET_ARL,
+        reference_value=MAX_REFERENCE_VALUE,
+        direction=direction,
+    )
+    reported_minimum = unattainable_error.context["min_attainable_arl"]
+
+    # Act -- pass that exact value straight back in.
+    result = fit_cusum(
+        baseline,
+        target_arl=reported_minimum,
+        reference_value=MAX_REFERENCE_VALUE,
+        direction=direction,
+    )
+
+    # Assert -- succeeds, and reports back the value asked for.
+    assert isinstance(result, FittedCUSUM)
+    assert result.decision_interval > 0.0
+    assert result.requested_arl == reported_minimum
+
+
+# --- Boundary: a target just above the minimum still succeeds (BIN-117) -----
+
+
+@pytest.mark.parametrize("direction", _VALID_DIRECTIONS)
+def test_fits_successfully_when_target_arl_is_just_above_the_minimum_attainable(
+    direction: str,
+) -> None:
+    """The boundary must not over-reject: a reachable target just above the
+    infimum still fits, and achieved_arl lands close to what was requested
+    -- BIN-117 explicitly warns the fix must not turn into a broader
+    rejection of realistic, attainable targets.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+    min_attainable = _min_attainable_arl0(MAX_REFERENCE_VALUE, direction)
+    reachable_target = min_attainable * 1.05  # comfortably attainable
+
+    # Act
+    result = fit_cusum(
+        baseline,
+        target_arl=reachable_target,
+        reference_value=MAX_REFERENCE_VALUE,
+        direction=direction,
+    )
+
+    # Assert
+    assert isinstance(result, FittedCUSUM)
+    assert result.decision_interval > 0.0
+    relative_gap = abs(result.achieved_arl - reachable_target) / reachable_target
+    assert relative_gap < 0.05
+
+
 # --- Edge: error distinguishability -----------------------------------------------
 
 
@@ -611,14 +901,34 @@ def test_fitted_cusum_satisfies_the_fitted_control_limits_protocol() -> None:
 def test_fits_successfully_with_reference_value_at_the_valid_range_boundary(
     boundary_reference_value: float,
 ) -> None:
-    """Boundary value analysis: the edges of the valid range are accepted."""
+    """Boundary value analysis: the edges of the valid range are accepted.
+
+    **Updated for BIN-117.** This test previously fixed ``target_arl`` at
+    ``_SHAPE_TEST_TARGET_ARL`` (370) for both boundary reference values.
+    At ``MAX_REFERENCE_VALUE`` (5.0) that combination is exactly the
+    external review's reproduced defect -- the minimum attainable
+    two-sided ARL0 at k=5.0 is ~1158.3, so 370 is genuinely unattainable
+    and (correctly, post-fix) raises rather than fitting. Asserting success
+    with that literal here would directly contradict this file's own
+    unattainable-target tests below, for the identical inputs. Deriving
+    the target from the reference value under test keeps this a pure
+    boundary-value-of-``reference_value`` test, decoupled from
+    ``target_arl`` attainability -- exactly what BIN-117 revealed this
+    test was silently conflating before the fix. The smallest-valid case
+    is unaffected: 370 remains comfortably attainable at
+    ``MIN_REFERENCE_VALUE`` (0.01), so ``max()`` below leaves it unchanged.
+    """
     # Arrange
     baseline = _sufficient_baseline()
+    target_arl = max(
+        _SHAPE_TEST_TARGET_ARL,
+        _min_attainable_arl0(boundary_reference_value, "two_sided") * 1.5,
+    )
 
     # Act
     result = fit_cusum(
         baseline,
-        target_arl=_SHAPE_TEST_TARGET_ARL,
+        target_arl=target_arl,
         reference_value=boundary_reference_value,
     )
 
@@ -632,13 +942,32 @@ def test_fits_successfully_with_reference_value_at_the_valid_range_boundary(
 
 @pytest.mark.parametrize(
     "boundary_target_arl",
-    [MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL],
+    [_SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE, MAX_MEANINGFUL_ARL],
     ids=["smallest_meaningful", "largest_meaningful"],
 )
 def test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_boundary(
     boundary_target_arl: float,
 ) -> None:
-    """Boundary value analysis: the edges of the meaningful range are accepted."""
+    """Boundary value analysis: the edges of the meaningful range are accepted.
+
+    **Updated for BIN-117.** ``smallest_meaningful`` previously used
+    ``MIN_MEANINGFUL_ARL`` (1.0) directly, fixed at the library default
+    reference value. That combination is genuinely unattainable -- the
+    two-sided minimum attainable ARL0 at ``DEFAULT_REFERENCE_VALUE`` is
+    ~1.0431, so 1.0 sits inside the zone BIN-117's fix now (correctly)
+    rejects. Using the actual per-``k`` minimum attainable value, with no
+    margin, keeps this a pure boundary-value test of the *meaningful
+    range*, decoupled from an attainability failure at this particular
+    reference value -- exactly the same correction
+    ``test_fits_successfully_with_reference_value_at_the_valid_range_boundary``
+    already applies for the reference-value axis. No margin is needed
+    here (unlike an earlier draft of this fix): ``_min_attainable_arl0``
+    now reports a genuinely-attainable value, so sitting exactly on it is
+    itself the boundary test, and a stronger one than a value some
+    distance away. ``largest_meaningful`` is unaffected:
+    ``MAX_MEANINGFUL_ARL`` remains comfortably attainable at the default
+    reference value.
+    """
     # Arrange
     baseline = _sufficient_baseline()
 
@@ -666,13 +995,22 @@ def test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_bo
 def test_decision_interval_is_always_positive(
     target_arl: float, reference_value: float
 ) -> None:
-    """For any valid inputs, the derived decision interval is a positive quantity.
+    """For any valid, attainable inputs, the decision interval is positive.
 
     A negative or zero decision interval would be a chart that signals
     immediately or never meaningfully accumulates -- not a coherent CUSUM
     design for any positive target ARL0.
+
+    **Updated for BIN-117.** An unattainable ``(reference_value,
+    target_arl)`` combination (two-sided default direction) is BIN-117's
+    own dedicated failure mode -- see the unattainable-target tests below
+    -- not a case this property should generate at all. ``assume()`` skips
+    (never fails) any Hypothesis-drawn pair the fix now correctly rejects,
+    so this property is only ever evaluated against combinations
+    ``fit_cusum`` is actually expected to succeed on.
     """
     # Arrange
+    assume(target_arl > _min_attainable_arl0(reference_value, "two_sided"))
     baseline = _sufficient_baseline()
 
     # Act

@@ -361,6 +361,110 @@ def _combine_two_sided_arl0(lower_arm_arl0: float, upper_arm_arl0: float) -> flo
     return 1.0 / (1.0 / lower_arm_arl0 + 1.0 / upper_arm_arl0)
 
 
+def _min_attainable_arl0(reference_value: float, direction: str) -> float:
+    """Compute the smallest ARL0 actually attainable at ``reference_value`` (BIN-117).
+
+    ⚠️ **This is deliberately evaluated at ``h = _MIN_DECISION_INTERVAL``, not
+    at the mathematical limit ``h = 0``.** As ``decision_interval -> 0+``,
+    Siegmund's correction constant ``b`` tends to exactly
+    ``_SIEGMUND_CORRECTION`` (``b = h + _SIEGMUND_CORRECTION``), so
+    ``_cusum_arl0(reference_value, 0.0)`` computes that limit directly --
+    but it is an *open* bound, approached as ``h`` shrinks and never itself
+    attained by any ``h`` that ``_calibrate_decision_interval`` will
+    actually return, since its search bracket's own floor is
+    ``_MIN_DECISION_INTERVAL`` (1e-6), not 0. Reporting the ``h=0`` figure
+    as "the minimum attainable ARL0" was itself a defect (found in review
+    of the first BIN-117 fix): for a whole band of inputs strictly between
+    the two values, the pre-check that compared against it would pass, yet
+    calibration would still bottom out at ``_MIN_DECISION_INTERVAL`` and
+    report a higher achieved ARL0 than requested -- silently reproducing
+    the exact class of miscalibration this ticket exists to close, and
+    handing the caller a ``min_attainable_arl`` in its error ``context``
+    that the library would not actually accept back. Evaluating at
+    ``h = _MIN_DECISION_INTERVAL`` instead -- the same floor
+    ``_calibrate_decision_interval`` itself searches from -- makes this
+    figure genuinely attainable: passing it straight back as ``target_arl``
+    succeeds (see ``test_fits_successfully_when_target_arl_equals_the_``
+    ``minimum_attainable_exactly`` in ``test_cusum_fitting.py``).
+
+    For ``"two_sided"``, the symmetric two-arm combination
+    (``_combine_two_sided_arl0``, Montgomery Eq. 9.7) of two identical
+    one-sided values gives the two-sided figure.
+
+    No non-negative decision interval can attain an ARL0 below this value:
+    ``_cusum_arl0(k, h)`` is strictly increasing in ``h`` for ``h >= 0``
+    (visible from the formula: ``d(ARL0)/dh > 0`` since the exponential
+    term dominates), and ``_calibrate_decision_interval`` never searches
+    below ``_MIN_DECISION_INTERVAL``, so this is the true floor of what it
+    can return. ``fit_cusum`` uses this to reject an unattainable
+    ``target_arl`` before ever invoking ``_calibrate_decision_interval`` --
+    see that function's external-review defect history (Linear BIN-117):
+    without this check, root-finding silently bottomed out at
+    ``_MIN_DECISION_INTERVAL`` and reported the (far higher) achieved ARL0
+    as if it were a successful fit.
+    """
+    one_sided = _cusum_arl0(reference_value, _MIN_DECISION_INTERVAL)
+    if direction == "two_sided":
+        return _combine_two_sided_arl0(one_sided, one_sided)
+    return one_sided
+
+
+def _require_attainable_target_arl(
+    target_arl: float, reference_value: float, direction: str
+) -> None:
+    """Enforce that ``target_arl`` is attainable at ``reference_value``/``direction``.
+
+    Raises ``InvalidParameterError`` (BIN-117) if no decision interval can
+    reach it.
+
+    Distinct from ``_require_target_arl``'s ordinary out-of-range check:
+    this constraint depends on *two* other parameters, not one, so it
+    cannot be expressed as a fixed bound on ``target_arl`` alone --
+    ``MIN_MEANINGFUL_ARL`` is a library-wide mathematical floor
+    (``E[N] >= 1``), not a per-``(reference_value, direction)`` guarantee
+    that every meaningful ARL0 is reachable.
+
+    Uses the identical floor (``_min_attainable_arl0``, evaluated at
+    ``h = _MIN_DECISION_INTERVAL``) that ``_calibrate_decision_interval``
+    itself searches from, so a ``target_arl`` this function accepts is
+    *provably* reachable by that function's own search bracket -- not
+    merely reachable in an unattained mathematical limit. That equivalence
+    is what makes a separate post-calibration bound-hit check unnecessary:
+    an earlier version of this fix kept one as a safety net, believing the
+    two could disagree; they cannot, because both now read the same
+    ``_MIN_DECISION_INTERVAL`` floor through the same formula.
+    """
+    min_attainable = _min_attainable_arl0(reference_value, direction)
+    if target_arl < min_attainable:
+        raise InvalidParameterError(
+            "target_arl is below the minimum ARL0 attainable for this "
+            "reference_value and direction -- no decision interval can "
+            "reach it",
+            context={
+                "parameter": "target_arl",
+                "constraint": (
+                    "must be >= the minimum ARL0 attainable at the given "
+                    "reference_value and direction "
+                    f"({min_attainable} here)"
+                ),
+                "kind": "invalid",
+                "provided": target_arl,
+                "reference_value": reference_value,
+                "direction": direction,
+                "min_attainable_arl": min_attainable,
+            },
+            recovery_hint=(
+                f"No decision interval can reach target_arl={target_arl} at "
+                f"reference_value={reference_value} and "
+                f"direction={direction!r} -- the minimum attainable ARL0 "
+                f"here is {min_attainable}, and that value is itself "
+                "achievable. Choose a target_arl at or above it, or lower "
+                "reference_value so smaller shifts become detectable at a "
+                "reachable false alarm rate."
+            ),
+        )
+
+
 def _calibrate_decision_interval(
     reference_value: float, target_arl: float, direction: str
 ) -> tuple[float, float]:
@@ -478,8 +582,11 @@ def fit_cusum(
     InvalidParameterError
         ``target_arl`` is missing or outside ``[MIN_MEANINGFUL_ARL,
         MAX_MEANINGFUL_ARL]``; ``reference_value`` is supplied but outside
-        ``[MIN_REFERENCE_VALUE, MAX_REFERENCE_VALUE]``; or ``direction`` is
-        supplied but not in ``_VALID_DIRECTIONS``.
+        ``[MIN_REFERENCE_VALUE, MAX_REFERENCE_VALUE]``; ``direction`` is
+        supplied but not in ``_VALID_DIRECTIONS``; or ``target_arl`` is
+        below the minimum ARL0 attainable at the given
+        ``reference_value``/``direction`` -- no non-negative decision
+        interval can reach it (BIN-117).
     InsufficientBaselineError
         ``baseline`` does not meet the sufficiency threshold (BIN-94
         A1/BR-1).
@@ -500,6 +607,9 @@ def fit_cusum(
         reference_value if reference_value is not None else DEFAULT_REFERENCE_VALUE
     )
     effective_direction = _validate_direction(direction)
+    _require_attainable_target_arl(
+        validated_target_arl, effective_reference_value, effective_direction
+    )
 
     sufficiency = baseline.check_sufficiency()
     if not sufficiency.is_sufficient:
@@ -538,6 +648,16 @@ def fit_cusum(
     decision_interval, achieved_arl = _calibrate_decision_interval(
         effective_reference_value, validated_target_arl, effective_direction
     )
+    # No post-calibration bound-hit guard here (deliberately, BIN-117
+    # review): _require_attainable_target_arl above and
+    # _calibrate_decision_interval's own search bracket both read
+    # _MIN_DECISION_INTERVAL through the identical _min_attainable_arl0/
+    # _cusum_arl0 formula, so a target_arl that survives the pre-check is
+    # provably reachable by this call, not merely reachable in the
+    # unattained h=0 limit a defensive post-check could no longer
+    # distinguish from a genuine, minimal-h fit. A prior version of this
+    # fix kept such a guard; see _min_attainable_arl0's docstring for why
+    # it was both unreachable and wrong.
 
     provenance = baseline.provenance_signature
     if provenance is None:  # pragma: no cover

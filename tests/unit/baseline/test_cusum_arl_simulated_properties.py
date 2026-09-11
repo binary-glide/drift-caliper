@@ -31,15 +31,30 @@ Three properties, one test group each below:
    sigma-standardised -- see ``cusum_fitting.py``'s module docstring), and
    moves ``target_value`` by the identical affine map.
 
-**AC6 -- no shared algebra.** Nothing below imports from
-``caliper.baseline.domain.cusum_fitting`` at all -- unlike the EWMA file,
-this file needs no formula helper even for its invariance check, because
-``decision_interval``/``reference_value`` are already reported in
-sigma-standardised units with nothing further to invert. The round-trip's
-comparison target is ``achieved_arl`` -- the artefact's own already-reported
-value -- checked only against independently simulated run lengths from
-``tests.support.spc_simulation``, which itself only calls
-``Monitor.record()``.
+**AC6 -- no shared algebra, with one narrow exception (BIN-117).** This
+file's own checks -- the round-trip comparison and the invariance check --
+import no formula helper from ``caliper.baseline.domain.cusum_fitting``:
+unlike the EWMA file, the invariance check needs no formula even to invert,
+because ``decision_interval``/``reference_value`` are already reported in
+sigma-standardised units with nothing further to invert, and the
+round-trip's comparison target is ``achieved_arl`` -- the artefact's own
+already-reported value -- checked only against independently simulated run
+lengths from ``tests.support.spc_simulation``, which itself only calls
+``Monitor.record()``. The one exception is the monotonicity property's
+``arl_low`` Hypothesis strategy (BIN-117): since ``fit_cusum`` now rejects
+a ``target_arl`` below the minimum ARL0 actually attainable for a given
+``(reference_value, direction)``, this file's fixed
+``_MONOTONICITY_REFERENCE_VALUE``/``_MONOTONICITY_DIRECTION`` need that
+same floor to bound the strategy so Hypothesis only ever draws attainable
+inputs -- importing production's own ``_min_attainable_arl0`` directly for
+that one purpose (not for the properties' own assertions), rather than
+re-deriving it. An earlier draft of this fix re-derived it locally via
+``_cusum_arl0``/``_combine_two_sided_arl0`` evaluated at the mathematical
+(open, unattained) limit ``h = 0`` -- the same mistake a second review pass
+found in production's own pre-check (see ``cusum_fitting.py``'s
+``_min_attainable_arl0`` docstring). Importing the fixed function directly
+removes that drift risk rather than requiring this file to independently
+track which basis production uses.
 
 **AC7 -- tolerance.** Identical derivation and parameters to
 ``test_ewma_arl_simulated_properties.py``: ``_N_RUNS = 1_500``,
@@ -56,7 +71,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_cusum
-from caliper.baseline.domain.ewma_fitting import MIN_MEANINGFUL_ARL
+from caliper.baseline.domain.cusum_fitting import _min_attainable_arl0
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 from tests.support.spc_simulation import (
     derived_relative_tolerance,
@@ -136,6 +151,24 @@ _MONOTONICITY_ARL_GAP_MAX = 1_000.0
 _MONOTONICITY_REFERENCE_VALUE = 0.5
 _MONOTONICITY_DIRECTION = "two_sided"
 
+# BIN-117: fit_cusum() now rejects a target_arl below the minimum ARL0
+# actually attainable for a given (reference_value, direction) -- see
+# cusum_fitting.py's `_min_attainable_arl0` docstring. Below this floor, at
+# the fixed _MONOTONICITY_REFERENCE_VALUE/_MONOTONICITY_DIRECTION this
+# property uses, every draw would raise rather than fit -- a change to
+# which inputs are legal, not a weakening of the monotonicity property
+# itself. No margin above the floor: `_min_attainable_arl0` (imported from
+# production, not re-derived -- see the module docstring's AC6 note) is
+# itself genuinely attainable, evaluated at the same
+# `_MIN_DECISION_INTERVAL` `_calibrate_decision_interval` searches from, so
+# using it directly as `min_value` lets Hypothesis draw the exact boundary
+# too -- a stronger property test than a value some margin away, and the
+# one an earlier draft of this fix (margin = infimum * 1.001, against the
+# wrong, open h=0 basis) did not exercise.
+_MONOTONICITY_ARL_LOW_MIN = _min_attainable_arl0(
+    _MONOTONICITY_REFERENCE_VALUE, _MONOTONICITY_DIRECTION
+)
+
 
 def _baseline_from_scores(scores: list[float]) -> Baseline:
     """Build a ``Baseline`` from an explicit list of scores, one shared provenance."""
@@ -166,7 +199,7 @@ def _baseline_scores_strategy() -> st.SearchStrategy[list[float]]:
 @given(
     scores=_baseline_scores_strategy(),
     arl_low=st.floats(
-        min_value=MIN_MEANINGFUL_ARL,
+        min_value=_MONOTONICITY_ARL_LOW_MIN,
         max_value=_MONOTONICITY_ARL_LOW_MAX,
         allow_nan=False,
     ),
@@ -183,6 +216,17 @@ def test_wider_target_arl_never_narrows_the_cusum_decision_interval(
     interval -- otherwise the chart would signal in-control observations
     MORE often for a LARGER requested ARL0, which is the calibration
     working backwards.
+
+    **Updated for BIN-117.** ``arl_low`` previously drew from
+    ``[MIN_MEANINGFUL_ARL, _MONOTONICITY_ARL_LOW_MAX]`` -- a range that, at
+    this test's fixed reference value (0.5), partially overlapped the zone
+    ``fit_cusum`` now (correctly) rejects as unattainable
+    (``MIN_MEANINGFUL_ARL=1.0`` is below the two-sided minimum attainable
+    ARL0 of ~1.0431 at ``k=0.5``). Bounding the strategy at
+    ``_MONOTONICITY_ARL_LOW_MIN`` -- the exact, genuinely-attainable floor
+    -- keeps every drawn ``arl_low`` legal post-fix -- this is a correction
+    to what inputs the strategy generates, not a change to what the
+    property itself asserts.
     """
     # Arrange
     baseline = _baseline_from_scores(scores)

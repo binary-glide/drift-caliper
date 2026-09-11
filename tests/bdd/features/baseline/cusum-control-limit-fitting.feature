@@ -337,3 +337,34 @@ Feature: Fit CUSUM control limits from the baseline
       | boundary                      |
       | the smallest meaningful value |
       | the largest meaningful value  |
+
+  # --- Boundary: false alarm tolerance unattainable at the chosen reference value (BIN-117) ---
+
+  # The reference value and the false alarm tolerance are not independent.
+  # A larger reference value raises the smallest false alarm tolerance any
+  # decision interval can deliver, so a pair that is individually valid on
+  # both axes can still be jointly unattainable. Before this was enforced,
+  # fitting silently returned an artefact reporting a false alarm tolerance
+  # the engineer never asked for -- authoritative-looking limits that do not
+  # deliver the stated statistical commitment.
+
+  Scenario: Fitting fails when the false alarm tolerance cannot be attained at the chosen reference value
+    Given the engineer has a Phase I baseline that passes the sufficiency check
+    And the baseline scores show non-zero variance
+    When they attempt to fit CUSUM control limits with a reference value and false alarm tolerance that are individually valid but jointly unattainable
+    Then the fitting fails with an error classifiable as an invalid parameter
+    And the error reports the smallest false alarm tolerance attainable at the chosen reference value
+    And no control limits are produced
+
+  # --- Boundary: the reported attainable minimum is itself accepted (BIN-117, BIN-122) ---
+
+  # The value the library names in its own error must be a value the library
+  # accepts. An engineer following the recovery guidance exactly must succeed,
+  # not meet the same error a second time. This scenario is the specification
+  # form of BIN-122's round-trip property.
+
+  Scenario: The smallest attainable false alarm tolerance reported by the error is itself accepted
+    Given a fitting attempt has failed because the false alarm tolerance was unattainable at the chosen reference value
+    When they fit CUSUM control limits with the smallest attainable false alarm tolerance that the error reported, at the same reference value
+    Then the result contains the decision interval and target value for CUSUM monitoring
+    And the result reports the false alarm tolerance that was achieved by the calibration

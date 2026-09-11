@@ -48,6 +48,51 @@ _REQUIRED_OBSERVATION_FIELDS = ("score", "reasoning", "provenance")
 _DIRECTIONS_WITH_UPPER_ARM = frozenset({"two_sided", "upper"})
 _DIRECTIONS_WITH_LOWER_ARM = frozenset({"two_sided", "lower"})
 
+# BIN-118 fallbacks: used only if a receiver's own __repr__ (or, in turn,
+# type(receiver).__name__) raises. Constants, not derived -- there is
+# nothing left to safely introspect about a receiver that fails at every
+# level of description.
+_UNREPRESENTABLE_RECEIVER = "<unrepresentable receiver>"
+
+
+def _describe_receiver(receiver: SignalReceiver) -> str:
+    """Format a receiver for ``DeliveryFailure.receiver`` (BIN-118).
+
+    Tries ``repr(receiver)`` first, falling back to
+    ``type(receiver).__name__``, then to a fixed constant.
+    ``Monitor._deliver`` builds ``DeliveryFailure`` from this identifier
+    *after* the receiver has already raised -- a receiver whose own
+    ``__repr__`` also raises (e.g. it touches a closed file or a detached
+    ORM session) must not let that second exception escape ``record()`` in
+    turn. Reachable by ordinary third-party code, not just malice --
+    reproduced by external code review, 2026-09-11 (Linear BIN-118).
+    """
+    try:
+        return repr(receiver)
+    except Exception:
+        try:
+            return type(receiver).__name__
+        except Exception:  # pragma: no cover
+            # type()/__name__ read a class attribute and cannot execute
+            # user code for an ordinary class -- unreachable in practice,
+            # but the fallback the ticket specifies still needs a floor.
+            return _UNREPRESENTABLE_RECEIVER
+
+
+def _describe_exception(exc: Exception) -> str:
+    """``str(exc)``, falling back to ``type(exc).__name__`` (BIN-118).
+
+    The sibling hazard to ``_describe_receiver``: a custom exception with a
+    broken ``__str__`` must not let that failure escape ``record()`` either.
+    ``type(exc).__name__`` alone (used for ``DeliveryFailure.error_type``)
+    is always safe -- it is a class attribute, not a call into user code --
+    so only ``str()`` itself needs a guard here.
+    """
+    try:
+        return str(exc)
+    except Exception:
+        return type(exc).__name__
+
 
 def _missing_observation_fields(candidate: object) -> list[str]:
     """Report which ``ScoringResult`` fields ``candidate`` does not expose.
@@ -250,11 +295,22 @@ class Monitor:
            ``signal``, each inside its own ``try``/``except`` so one
            receiver's failure never stops the next from being attempted.
            A failure is recorded as a ``DeliveryFailure`` built entirely
-           from the caught exception (``type(exc).__name__``, ``str(exc)``)
-           -- never by consulting anything the receiver itself reports
-           (ADR-010 section 1). No receiver ever observes another
-           receiver's failure: each sees the same pristine, empty
-           ``delivery_failures`` regardless of position in ``receivers``.
+           from the caught exception (``type(exc).__name__``,
+           ``_describe_exception(exc)``) -- never by consulting anything
+           the receiver itself reports (ADR-010 section 1). No receiver
+           ever observes another receiver's failure: each sees the same
+           pristine, empty ``delivery_failures`` regardless of position in
+           ``receivers``.
+
+           ⚠️ **BIN-118:** describing the failure -- ``repr(receiver)``
+           and ``str(exc)`` -- is itself capable of raising (a receiver
+           whose own ``__repr__`` touches a closed file or detached
+           session; a custom exception with a broken ``__str__``), so
+           ``_describe_receiver``/``_describe_exception`` wrap those calls
+           with their own fallbacks rather than being called directly
+           inside this ``try``. Absorbing the receiver's exception but then
+           letting its *description* propagate would still break every
+           guarantee this method exists to provide.
         3. (Step 4) If any failures were collected, exactly one
            ``model_copy`` produces the final result after the loop --
            never per-failure. That final result is what ``record()``
@@ -267,9 +323,9 @@ class Monitor:
             except Exception as exc:
                 failures.append(
                     DeliveryFailure(
-                        receiver=repr(receiver),
+                        receiver=_describe_receiver(receiver),
                         error_type=type(exc).__name__,
-                        error_message=str(exc),
+                        error_message=_describe_exception(exc),
                     )
                 )
         if not failures:
