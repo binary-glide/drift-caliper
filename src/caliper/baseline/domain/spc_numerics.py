@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import itertools
 import math
-import statistics
 from collections.abc import Sequence
 
 from caliper.errors import DegenerateBaselineError
@@ -105,6 +104,62 @@ _NON_FINITE_SIGMA_REASON = "non_finite_sigma_estimate"
 _SIGMA_UNDERFLOW_REASON = "sigma_estimate_underflow"
 
 
+def _overflow_safe_mean(values: Sequence[float]) -> float:
+    """Exactly-rounded mean, tolerating a running sum that overflows float64.
+
+    ``statistics.fmean`` delegates to ``math.fsum`` for its exactly-rounded
+    result. ``fsum`` raises ``OverflowError`` when its *intermediate*
+    (running) sum exceeds float64's finite range -- even when the true,
+    final mean is itself perfectly representable (BIN-123). An alternating
+    ``[1e307, 0.0, ...]`` sequence is the canonical example: the true sum
+    (~7.5e308 for 150 such values) is not representable, but dividing by
+    150 first would give ~5e306, comfortably representable.
+
+    The ordinary path -- ``math.fsum(values) / len(values)`` -- is tried
+    first and returned unchanged whenever it succeeds, so this function is
+    bit-identical to ``statistics.fmean`` on every input that does not hit
+    the overflow edge case. Precision cannot regress *by construction* for
+    the common case; it is not merely expected to measure the same.
+
+    On overflow, every value is scaled down by the same power of two before
+    summing, and the sum is scaled back up by the same factor afterwards
+    (after dividing by ``len(values)``, not before -- the *sum* is exactly
+    what does not fit; the *mean* is what does). Multiplying by a power of
+    two only shifts a float's exponent; the mantissa -- and therefore
+    ``fsum``'s exact rounding -- is untouched, so this fallback is exact in
+    a way that scaling by an arbitrary factor (``len(values)``, say) would
+    not be: dividing each term by ``n`` first would round every term
+    individually and give up ``fsum``'s exactness before it ever ran.
+
+    The scale is the *smallest* power of two (found by trying successively
+    larger shifts) that keeps the scaled sum finite. The smallest sufficient
+    shift minimises how far every value is pushed towards zero -- an
+    unnecessarily large one risks pushing a value that was normal before
+    scaling into the subnormal range, and losing part or all of its
+    contribution to the sum. A baseline whose dynamic range is wide enough
+    that even the smallest sufficient shift still loses a value this way is
+    not something this function can repair: at that point the input is at
+    the edge of what float64 can represent at all, and the caller's own
+    finite/positive check on the *result* (BIN-119) is the backstop for
+    that, not this function.
+    """
+    try:
+        return math.fsum(values) / len(values)
+    except OverflowError:
+        pass
+
+    shift = 0
+    while True:
+        shift += 1
+        scale = math.ldexp(1.0, -shift)
+        scaled = [value * scale for value in values]
+        try:
+            scaled_sum = math.fsum(scaled)
+        except OverflowError:
+            continue
+        return math.ldexp(scaled_sum / len(values), shift)
+
+
 def _moving_range_sigma(scores: Sequence[float]) -> float:
     """Estimate short-term sigma from the mean moving range (span 2).
 
@@ -130,7 +185,7 @@ def _moving_range_sigma(scores: Sequence[float]) -> float:
         (``context["reason"] == "sigma_estimate_underflow"``).
     """
     moving_ranges = [abs(b - a) for a, b in itertools.pairwise(scores)]
-    mean_moving_range = statistics.fmean(moving_ranges)
+    mean_moving_range = _overflow_safe_mean(moving_ranges)
     sigma = mean_moving_range / _MOVING_RANGE_D2
 
     if not math.isfinite(sigma):

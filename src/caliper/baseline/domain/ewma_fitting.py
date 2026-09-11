@@ -94,7 +94,10 @@ from scipy.stats import norm  # type: ignore[attr-defined]
 
 from caliper.baseline.domain.baseline import Baseline
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
-from caliper.baseline.domain.spc_numerics import _moving_range_sigma
+from caliper.baseline.domain.spc_numerics import (
+    _moving_range_sigma,
+    _overflow_safe_mean,
+)
 from caliper.errors import (
     DegenerateBaselineError,
     InsufficientBaselineError,
@@ -535,7 +538,10 @@ def fit_ewma(
             ),
         )
 
-    baseline_mean = statistics.fmean(scores)
+    # statistics.fmean(scores) would raise OverflowError here on a baseline
+    # whose running sum overflows float64 even though the mean itself is
+    # representable (BIN-123) -- see _overflow_safe_mean's docstring.
+    baseline_mean = _overflow_safe_mean(scores)
     baseline_spread = statistics.stdev(scores)
     sigma_estimate = _moving_range_sigma(scores)
 
