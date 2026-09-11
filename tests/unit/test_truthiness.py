@@ -62,6 +62,8 @@ from __future__ import annotations
 import pytest
 
 from caliper.baseline import Baseline, fit_cusum, fit_ewma, fit_shewhart
+from caliper.measurement import ModelVersion, Provenance, ScoringCriteria
+from caliper.monitoring import Monitor
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Arbitrary target ARL0 shared by the three fit_* calls below -- a DX/shape
@@ -203,3 +205,43 @@ def test_bool_is_forbidden_on_fitted_shewhart() -> None:
     # Act / Assert
     with pytest.raises(TypeError):
         bool(fitted)
+
+
+# --- MonitoringResult (BIN-69, ADR-009 section 4) -----------------------------
+#
+# `MonitoringResult` *does* have an explicit yes/no field (`is_in_control`),
+# unlike the four types above -- but `__bool__` still raises. This is not an
+# inconsistency: it is domain-modeller's explicit, engaged-with-both-options
+# decision (docs/domain-model.md, Value Object Inventory -- MonitoringResult,
+# "Truthiness decision"), because "is everything still fine?" and "did
+# something notable just happen?" are opposite readings of
+# `if monitor.record(observation):`, and the field name only disambiguates
+# one of them. Returning `is_in_control` from `__bool__` would risk a
+# **silently inverted** monitoring loop -- alerting on the boring in-control
+# majority and staying quiet on genuine signals -- which is worse than the
+# always-`True` P0 this file's other tests catch, because it does not look
+# broken. See CLAUDE.md's "🚨 `MonitoringResult.__bool__` raises `TypeError`"
+# note for the full reasoning this test pins.
+
+
+def test_bool_is_forbidden_on_monitoring_result() -> None:
+    """`MonitoringResult` has an explicit `is_in_control` field -- `bool()` raises.
+
+    Obtained via `Monitor.record()`, never constructed directly, mirroring
+    the convention every other result/artefact type in this file follows.
+    """
+    # Arrange
+    fitted = fit_shewhart(_sufficient_baseline(), target_arl=_SHAPE_TEST_TARGET_ARL)
+    monitor = Monitor(fitted)
+    matching_provenance = Provenance(
+        model_version=ModelVersion(value=fitted.provenance_model_version),
+        scoring_criteria=ScoringCriteria(value=fitted.provenance_criteria),
+    )
+    observation = ScoringResultFactory(provenance=matching_provenance)
+
+    # Act
+    result = monitor.record(observation)
+
+    # Assert
+    with pytest.raises(TypeError):
+        bool(result)

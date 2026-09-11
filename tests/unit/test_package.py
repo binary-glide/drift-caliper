@@ -74,6 +74,9 @@ _REQUIRED_TOP_LEVEL_NAMES = frozenset(
         "fit_cusum",
         "fit_shewhart",
         "compare_provenance",
+        # Monitoring (BIN-69, BIN-72, ADR-009)
+        "Monitor",
+        "MonitoringResult",
         # Error taxonomy (ADR-002) -- an engineer catches these, so they
         # must be reachable without knowing `caliper.errors` exists.
         "CaliperError",
