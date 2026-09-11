@@ -557,10 +557,22 @@ the parameter-estimation-error problem ADR-005 already addressed (Quesenberry
 
 ### Citation status -- record the gap honestly
 
-Supporting sources are **commercial SPC vendor documentation** (spcforexcel.com,
-analyse-it, SigmaXL). Montgomery Chapter 9 is paywalled and was not accessed
-directly; all secondary sources citing Montgomery confirm MR-based estimation for
-individuals data across all chart types.
+✅ **Closed 2026-09-11 — Montgomery obtained and read directly.** *Introduction to
+Statistical Quality Control*, 7th ed. (Wiley, 2013), §6.4, Eq. 6.33, states the
+individuals chart explicitly as `UCL = x̄ + 3·MR̄/d₂`, centre line `x̄`,
+`LCL = x̄ − 3·MR̄/d₂`, with *"If a moving range of n = 2 observations is used,
+then d₂ = 1.128."* MR-based estimation for individuals data is confirmed from the
+primary source, not inferred from vendors.
+
+`d₂ = 1.128` also matches Appendix VI (Factors for Constructing Variables Control
+Charts) and Caliper's own **derivation**, `2/√π = 1.1283791…`, which
+`test_moving_range_d2_matches_the_expected_range_of_two_standard_normals` asserts.
+Three independent confirmations; the derivation remains primary, since it is exact
+where the table is rounded.
+
+*Superseded text, kept for the record:* supporting sources were **commercial SPC
+vendor documentation** (spcforexcel.com, analyse-it, SigmaXL), with Montgomery
+Chapter 9 paywalled and not accessed directly.
 
 The NIST/SEMATECH e-Handbook was independently checked: its EWMA section says
 only "s is the standard deviation calculated from the historical data" without

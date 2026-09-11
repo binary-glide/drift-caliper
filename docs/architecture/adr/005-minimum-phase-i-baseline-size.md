@@ -409,7 +409,7 @@ mechanism.
 
 | Claim | Source | Verified |
 |---|---|---|
-| Montgomery recommends 20--25 subgroups of size 3--5 | Montgomery (2013, p. 239), cited via Does et al. (2020) and Johnson (2016) | Yes -- multiple secondary sources confirm the textbook recommendation |
+| Montgomery recommends 20--25 subgroups of size 3--5 | Montgomery (2013), 7th ed., **p. 239 read directly 2026-09-11** | **Yes -- primary source.** Verbatim: *"It is highly desirable to have 20--25 samples or subgroups of size n (typically n is between 3 and 5) to compute the trial control limits."* p. 236 adds *"at least 20 to 25 samples"* with *"n will be small, often either 4, 5, or 6"*. **This confirms the correction this ADR rests on: the 20--25 are subgroups, not individual observations.** |
 | Quesenberry (1993): m = 300 for n = 1 | *Journal of Quality Technology* 25(4):237--247, confirmed via Does et al. (2020) and Huberts et al. (2022) | Yes -- cited independently by multiple subsequent papers |
 | Jones et al. (2001): EWMA deteriorates with small Phase I | *Technometrics* 43(2):156--167 | Yes -- paper abstract confirmed via DOI 10.1198/004017001750386279 |
 | Borror et al. (1999): EWMA robust to non-normality | *Journal of Quality Technology* 31(3):309--316 | Yes -- ASU publication record and JQT archive confirm |

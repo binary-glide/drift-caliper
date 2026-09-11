@@ -113,13 +113,42 @@ error in the ``-1-2kb`` term (which would NOT cancel correctly in this
 limit) fails this test even though it might still coincidentally pass the
 SAS-anchored check above for a different (k, h) pair.
 
+## Primary source obtained 2026-09-11 -- the citation chain is now closed
+
+**The `b = h + 1.166` relation and the two-sided combination rule are now
+verified directly against Montgomery (2013), *Introduction to Statistical
+Quality Control*, 7th ed., Wiley, page 423**, which states Siegmund's
+approximation in full:
+
+    "For a one-sided CUSUM (that is, C+_i or C-_i) with parameters h and k,
+     Siegmund's approximation is (9.6) [...] where Delta = d* - k for the
+     upper one-sided CUSUM C+_i, Delta = -d* - k for the lower one-sided
+     CUSUM C-_i, **b = h + 1.166**, and d* = (mu_1 - mu_0)/sigma. If
+     Delta = 0, one can use ARL = b^2."
+
+Equation 9.7 gives the two-sided combination as ``1/ARL = 1/ARL+ + 1/ARL-``.
+
+Montgomery's own worked example on the same page --  k = 1/2, h = 5, giving
+b = 6.166, a one-sided ARL0 of 938.2 and a two-sided ARL0 of 469.1 against a
+true value of 465 from his Table 9.3 -- is asserted by
+``test_reproduces_montgomery_worked_example`` below. **That is a published
+numerical result this implementation had never been checked against**, and it
+is a stronger oracle than anything that preceded it here, because the values
+were computed by someone else from an independently stated formula.
+
+The verification chain that follows was built *before* the primary source was
+available. It is kept in full rather than deleted: each link is still a real
+check, they caught real errors, and an implementation agreeing with four
+mutually independent methods is better evidenced than one agreeing with a
+single quotation.
+
 ## Fourth link: Monte Carlo, which shares no assumptions with the closed form
 
-Siegmund's approximation reached this file through two hops of secondary
-sources (the primary is paywalled). A citation chain is thin evidence for the
-numbers a control chart is built on, so both the formula **and** the two-sided
-combination rule were checked against a direct simulation of the CUSUM
-recursion -- no shared algebra, just counting steps to the first boundary
+Before the primary source was obtained, Siegmund's approximation reached this
+file through two hops of secondary sources. A citation chain is thin evidence
+for the numbers a control chart is built on, so both the formula **and** the
+two-sided combination rule were checked against a direct simulation of the
+CUSUM recursion -- no shared algebra, just counting steps to the first boundary
 crossing with x ~ N(0, 1):
 
     k     h     Siegmund two-sided   Monte Carlo (200k runs)   ratio
@@ -487,3 +516,62 @@ def test_two_sided_needs_a_wider_decision_interval_than_one_sided() -> None:
 
     # Assert
     assert two_sided.decision_interval > one_sided.decision_interval
+
+
+# --- Primary source: Montgomery (2013) 7th ed., p. 423 ------------------------
+
+# Montgomery's own worked example, read from the page rather than recalled:
+# k = 1/2 and h = 5 give b = h + 1.166 = 6.166, a one-sided ARL0 of 938.2, and
+# a two-sided ARL0 of 469.1 -- which he notes is "very close to the true ARL0
+# value of 465 shown in Table 9.3".
+#
+# Deliberately hand-typed rather than imported from `cusum_fitting`: these are
+# an external claim about what the published approximation yields, and a test
+# that sourced them from the implementation would pass for any value. Same
+# reasoning as the audit-summary labels in BIN-66.
+_MONTGOMERY_K = 0.5
+_MONTGOMERY_H = 5.0
+_MONTGOMERY_ONE_SIDED_ARL0 = 938.2
+_MONTGOMERY_TWO_SIDED_ARL0 = 469.1
+_MONTGOMERY_TABLE_9_3_EXACT = 465.0
+
+
+def test_reproduces_montgomery_worked_example() -> None:
+    """`_cusum_arl0` reproduces Montgomery (2013) 7th ed. p. 423 exactly.
+
+    The strongest oracle in this module: a published numerical result,
+    computed by someone else from an independently stated formula, for a
+    design point this implementation was never tuned against.
+
+    Agreement to four significant figures means `_SIEGMUND_CORRECTION`, the
+    exponent, the `-1` term and the two-sided reciprocal-sum rule are each
+    right -- a sign error or a wrong constant in any of them moves this
+    number visibly.
+    """
+    # Act
+    one_sided = _cusum_arl0(_MONTGOMERY_K, _MONTGOMERY_H)
+    two_sided = _combine_two_sided_arl0(one_sided, one_sided)
+
+    # Assert
+    assert one_sided == pytest.approx(_MONTGOMERY_ONE_SIDED_ARL0, rel=1e-4)
+    assert two_sided == pytest.approx(_MONTGOMERY_TWO_SIDED_ARL0, rel=1e-4)
+
+
+def test_siegmund_approximation_sits_close_to_montgomery_table_9_3() -> None:
+    """The approximation lands near the exact ARL0, and slightly above it.
+
+    Montgomery reports 469.1 from the approximation against 465 exact. Pinning
+    the *direction* and rough size of that gap guards the approximation's known
+    behaviour: it is derived from a Brownian-motion limit and mildly
+    overestimates ARL0 here. A change that made it match 465 exactly would mean
+    the implementation had stopped being Siegmund's approximation.
+    """
+    # Act
+    two_sided = _combine_two_sided_arl0(
+        _cusum_arl0(_MONTGOMERY_K, _MONTGOMERY_H),
+        _cusum_arl0(_MONTGOMERY_K, _MONTGOMERY_H),
+    )
+
+    # Assert
+    assert two_sided > _MONTGOMERY_TABLE_9_3_EXACT
+    assert two_sided == pytest.approx(_MONTGOMERY_TABLE_9_3_EXACT, rel=0.02)

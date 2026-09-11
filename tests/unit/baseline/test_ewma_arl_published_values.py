@@ -21,10 +21,37 @@ in-control entry (shift = 0) for each pair, which is exactly what
 ``FittedEWMA.achieved_arl`` reports when ``target_arl`` is the in-control
 value the engineer requested.
 
-## Verification chain -- record the gap honestly
+## Primary source obtained 2026-09-11 -- the gap is closed
 
-Technometrics 32(1) (1990) is paywalled and was not accessible directly in
-this environment (the same access gap ADR-004's amendment already recorded
+**Table 3 has been read directly** from Lucas & Saccucci (1990),
+*Technometrics* **32**(1), page 5, and every ``L`` this module asserts is
+confirmed against it. The full published row:
+
+    L   = 3.090  3.087  3.071  3.054  3.023  2.998  2.962  2.814  2.615  2.437
+    lam =  1.00    .75    .50    .40    .30    .25    .20    .10    .05    .03
+
+with the table's own footnote stating the calibration these answer to:
+*"L values are based on zero-state in-control ARL = 500."* That is exactly
+the claim this module makes, now quoted rather than inferred.
+
+``test_calibration_recovers_the_published_limit_multiplier_for_arl0_500``
+is parametrised over **all ten** entries. It previously pinned only the
+first and last, because the table was not held; two endpoints could in
+principle be hit by a chain that was wrong in between, and ten cannot.
+
+Table 3 also settles a question this project raised separately (BIN-113):
+at ARL0 = 500 its steady-state row reads 500, 500, 499, 498, 497, 496, 496,
+492, 487, 480 against a zero-state 500 throughout -- so steady-state is
+**lower**, as predicted, by 0% at lambda = 1.00 rising to **4% at
+lambda = 0.03**. The paper's own text puts the spread at "less than 2% for
+an in-control ARL of 5,000 to approximately 10% for an in-control ARL of
+100", and concludes: *"For most practical purposes, the difference between
+zero-state and steady-state ARL's is unimportant and either one suffices."*
+
+## The chain that was built before the source arrived -- kept, not deleted
+
+Technometrics 32(1) (1990) was paywalled and not accessible in the session
+that wrote this module (the same access gap ADR-004's amendment already recorded
 for Montgomery Chapter 9 -- see its "Citation status" section). Table 3's
 values were instead verified via the CRAN package **`spc`: Statistical
 Process Control -- Calculation of ARL and Other Control Chart Performance
@@ -245,7 +272,21 @@ def _implied_limit_multiplier(result: FittedEWMA) -> float:
 @pytest.mark.parametrize(
     ("smoothing_param", "published_multiplier"),
     [
-        pytest.param(0.5, 3.071, id="lambda-0.5-L-3.071"),
+        # The complete L row of Table 3, read from the paper (Technometrics
+        # 32(1), p. 5) on 2026-09-11. Previously only the first and last
+        # entries were pinned, because the table itself was not held.
+        #
+        # Its footnote states the calibration these are the answer to:
+        # "L values are based on zero-state in-control ARL = 500."
+        pytest.param(1.00, 3.090, id="lambda-1.00-L-3.090"),
+        pytest.param(0.75, 3.087, id="lambda-0.75-L-3.087"),
+        pytest.param(0.50, 3.071, id="lambda-0.50-L-3.071"),
+        pytest.param(0.40, 3.054, id="lambda-0.40-L-3.054"),
+        pytest.param(0.30, 3.023, id="lambda-0.30-L-3.023"),
+        pytest.param(0.25, 2.998, id="lambda-0.25-L-2.998"),
+        pytest.param(0.20, 2.962, id="lambda-0.20-L-2.962"),
+        pytest.param(0.10, 2.814, id="lambda-0.10-L-2.814"),
+        pytest.param(0.05, 2.615, id="lambda-0.05-L-2.615"),
         pytest.param(0.03, 2.437, id="lambda-0.03-L-2.437"),
     ],
 )
