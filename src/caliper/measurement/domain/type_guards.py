@@ -38,11 +38,23 @@ consistently rather than revisiting it per-ticket.
 saying so is better than letting a blanket claim cover a weak case**
 (raised by ``code-reviewer`` on ``BIN-104``, which diffed them):
 
-- ``require_real_number`` **genuinely differs** from ``parameter_guards``'
-  version. This one *accepts* ``bool`` and returns the value unchanged;
-  that one *rejects* ``bool`` and narrows to ``float``, because a boolean
-  ``target_arl`` silently means an ARL0 of 1 (``BIN-131``). Two contexts,
-  two real rules -- duplication is correct here, not incidental.
+- ``require_real_number`` **used to genuinely differ** from
+  ``parameter_guards``' version -- this one *accepted* ``bool``, that one
+  *rejected* it. **BIN-132 closed that gap**: a boolean ``score`` silently
+  became ``1.0``/``0.0`` and entered a baseline as Bernoulli data, which is
+  fitted with normal-theory limits that do not hold for it -- the same
+  class of defect ``BIN-131`` found on the fitting side for a boolean
+  ``target_arl``. Both helpers now reject ``bool`` before the
+  ``numbers.Real`` check (checked first deliberately: ``bool`` subclasses
+  ``int``, so ``isinstance(True, numbers.Real)`` is ``True`` and a
+  ``numbers.Real``-only check would silently accept it). What still
+  differs is shape, not the bool rule: this one returns the value
+  *unchanged* (Pydantic's own core coercion still narrows it afterwards);
+  ``parameter_guards.require_real_number`` narrows to ``float`` itself,
+  because nothing downstream of a fitting parameter performs that
+  coercion. That shape difference, plus the bounded-context boundary
+  argument above, is why this remains its own function rather than an
+  import.
 - ``require_str`` has no counterpart at all.
 - ``require_instance`` **is byte-identical** to ``parameter_guards.require_type``
   apart from its name and one annotation (``object`` vs a ``TypeVar``).
@@ -107,14 +119,24 @@ def require_real_number(value: object, *, parameter: str, constraint: str) -> ob
     """Reject a value that is not a real number before Pydantic's core coercion runs.
 
     Accepts anything that duck-types as a real number -- ``int``, ``float``,
-    ``bool`` (an ``int`` subclass; not excluded here, unlike
-    ``caliper.baseline.domain.parameter_guards.require_real_number`` -- no
-    scenario or business rule in this bounded context treats a boolean
-    score as a distinct hazard the way an ARL0 target does), and every
-    numpy scalar type that registers with :class:`numbers.Real`. Returned
+    and every numpy scalar type that registers with :class:`numbers.Real` --
+    and rejects everything else, ``bool`` included (BIN-132). Returned
     unchanged rather than narrowed to ``float`` -- Pydantic's own core
     coercion (which already accepts every one of these types, verified by
     direct execution) still runs afterwards and performs that narrowing.
+
+    **``bool`` is excluded explicitly, and checked before the
+    ``numbers.Real`` test** -- mirrors
+    ``caliper.baseline.domain.parameter_guards.require_real_number`` (see
+    that function's docstring for why the check order matters: ``bool``
+    subclasses ``int``, so ``isinstance(True, numbers.Real)`` is ``True``,
+    and a ``numbers.Real``-only check would silently accept it). Before
+    BIN-132 this function deliberately accepted ``bool`` -- see the module
+    docstring's "That justification is not equally strong" section for why
+    that was reversed: ``ScoringResult(score=True)`` silently became
+    ``1.0``, and a pass/fail judge's output entering a baseline as ones and
+    zeros gets fitted with normal-theory control limits that do not hold
+    for Bernoulli data.
 
     Parameters
     ----------
@@ -133,8 +155,43 @@ def require_real_number(value: object, *, parameter: str, constraint: str) -> ob
     Raises
     ------
     InvalidParameterError
-        ``value`` is not a :class:`numbers.Real`.
+        ``value`` is a ``bool``, or is not a :class:`numbers.Real`.
     """
+    if isinstance(value, bool):
+        raise InvalidParameterError(
+            f"{parameter} must be a real number, not a bool",
+            context={
+                "parameter": parameter,
+                "constraint": constraint,
+                "kind": "invalid",
+                "provided": value,
+            },
+            recovery_hint=(
+                "A bool score silently becomes 1.0/0.0 and, once enough of "
+                "them accumulate in a baseline, gets fitted with "
+                "normal-theory control limits that do not hold for "
+                "Bernoulli data -- Caliper will not do that silently. "
+                "Aggregate before scoring instead: score each "
+                "NON-OVERLAPPING batch of judgements with that batch's pass "
+                "rate (e.g. one score per 20 judged outputs). Use "
+                "non-overlapping batches, not a rolling window -- "
+                "consecutive rolling values share almost all their "
+                "observations, and the moving-range sigma Caliper fits from "
+                "assumes consecutive observations are independent, so a "
+                "rolling pass-rate reintroduces a variant of the problem "
+                "this rejection exists to prevent. Check the normal "
+                "approximation holds for YOUR pass rate: it needs both "
+                "n*p > 5 and n*(1-p) > 5, so a batch of 20 is only adequate "
+                "for pass rates roughly between 0.25 and 0.75 -- a "
+                "well-behaved agent passing 90% of the time needs a batch "
+                "of about 50, not 20. Cost, honestly: ADR-005's "
+                "100-observation Phase I minimum then means batch_size * "
+                "100 underlying judgements before a baseline exists (2,000 "
+                "at batch 20; 5,000 at batch 50), not 100. If you need "
+                "proper Bernoulli/p-chart support instead of this "
+                "workaround, track BIN-133."
+            ),
+        )
     if not isinstance(value, numbers.Real):
         raise InvalidParameterError(
             f"{parameter} must be a real number",

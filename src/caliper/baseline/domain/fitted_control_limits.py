@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from caliper.baseline.domain.fitting_advisory import FittingAdvisory
+
 
 @runtime_checkable
 class FittedControlLimits(Protocol):
@@ -98,5 +100,18 @@ class FittedControlLimits(Protocol):
         """Identifier for the method that produced the limits.
 
         E.g. ``"markov_chain"``.
+        """
+        ...
+
+    @property
+    def advisories(self) -> tuple[FittingAdvisory, ...]:
+        """Non-raising disclosures about this fit (ADR-011).
+
+        Empty when there is nothing to disclose -- e.g. a
+        ``target_arl`` inside ADR-011's flagged tier (``[100, 370)``)
+        attaches one. A plain, empty-when-clean tuple, not a truthiness
+        trap (BIN-110): ``if artefact.advisories:`` means exactly what it
+        reads as, unlike ``bool(artefact)`` itself, which every concrete
+        ``Fitted*`` type still forbids outright.
         """
         ...

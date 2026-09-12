@@ -18,21 +18,38 @@ case: they are validation floors and ceilings an engineer supplies a value
 *within*, never a value they assign, so knowing the exact number buys them
 nothing an `InvalidParameterError`'s `constraint` message does not already
 say at the moment they actually need it.
+
+**Extended under ADR-011/BIN-131.** `MIN_MEANINGFUL_ARL` was renamed to
+`MIN_COHERENT_ARL` (same file, `ewma_fitting.py`; the `E[N] >= 1`
+derivation is unchanged, only the name), and two new bounds were
+introduced in `parameter_guards.py`: `MIN_TARGET_ARL` (the hard floor,
+100) and `VERIFIED_ARL_FLOOR` (the advisory line, 370). All three follow
+the identical ruling above -- this list keeps **both** the old name
+(`MIN_MEANINGFUL_ARL`, proving no back-compat alias was quietly left
+behind under the retired name) and the new one (`MIN_COHERENT_ARL`), plus
+the two additions, so this test proves the same thing it always did for a
+larger set of names rather than silently narrowing its own coverage.
 """
 
 from __future__ import annotations
 
 import caliper.baseline as baseline_pkg
 
-# The 6 internal validation bounds BIN-110 removes from the public surface
-# entirely (not just from __all__ -- see module docstring).
+# The internal validation bounds removed from the public surface entirely
+# (not just from __all__ -- see module docstring). 6 from BIN-110, plus 3
+# from ADR-011/BIN-131 (MIN_COHERENT_ARL, MIN_TARGET_ARL,
+# VERIFIED_ARL_FLOOR) -- MIN_MEANINGFUL_ARL is kept too, as the retired name
+# that must also never resurface.
 _REMOVED_VALIDATION_BOUNDS = (
     "MAX_MEANINGFUL_ARL",
     "MAX_REFERENCE_VALUE",
     "MAX_SMOOTHING_PARAM",
+    "MIN_COHERENT_ARL",
     "MIN_MEANINGFUL_ARL",
     "MIN_REFERENCE_VALUE",
     "MIN_SMOOTHING_PARAM",
+    "MIN_TARGET_ARL",
+    "VERIFIED_ARL_FLOOR",
 )
 
 # The 4 DEFAULT_* constants BIN-110 keeps -- see the module docstring's
@@ -54,6 +71,10 @@ _RETAINED_DOMAIN_EXPORTS = (
     "FittedCUSUM",
     "FittedEWMA",
     "FittedShewhart",
+    # Added under ADR-011/BIN-131 -- the non-raising advisory attached to a
+    # fitted artefact when target_arl is inside the flagged tier. Same
+    # export shape as DataQualityConcern above, added rather than retained.
+    "FittingAdvisory",
     "SufficiencyResult",
     "fit_cusum",
     "fit_ewma",

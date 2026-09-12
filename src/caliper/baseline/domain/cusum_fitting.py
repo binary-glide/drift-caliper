@@ -91,9 +91,15 @@ from collections.abc import Sequence
 from scipy.optimize import brentq
 
 from caliper.baseline.domain.baseline import Baseline
-from caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL, MIN_MEANINGFUL_ARL
+from caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL
 from caliper.baseline.domain.fitted_cusum import FittedCUSUM
-from caliper.baseline.domain.parameter_guards import require_real_number, require_type
+from caliper.baseline.domain.fitting_advisory import FittingAdvisory
+from caliper.baseline.domain.parameter_guards import (
+    MIN_TARGET_ARL,
+    classify_target_arl,
+    require_real_number,
+    require_type,
+)
 from caliper.baseline.domain.spc_numerics import (
     _moving_range_sigma,
     _overflow_safe_mean,
@@ -142,6 +148,12 @@ from caliper.errors import (
 # far beyond any shift a bounded [0, 1] scoring baseline could exhibit --
 # comfortably generous headroom above the 0.25-1.0 range the sources above
 # treat as the practically useful band, without being unbounded.
+#
+# At k=MAX_REFERENCE_VALUE the smallest attainable ARL0 (~1158.3 two-sided,
+# see _min_attainable_arl0) sits well above ADR-011's MIN_TARGET_ARL policy
+# floor (100) -- BIN-117's attainability check and ADR-011's policy floor
+# are independent bounds, and the attainability floor is the one that binds
+# here, not the policy floor.
 MIN_REFERENCE_VALUE = 0.01
 MAX_REFERENCE_VALUE = 5.0
 
@@ -187,10 +199,11 @@ _SIEGMUND_CORRECTION = 1.166
 # keeps the bracket well away from any degenerate edge, and the upper edge
 # is expanded geometrically (see _calibrate_decision_interval) up to this
 # ceiling, which comfortably exceeds any h a target_arl within
-# [MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL] requires in practice -- verified
-# during research across the full valid (reference_value, target_arl) grid,
-# including both boundary corners, without the geometric expansion coming
-# close to this ceiling or to a floating-point overflow in `math.exp`.
+# [MIN_TARGET_ARL, MAX_MEANINGFUL_ARL] (ADR-011) requires in practice --
+# verified during research across the full valid (reference_value,
+# target_arl) grid, including both boundary corners, without the geometric
+# expansion coming close to this ceiling or to a floating-point overflow in
+# `math.exp`.
 _MIN_DECISION_INTERVAL = 1e-6
 _MAX_DECISION_INTERVAL = 1e5
 
@@ -204,17 +217,20 @@ _ZERO_VARIANCE_REASON = "zero_variance"
 # --- Parameter validation ----------------------------------------------------
 
 
-def _require_target_arl(target_arl: float | None) -> float:
-    """Validate ``target_arl`` and return it narrowed to ``float``.
+def _require_target_arl(
+    target_arl: float | None,
+) -> tuple[float, FittingAdvisory | None]:
+    """Validate ``target_arl``, returning it narrowed to ``float`` plus any advisory.
 
     Mirrors ``ewma_fitting._require_target_arl`` -- ``target_arl`` is
     optional in the Python signature but required by Caliper's validation
     (ADR-004 section 5): omitting it is a classifiable ``CaliperError``,
-    never Python's ``TypeError``.
+    never Python's ``TypeError``. The range check and ADR-011's
+    flagged-tier disclosure are delegated to
+    ``parameter_guards.classify_target_arl``, shared verbatim with
+    ``ewma_fitting``/``shewhart_fitting`` rather than tripled.
     """
-    constraint = (
-        f"must be a finite float in [{MIN_MEANINGFUL_ARL}, {MAX_MEANINGFUL_ARL}]"
-    )
+    constraint = f"must be a finite float in [{MIN_TARGET_ARL}, {MAX_MEANINGFUL_ARL}]"
     if target_arl is None:
         raise InvalidParameterError(
             "target_arl is required to fit CUSUM control limits",
@@ -237,24 +253,15 @@ def _require_target_arl(target_arl: float | None) -> float:
     numeric_target_arl = require_real_number(
         target_arl, parameter="target_arl", constraint=constraint
     )
-    if not math.isfinite(numeric_target_arl) or not (
-        MIN_MEANINGFUL_ARL <= numeric_target_arl <= MAX_MEANINGFUL_ARL
-    ):
-        raise InvalidParameterError(
-            "target_arl is outside the meaningful range",
-            context={
-                "parameter": "target_arl",
-                "constraint": constraint,
-                "kind": "invalid",
-                "provided": target_arl,
-            },
-            recovery_hint=(
-                "Choose a target_arl within "
-                f"[{MIN_MEANINGFUL_ARL}, {MAX_MEANINGFUL_ARL}], e.g. 370 or "
-                "500 -- common in-control ARL0 targets in the SPC literature."
-            ),
-        )
-    return numeric_target_arl
+    # ADR-011: refuses below MIN_TARGET_ARL (100) or above MAX_MEANINGFUL_ARL;
+    # returns a FittingAdvisory when inside [MIN_TARGET_ARL, VERIFIED_ARL_FLOOR).
+    # BIN-117's own attainability check runs separately, after this --
+    # a different bound that can sit far above this one (see
+    # _min_attainable_arl0/_require_attainable_target_arl below).
+    advisory = classify_target_arl(
+        numeric_target_arl, max_target_arl=MAX_MEANINGFUL_ARL
+    )
+    return numeric_target_arl, advisory
 
 
 def _validate_reference_value(reference_value: float | None) -> float | None:
@@ -437,9 +444,12 @@ def _require_attainable_target_arl(
     Distinct from ``_require_target_arl``'s ordinary out-of-range check:
     this constraint depends on *two* other parameters, not one, so it
     cannot be expressed as a fixed bound on ``target_arl`` alone --
-    ``MIN_MEANINGFUL_ARL`` is a library-wide mathematical floor
-    (``E[N] >= 1``), not a per-``(reference_value, direction)`` guarantee
-    that every meaningful ARL0 is reachable.
+    ``MIN_TARGET_ARL`` (ADR-011) is a library-wide *policy* floor (the
+    smallest ARL0 the field's own literature tabulates at all), not a
+    per-``(reference_value, direction)`` guarantee that every ARL0 at or
+    above it is reachable. This function's floor can sit far *above*
+    ``MIN_TARGET_ARL`` (e.g. ~1158.3 at ``reference_value=5.0``,
+    two-sided) -- the two checks are independent and both are needed.
 
     Uses the identical floor (``_min_attainable_arl0``, evaluated at
     ``h = _MIN_DECISION_INTERVAL``) that ``_calibrate_decision_interval``
@@ -592,15 +602,16 @@ def fit_cusum(
     Returns
     -------
     FittedCUSUM
-        The fitted artefact.
+        The fitted artefact. Carries a non-empty ``advisories`` when
+        ``target_arl`` is inside ADR-011's flagged tier (``[100, 370)``).
 
     Raises
     ------
     InvalidParameterError
-        ``target_arl`` is missing or outside ``[MIN_MEANINGFUL_ARL,
-        MAX_MEANINGFUL_ARL]``; ``reference_value`` is supplied but outside
-        ``[MIN_REFERENCE_VALUE, MAX_REFERENCE_VALUE]``; ``direction`` is
-        supplied but not in ``_VALID_DIRECTIONS``; or ``target_arl`` is
+        ``target_arl`` is missing or outside ``[MIN_TARGET_ARL,
+        MAX_MEANINGFUL_ARL]`` (ADR-011); ``reference_value`` is supplied but
+        outside ``[MIN_REFERENCE_VALUE, MAX_REFERENCE_VALUE]``; ``direction``
+        is supplied but not in ``_VALID_DIRECTIONS``; or ``target_arl`` is
         below the minimum ARL0 attainable at the given
         ``reference_value``/``direction`` -- no non-negative decision
         interval can reach it (BIN-117).
@@ -624,7 +635,7 @@ def fit_cusum(
     baseline = require_type(
         baseline, Baseline, parameter="baseline", type_name="Baseline"
     )
-    validated_target_arl = _require_target_arl(target_arl)
+    validated_target_arl, target_arl_advisory = _require_target_arl(target_arl)
     validated_reference_value = _validate_reference_value(reference_value)
     effective_reference_value = (
         validated_reference_value
@@ -713,6 +724,7 @@ def fit_cusum(
         decision_interval=decision_interval,
         target_value=baseline_mean,
         direction=effective_direction,
+        advisories=(target_arl_advisory,) if target_arl_advisory is not None else (),
     )
 
 
@@ -721,7 +733,7 @@ __all__ = [
     "DEFAULT_REFERENCE_VALUE",
     "MAX_MEANINGFUL_ARL",
     "MAX_REFERENCE_VALUE",
-    "MIN_MEANINGFUL_ARL",
     "MIN_REFERENCE_VALUE",
+    "MIN_TARGET_ARL",
     "fit_cusum",
 ]

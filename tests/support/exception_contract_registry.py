@@ -68,6 +68,7 @@ from typing import Any
 
 from caliper.baseline import (
     Baseline,
+    FittingAdvisory,
     compare_provenance,
     fit_cusum,
     fit_ewma,
@@ -207,6 +208,7 @@ class _ThirdPartyArtefact:
     requested_arl = 370.0
     achieved_arl = 370.0
     calibration_method = "third_party"
+    advisories: tuple[FittingAdvisory, ...] = ()
 
 
 class _RaisingProvenanceArtefact:
@@ -719,6 +721,14 @@ EXCLUDED: tuple[ExcludedEntryPoint, ...] = (
         "A pure output value object produced only internally by "
         "Baseline.check_sufficiency() -- never constructed by an engineer "
         "with caller-supplied input. No validators beyond field presence.",
+    ),
+    ExcludedEntryPoint(
+        "FittingAdvisory",
+        "A pure output value object produced only internally by "
+        "fit_ewma()/fit_cusum()/fit_shewhart() (ADR-011) when target_arl is "
+        "inside the flagged tier -- never constructed by an engineer with "
+        "caller-supplied input. No validators beyond field presence, "
+        "identical reasoning to DataQualityConcern above.",
     ),
     ExcludedEntryPoint(
         "DeliveryFailure",

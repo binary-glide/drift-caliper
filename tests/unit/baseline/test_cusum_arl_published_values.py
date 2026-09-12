@@ -231,6 +231,7 @@ import pytest
 
 from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_cusum
 from caliper.baseline.domain.cusum_fitting import (
+    _calibrate_decision_interval,
     _combine_two_sided_arl0,
     _cusum_arl0,
 )
@@ -387,12 +388,12 @@ def test_two_sided_calibration_matches_the_one_sided_design_at_half_target() -> 
     """A two-sided fit at half SAS's ARL0 reproduces SAS's one-sided decision interval.
 
     Per Montgomery's Eq. 9.7 (module docstring, Route 1): for a symmetric
-    two-sided CUSUM, ``ARL0_two_sided = ARL0_one_sided_arm / 2``. Fitting
-    with ``direction="two_sided"`` and ``target_arl = SAS_ARL0 / 2`` should
-    therefore produce the *same* decision interval as the pure one-sided fit
-    above, at the *same* reference value -- because each arm individually
-    must still achieve the one-sided ARL0 of 117.6 for the combined,
-    two-sided figure to be 58.8.
+    two-sided CUSUM, ``ARL0_two_sided = ARL0_one_sided_arm / 2``. Calibrating
+    with ``direction="two_sided"`` and ``target_arl = SAS_ARL0 / 2`` (58.8)
+    should therefore produce the *same* decision interval as the pure
+    one-sided fit above, at the *same* reference value -- because each arm
+    individually must still achieve the one-sided ARL0 of 117.6 for the
+    combined, two-sided figure to be 58.8.
 
     Checked against ``_published_cusum_arl0`` -- this file's own,
     independently-written re-derivation of Siegmund's formula, never the
@@ -403,24 +404,35 @@ def test_two_sided_calibration_matches_the_one_sided_design_at_half_target() -> 
     (``cusum_fitting.py``'s module docstring) -- if that reading is wrong,
     this specific test is the one to revisit; the one-sided tests above are
     unaffected either way.
+
+    **Calls ``_calibrate_decision_interval`` directly, not ``fit_cusum``
+    (ADR-011/BIN-131).** SAS's published anchor (58.8, half of 117.6) is
+    below ``MIN_TARGET_ARL`` (100) -- ADR-011's hard floor at the public
+    ``fit_cusum`` boundary, a caller-facing policy about which
+    ``target_arl`` values Caliper will *calibrate for a real engineer*, not
+    a property of the Siegmund two-sided combination formula this test
+    verifies. That formula holds at every ``target_arl``, including ones
+    the public API now refuses on policy grounds; this file already tests
+    other internal calibration functions directly (``_cusum_arl0``,
+    ``_combine_two_sided_arl0``, imported above) for exactly this reason --
+    they are pure maths, orthogonal to ADR-011's business rule.
+    ``test_calibration_recovers_the_sas_decision_interval_for_a_known_design_point``
+    above still goes through ``fit_cusum`` unchanged, since its own
+    ``target_arl`` (117.6) clears the floor.
     """
     # Arrange
-    baseline = _sufficient_baseline()
     two_sided_target_arl = _SAS_ARL0 / 2.0
 
     # Act
-    result = fit_cusum(
-        baseline,
-        target_arl=two_sided_target_arl,
-        reference_value=_SAS_REFERENCE_VALUE,
-        direction="two_sided",
+    decision_interval, _achieved_arl = _calibrate_decision_interval(
+        _SAS_REFERENCE_VALUE, two_sided_target_arl, "two_sided"
     )
     implied_one_sided_arl0 = _published_cusum_arl0(
-        result.reference_value, result.decision_interval
+        _SAS_REFERENCE_VALUE, decision_interval
     )
 
     # Assert
-    assert result.decision_interval == pytest.approx(_SAS_DECISION_INTERVAL, rel=0.01)
+    assert decision_interval == pytest.approx(_SAS_DECISION_INTERVAL, rel=0.01)
     _assert_close_to_published(implied_one_sided_arl0, _SAS_ARL0)
 
 

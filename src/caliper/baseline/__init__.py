@@ -11,8 +11,9 @@ context's types, re-exported here so every consumer imports from
 
 ``MIN_*``/``MAX_*`` validation bounds (``cusum_fitting``'s
 ``MIN_REFERENCE_VALUE``/``MAX_REFERENCE_VALUE``, ``ewma_fitting``'s
-``MIN_SMOOTHING_PARAM``/``MAX_SMOOTHING_PARAM``/``MIN_MEANINGFUL_ARL``/
-``MAX_MEANINGFUL_ARL``) are deliberately NOT re-exported here (BIN-110 P2).
+``MIN_SMOOTHING_PARAM``/``MAX_SMOOTHING_PARAM``/``MIN_COHERENT_ARL``/
+``MAX_MEANINGFUL_ARL``, ``parameter_guards``'s ``MIN_TARGET_ARL``/
+``VERIFIED_ARL_FLOOR``) are deliberately NOT re-exported here (BIN-110 P2).
 They are internal validation floors and ceilings an engineer supplies a
 value *within*, never a value they assign -- noise on autocomplete that an
 ``InvalidParameterError``'s ``constraint`` message already communicates at
@@ -39,6 +40,7 @@ from caliper.baseline.domain.fitted_control_limits import FittedControlLimits
 from caliper.baseline.domain.fitted_cusum import FittedCUSUM
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
 from caliper.baseline.domain.fitted_shewhart import FittedShewhart
+from caliper.baseline.domain.fitting_advisory import FittingAdvisory
 from caliper.baseline.domain.shewhart_fitting import fit_shewhart
 from caliper.baseline.domain.sufficiency_result import SufficiencyResult
 
@@ -53,6 +55,7 @@ __all__ = [
     "FittedControlLimits",
     "FittedEWMA",
     "FittedShewhart",
+    "FittingAdvisory",
     "SufficiencyResult",
     "compare_provenance",
     "fit_cusum",

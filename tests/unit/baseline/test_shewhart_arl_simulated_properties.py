@@ -55,7 +55,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_shewhart
-from caliper.baseline.domain.ewma_fitting import MIN_MEANINGFUL_ARL
+from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
 from tests.factories import ProvenanceFactory
 from tests.support.baseline_strategies import (
     baseline_from_scores,
@@ -140,7 +140,7 @@ _MONOTONICITY_ARL_GAP_MAX = 1_000.0
 @given(
     scores=baseline_scores_strategy(),
     arl_low=st.floats(
-        min_value=MIN_MEANINGFUL_ARL,
+        min_value=MIN_TARGET_ARL,
         max_value=_MONOTONICITY_ARL_LOW_MAX,
         allow_nan=False,
     ),
@@ -154,6 +154,8 @@ def test_wider_target_arl_never_narrows_the_shewhart_boundary(
     """``sigma_multiplier`` (hence ``ucl - lcl``) is non-decreasing in ``target_arl``.
 
     Mirrors the EWMA/CUSUM monotonicity tests above; see their docstrings.
+    Rebounded to ``MIN_TARGET_ARL`` under ADR-011 -- ``MIN_MEANINGFUL_ARL``
+    (now ``MIN_COHERENT_ARL``) is no longer a legal ``target_arl``.
     """
     # Arrange
     baseline = baseline_from_scores(scores)

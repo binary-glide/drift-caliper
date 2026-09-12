@@ -57,6 +57,7 @@ from caliper.baseline.domain.cusum_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_REFERENCE_VALUE,
     MIN_REFERENCE_VALUE,
+    MIN_TARGET_ARL,
     _min_attainable_arl0,
 )
 from caliper.errors import (
@@ -103,8 +104,14 @@ _REFERENCE_VALUE_BOUNDARIES = {
 # `_MIN_DECISION_INTERVAL`. Mirrors
 # `test_fits_successfully_with_reference_value_at_the_valid_range_boundary`'s
 # identical correction in `tests/unit/baseline/test_cusum_fitting.py`.
-_SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE = (
-    _min_attainable_arl0(DEFAULT_REFERENCE_VALUE, DEFAULT_DIRECTION) * 1.05
+#
+# ADR-011/BIN-131: a second, independent floor now applies -- MIN_TARGET_ARL
+# (100). At DEFAULT_REFERENCE_VALUE the attainability floor times 1.05 is
+# ~1.095, far below MIN_TARGET_ARL, so MIN_TARGET_ARL is the one that
+# actually binds; `max()` keeps this legal regardless of which floor binds.
+_SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE = max(
+    _min_attainable_arl0(DEFAULT_REFERENCE_VALUE, DEFAULT_DIRECTION) * 1.05,
+    MIN_TARGET_ARL,
 )
 _TARGET_ARL_BOUNDARIES = {
     "the smallest meaningful value": (

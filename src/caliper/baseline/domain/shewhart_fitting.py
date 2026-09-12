@@ -55,15 +55,20 @@ external citation.
 
 from __future__ import annotations
 
-import math
 import statistics
 from collections.abc import Sequence
 from statistics import NormalDist
 
 from caliper.baseline.domain.baseline import Baseline
-from caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL, MIN_MEANINGFUL_ARL
+from caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL
 from caliper.baseline.domain.fitted_shewhart import FittedShewhart
-from caliper.baseline.domain.parameter_guards import require_real_number, require_type
+from caliper.baseline.domain.fitting_advisory import FittingAdvisory
+from caliper.baseline.domain.parameter_guards import (
+    MIN_TARGET_ARL,
+    classify_target_arl,
+    require_real_number,
+    require_type,
+)
 from caliper.baseline.domain.spc_numerics import (
     _moving_range_sigma,
     _overflow_safe_mean,
@@ -89,19 +94,22 @@ _ZERO_VARIANCE_REASON = "zero_variance"
 # --- Parameter validation ----------------------------------------------------
 
 
-def _require_target_arl(target_arl: float | None) -> float:
-    """Validate ``target_arl`` and return it narrowed to ``float``.
+def _require_target_arl(
+    target_arl: float | None,
+) -> tuple[float, FittingAdvisory | None]:
+    """Validate ``target_arl``, returning it narrowed to ``float`` plus any advisory.
 
     Mirrors ``ewma_fitting._require_target_arl``/``cusum_fitting._require_target_arl``
     -- ``target_arl`` is optional in the Python signature but required by
     Caliper's validation (ADR-004 section 5, BIN-95 A3): omitting it is a
     classifiable ``CaliperError``, never Python's ``TypeError``. Unlike its
     siblings, this is the *only* engineer-specified parameter ``fit_shewhart``
-    has -- there is no second tuning parameter to validate.
+    has -- there is no second tuning parameter to validate. The range check
+    and ADR-011's flagged-tier disclosure are delegated to
+    ``parameter_guards.classify_target_arl``, shared verbatim with
+    ``ewma_fitting``/``cusum_fitting`` rather than tripled.
     """
-    constraint = (
-        f"must be a finite float in [{MIN_MEANINGFUL_ARL}, {MAX_MEANINGFUL_ARL}]"
-    )
+    constraint = f"must be a finite float in [{MIN_TARGET_ARL}, {MAX_MEANINGFUL_ARL}]"
     if target_arl is None:
         raise InvalidParameterError(
             "target_arl is required to fit Shewhart I-chart control limits",
@@ -124,24 +132,18 @@ def _require_target_arl(target_arl: float | None) -> float:
     numeric_target_arl = require_real_number(
         target_arl, parameter="target_arl", constraint=constraint
     )
-    if not math.isfinite(numeric_target_arl) or not (
-        MIN_MEANINGFUL_ARL <= numeric_target_arl <= MAX_MEANINGFUL_ARL
-    ):
-        raise InvalidParameterError(
-            "target_arl is outside the meaningful range",
-            context={
-                "parameter": "target_arl",
-                "constraint": constraint,
-                "kind": "invalid",
-                "provided": target_arl,
-            },
-            recovery_hint=(
-                "Choose a target_arl within "
-                f"[{MIN_MEANINGFUL_ARL}, {MAX_MEANINGFUL_ARL}], e.g. 370 or "
-                "500 -- common in-control ARL0 targets in the SPC literature."
-            ),
-        )
-    return numeric_target_arl
+    # ADR-011: refuses below MIN_TARGET_ARL (100) or above MAX_MEANINGFUL_ARL;
+    # returns a FittingAdvisory when inside [MIN_TARGET_ARL, VERIFIED_ARL_FLOOR).
+    # This also closes the pathological case ADR-011's Context section
+    # opens with: target_arl=1.0 used to fit "successfully" here (sigma_multiplier
+    # collapses to exactly 0.0 at that point -- see module docstring) and
+    # alarm on nearly every observation. That degenerate point is still
+    # mathematically real (_shewhart_sigma_multiplier(1.0) == 0.0), it is
+    # simply no longer reachable through this public target_arl parameter.
+    advisory = classify_target_arl(
+        numeric_target_arl, max_target_arl=MAX_MEANINGFUL_ARL
+    )
+    return numeric_target_arl, advisory
 
 
 # --- Baseline statistics ------------------------------------------------------
@@ -206,13 +208,14 @@ def fit_shewhart(
     Returns
     -------
     FittedShewhart
-        The fitted artefact.
+        The fitted artefact. Carries a non-empty ``advisories`` when
+        ``target_arl`` is inside ADR-011's flagged tier (``[100, 370)``).
 
     Raises
     ------
     InvalidParameterError
-        ``target_arl`` is missing or outside ``[MIN_MEANINGFUL_ARL,
-        MAX_MEANINGFUL_ARL]``.
+        ``target_arl`` is missing or outside ``[MIN_TARGET_ARL,
+        MAX_MEANINGFUL_ARL]`` (ADR-011).
     InsufficientBaselineError
         ``baseline`` does not meet the sufficiency threshold (BIN-95
         A1/BR-1).
@@ -226,7 +229,7 @@ def fit_shewhart(
     baseline = require_type(
         baseline, Baseline, parameter="baseline", type_name="Baseline"
     )
-    validated_target_arl = _require_target_arl(target_arl)
+    validated_target_arl, target_arl_advisory = _require_target_arl(target_arl)
 
     sufficiency = baseline.check_sufficiency()
     if not sufficiency.is_sufficient:
@@ -293,10 +296,11 @@ def fit_shewhart(
         achieved_arl=achieved_arl,
         calibration_method=_CALIBRATION_METHOD,
         sigma_multiplier=sigma_multiplier,
+        advisories=(target_arl_advisory,) if target_arl_advisory is not None else (),
         ucl=baseline_mean + half_width,
         lcl=baseline_mean - half_width,
         cl=baseline_mean,
     )
 
 
-__all__ = ["MAX_MEANINGFUL_ARL", "MIN_MEANINGFUL_ARL", "fit_shewhart"]
+__all__ = ["MAX_MEANINGFUL_ARL", "MIN_TARGET_ARL", "fit_shewhart"]

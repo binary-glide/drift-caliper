@@ -33,6 +33,7 @@ from typing import NoReturn
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.baseline.domain.audit_summary import render_audit_summary
+from caliper.baseline.domain.fitting_advisory import FittingAdvisory
 from caliper.errors import InvalidParameterError
 
 
@@ -88,6 +89,12 @@ class FittedShewhart(BaseModel):
 
     cl: float
     """Centre line (= ``baseline_mean``)."""
+
+    # -- ADR-011: non-raising disclosures, e.g. target_arl inside the
+    # flagged tier ([100, 370)) -- empty when there is nothing to disclose.
+    # Defaults to `()` so every existing direct-construction call site keeps
+    # working unchanged; `fit_shewhart` always passes it explicitly.
+    advisories: tuple[FittingAdvisory, ...] = ()
 
     @field_validator("sigma_estimate")
     @classmethod

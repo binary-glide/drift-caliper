@@ -88,15 +88,24 @@ from caliper.baseline import (
     Baseline,
     FittedControlLimits,
     FittedShewhart,
+    FittingAdvisory,
     fit_shewhart,
 )
 
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
 # re-exported from caliper.baseline, so tests that need the exact bound
 # values import them from the owning submodule directly.
+#
+# MIN_TARGET_ARL (100, ADR-011's hard floor) replaces MIN_MEANINGFUL_ARL as
+# the smallest *legal* target_arl -- MIN_COHERENT_ARL (1.0, renamed from
+# MIN_MEANINGFUL_ARL) is the older, weaker, purely-arithmetic floor and is
+# imported separately below only where a test specifically exercises the
+# now-illegal gap between the two (BIN-131).
+from caliper.baseline.domain.ewma_fitting import MIN_COHERENT_ARL
+from caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
 from caliper.baseline.domain.shewhart_fitting import (
     MAX_MEANINGFUL_ARL,
-    MIN_MEANINGFUL_ARL,
+    MIN_TARGET_ARL,
 )
 from caliper.errors import (
     CaliperError,
@@ -704,13 +713,24 @@ def test_baseline_mean_precision_is_unchanged_on_an_ordinary_baseline() -> None:
 
 @pytest.mark.parametrize(
     "invalid_target_arl",
-    [0.0, -10.0, MAX_MEANINGFUL_ARL * 2],
-    ids=["zero", "negative", "outside_meaningful_range"],
+    [0.0, -10.0, MAX_MEANINGFUL_ARL * 2, MIN_COHERENT_ARL],
+    ids=[
+        "zero",
+        "negative",
+        "outside_meaningful_range",
+        "coherent_but_below_policy_floor",
+    ],
 )
 def test_raises_invalid_parameter_error_for_an_invalid_false_alarm_tolerance(
     invalid_target_arl: float,
 ) -> None:
-    """Every invalid false alarm tolerance value raises a classifiable error."""
+    """Every invalid false alarm tolerance value raises a classifiable error.
+
+    ``MIN_COHERENT_ARL`` (1.0, ADR-011's worked example) used to fit
+    "successfully" here -- the exact degenerate point where
+    ``sigma_multiplier == 0.0`` and the chart alarms on nearly every
+    in-control observation. It must now be refused.
+    """
     # Arrange
     baseline = _sufficient_baseline()
 
@@ -725,6 +745,62 @@ def test_raises_invalid_parameter_error_for_an_invalid_false_alarm_tolerance(
     assert error.context["provided"] == invalid_target_arl
     assert isinstance(error.context["constraint"], str)
     assert error.context["constraint"] != ""
+
+
+# --- ADR-011: three-tier target_arl policy ------------------------------------
+#
+# refused (< MIN_TARGET_ARL) is covered by the invalid-parameter test above.
+# These cover the two tiers that both fit: flagged ([MIN_TARGET_ARL,
+# VERIFIED_ARL_FLOOR)) attaches a FittingAdvisory; clean (>= VERIFIED_ARL_FLOOR)
+# does not.
+
+
+@pytest.mark.parametrize(
+    "flagged_target_arl",
+    [MIN_TARGET_ARL, VERIFIED_ARL_FLOOR - 1e-6],
+    ids=["at_policy_floor", "just_below_verified_floor"],
+)
+def test_fits_with_a_non_raising_advisory_when_target_arl_is_in_the_flagged_tier(
+    flagged_target_arl: float,
+) -> None:
+    """``target_arl`` inside ``[MIN_TARGET_ARL, VERIFIED_ARL_FLOOR)`` fits, flagged."""
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    result = fit_shewhart(baseline, target_arl=flagged_target_arl)
+
+    # Assert
+    assert isinstance(result, FittedShewhart)
+    assert result.requested_arl == flagged_target_arl
+    assert len(result.advisories) == 1
+    advisory = result.advisories[0]
+    assert isinstance(advisory, FittingAdvisory)
+    assert advisory.kind == "target_arl_below_verified_range"
+    assert advisory.description != ""
+
+
+@pytest.mark.parametrize(
+    "clean_target_arl",
+    [VERIFIED_ARL_FLOOR, MAX_MEANINGFUL_ARL],
+    ids=["at_verified_floor", "largest_meaningful"],
+)
+def test_fits_with_no_advisory_when_target_arl_is_in_the_clean_tier(
+    clean_target_arl: float,
+) -> None:
+    """``target_arl`` at or above ``VERIFIED_ARL_FLOOR`` fits silently.
+
+    No advisory.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    result = fit_shewhart(baseline, target_arl=clean_target_arl)
+
+    # Assert
+    assert isinstance(result, FittedShewhart)
+    assert result.advisories == ()
 
 
 # --- Sad path: missing false alarm tolerance --------------------------------------
@@ -843,13 +919,13 @@ def test_fitted_shewhart_satisfies_the_fitted_control_limits_protocol() -> None:
 
 @pytest.mark.parametrize(
     "boundary_target_arl",
-    [MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL],
-    ids=["smallest_meaningful", "largest_meaningful"],
+    [MIN_TARGET_ARL, MAX_MEANINGFUL_ARL],
+    ids=["smallest_legal", "largest_meaningful"],
 )
 def test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_boundary(
     boundary_target_arl: float,
 ) -> None:
-    """Boundary value analysis: the edges of the meaningful range are accepted."""
+    """Boundary value analysis: the edges of the legal range are accepted (ADR-011)."""
     # Arrange
     baseline = _sufficient_baseline()
 
@@ -866,27 +942,30 @@ def test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_bo
 
 
 #
-# ``exclude_min=True`` deliberately excludes ``MIN_MEANINGFUL_ARL`` (1.0)
-# itself: unlike EWMA/CUSUM's numerical root-finders (which never reach
-# their own floor exactly, by construction), Shewhart's closed-form
-# calibration genuinely produces ``sigma_multiplier == 0.0`` at
-# ``target_arl == 1.0`` (solving ``1 = 1 / (2 * Phi(-L))`` gives ``L = 0``
-# exactly) -- a mathematically correct, degenerate design point where the
-# limits collapse onto the centre line, not a bug. The feature file's own
-# boundary scenario covers that exact point with a weaker, shape-only
-# assertion (see the boundary test above and the BDD steps); this property
-# test asserts strict ordering over the meaningful *interior* of the range.
+# Rebounded under ADR-011/BIN-131 (was ``[MIN_MEANINGFUL_ARL,
+# MAX_MEANINGFUL_ARL]`` -- MIN_MEANINGFUL_ARL is now MIN_COHERENT_ARL, 1.0,
+# no longer a legal target_arl at all). ``exclude_min=True`` is no longer
+# needed: the old exclusion existed because Shewhart's closed-form
+# calibration genuinely produces ``sigma_multiplier == 0.0`` exactly at
+# ``target_arl == MIN_COHERENT_ARL`` (1.0) -- a mathematically correct,
+# degenerate design point where the limits collapse onto the centre line.
+# ``MIN_TARGET_ARL`` (100) is far from that degeneracy
+# (``sigma_multiplier(100) ~= 2.576``), so the strategy's new floor no
+# longer needs to dodge it; the degenerate point itself is still real
+# mathematics (``_shewhart_sigma_multiplier(1.0) == 0.0``), it is simply no
+# longer reachable through the public ``target_arl`` parameter at all (see
+# ``test_raises_invalid_parameter_error_for_a_now_illegal_coherent_arl``
+# below, which pins that ADR-011 worked example directly).
 @settings(max_examples=20, deadline=None)
 @given(
     target_arl=st.floats(
-        min_value=MIN_MEANINGFUL_ARL,
+        min_value=MIN_TARGET_ARL,
         max_value=MAX_MEANINGFUL_ARL,
-        exclude_min=True,
         allow_nan=False,
     ),
 )
 def test_ucl_is_always_above_cl_which_is_always_above_lcl(target_arl: float) -> None:
-    """Above the ARL0=1 degenerate point, all three limits are strictly ordered."""
+    """Across the entire legal range, all three limits are strictly ordered."""
     # Arrange
     baseline = _sufficient_baseline()
 
@@ -897,27 +976,26 @@ def test_ucl_is_always_above_cl_which_is_always_above_lcl(target_arl: float) -> 
     assert result.ucl > result.cl > result.lcl
 
 
-# --- Property: the sigma multiplier is strictly positive above the ARL0=1 point -----
+# --- Property: the sigma multiplier is strictly positive across the legal range -----
 
 
 @settings(max_examples=20, deadline=None)
 @given(
     target_arl=st.floats(
-        min_value=MIN_MEANINGFUL_ARL,
+        min_value=MIN_TARGET_ARL,
         max_value=MAX_MEANINGFUL_ARL,
-        exclude_min=True,
         allow_nan=False,
     ),
 )
-def test_sigma_multiplier_is_positive_above_the_arl0_equals_one_degenerate_point(
+def test_sigma_multiplier_is_positive_across_the_legal_range(
     target_arl: float,
 ) -> None:
-    """A negative sigma multiplier would invert the limits.
+    """A negative (or zero) sigma multiplier would invert (or collapse) the limits.
 
-    See the note above ``test_ucl_is_always_above_cl_which_is_always_above_lcl``
-    for why ``target_arl == MIN_MEANINGFUL_ARL`` (exactly 1.0) is excluded:
-    it is the one point where ``sigma_multiplier == 0.0`` is the
-    mathematically correct answer, not a defect.
+    Unlike before ADR-011, the legal range no longer approaches the
+    ``target_arl == MIN_COHERENT_ARL`` (1.0) degenerate point where
+    ``sigma_multiplier == 0.0`` is the mathematically correct answer -- see
+    the note above ``test_ucl_is_always_above_cl_which_is_always_above_lcl``.
     """
     # Arrange
     baseline = _sufficient_baseline()

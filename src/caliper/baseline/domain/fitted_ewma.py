@@ -24,6 +24,7 @@ from typing import NoReturn
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.baseline.domain.audit_summary import render_audit_summary
+from caliper.baseline.domain.fitting_advisory import FittingAdvisory
 from caliper.errors import InvalidParameterError
 
 
@@ -34,7 +35,8 @@ class FittedEWMA(BaseModel):
     eleven fields below are exactly the protocol's property names, in the
     same order as ``docs/domain-model.md``'s shared-core table. The four
     EWMA-specific fields follow (``docs/domain-model.md``, Chart-Specific
-    Artefacts -- FittedEWMA). Immutable after creation (BIN-65 BR-10) via
+    Artefacts -- FittedEWMA), then ``advisories`` (ADR-011, shared-core --
+    see ``FittedControlLimits``). Immutable after creation (BIN-65 BR-10) via
     ``ConfigDict(frozen=True)`` -- attempting to reassign any field raises
     ``pydantic_core.ValidationError`` (ADR-002 section 7), not a
     ``CaliperError``.
@@ -64,6 +66,13 @@ class FittedEWMA(BaseModel):
     ucl: float
     lcl: float
     cl: float
+
+    # -- ADR-011: non-raising disclosures, e.g. target_arl inside the
+    # flagged tier ([100, 370)) -- empty when there is nothing to disclose.
+    # Defaults to `()` so every existing direct-construction call site
+    # (tests/unit/baseline/test_fitted_artefact_sigma_invariant.py included)
+    # keeps working unchanged; `fit_ewma` always passes it explicitly.
+    advisories: tuple[FittingAdvisory, ...] = ()
 
     @field_validator("sigma_estimate")
     @classmethod

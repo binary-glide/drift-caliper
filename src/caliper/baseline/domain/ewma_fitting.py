@@ -29,7 +29,13 @@ from caliper.baseline.domain.ewma_numerics import (
     _ewma_asymptotic_std_ratio,
 )
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
-from caliper.baseline.domain.parameter_guards import require_real_number, require_type
+from caliper.baseline.domain.fitting_advisory import FittingAdvisory
+from caliper.baseline.domain.parameter_guards import (
+    MIN_TARGET_ARL,
+    classify_target_arl,
+    require_real_number,
+    require_type,
+)
 from caliper.baseline.domain.spc_numerics import (
     _moving_range_sigma,
     _overflow_safe_mean,
@@ -90,14 +96,31 @@ DEFAULT_SMOOTHING_PARAM = 0.2
 
 # --- False alarm tolerance (target ARL0) meaningful range -------------------
 #
-# MIN_MEANINGFUL_ARL = 1.0 is not an engineering choice -- it is a
+# MIN_COHERENT_ARL = 1.0 is not an engineering choice -- it is a
 # mathematical floor. ARL0 is defined as the expectation of a stopping time
 # (the count of in-control observations until the first false alarm), and
 # that count is a positive integer -- it is always at least 1, because the
 # very first observation is itself a trial that can trigger an alarm.
 # E[N] >= 1 for any N supported on {1, 2, 3, ...} follows directly from the
 # definition of expectation; no value below 1 is a coherent ARL0 to request.
-MIN_MEANINGFUL_ARL = 1.0
+#
+# Renamed from MIN_MEANINGFUL_ARL under ADR-011 (2026-09-12): this constant
+# was correctly derived but wrongly named -- it names the smallest
+# *arithmetically coherent* ARL0, not the smallest *useful* one, and the gap
+# between those two claims is exactly what let target_arl=1.0 fit
+# "successfully" while alarming on nearly every in-control observation
+# (BIN-131). It is no longer the enforced lower bound on target_arl -- that
+# is now caliper.baseline.domain.parameter_guards.MIN_TARGET_ARL (100.0),
+# ADR-011's hard floor, a much stronger claim ("the field tabulates nothing
+# smaller") than this one ("the arithmetic is still coherent"). This
+# constant is kept, unused in the validation path below, purely for its
+# derivation -- ADR-011 requires keeping the comment verbatim.
+#
+# Internal-only: absent from both caliper.__all__ and
+# caliper.baseline.__all__, and not reachable via hasattr on either package
+# (test_baseline_package_exports.py pins this) -- so renaming it carries no
+# deprecation burden.
+MIN_COHERENT_ARL = 1.0
 
 # MAX_MEANINGFUL_ARL has no comparable mathematical ceiling -- ARL0 grows
 # without bound as L -> infinity. 1,000,000 is an engineering default, not a
@@ -129,8 +152,10 @@ _ZERO_VARIANCE_REASON = "zero_variance"
 # --- Parameter validation ----------------------------------------------------
 
 
-def _require_target_arl(target_arl: float | None) -> float:
-    """Validate ``target_arl`` and return it narrowed to ``float``.
+def _require_target_arl(
+    target_arl: float | None,
+) -> tuple[float, FittingAdvisory | None]:
+    """Validate ``target_arl``, returning it narrowed to ``float`` plus any advisory.
 
     ``target_arl`` is optional in the Python signature but required by
     Caliper's validation (ADR-004 section 5, closing ADR-002's open
@@ -138,10 +163,14 @@ def _require_target_arl(target_arl: float | None) -> float:
     Python's ``TypeError``. Returning the validated value (rather than
     ``None``) lets callers avoid a redundant ``is None`` narrowing check
     after this function has already ruled that case out.
+
+    The range check itself, and the ADR-011 flagged-tier disclosure, are
+    delegated to ``parameter_guards.classify_target_arl`` -- shared verbatim
+    with ``cusum_fitting``/``shewhart_fitting`` rather than tripled, per the
+    BIN-124 lesson about identical validation logic drifting out of sync
+    across the three fitting modules.
     """
-    constraint = (
-        f"must be a finite float in [{MIN_MEANINGFUL_ARL}, {MAX_MEANINGFUL_ARL}]"
-    )
+    constraint = f"must be a finite float in [{MIN_TARGET_ARL}, {MAX_MEANINGFUL_ARL}]"
     if target_arl is None:
         raise InvalidParameterError(
             "target_arl is required to fit EWMA control limits",
@@ -165,24 +194,12 @@ def _require_target_arl(target_arl: float | None) -> float:
     numeric_target_arl = require_real_number(
         target_arl, parameter="target_arl", constraint=constraint
     )
-    if not math.isfinite(numeric_target_arl) or not (
-        MIN_MEANINGFUL_ARL <= numeric_target_arl <= MAX_MEANINGFUL_ARL
-    ):
-        raise InvalidParameterError(
-            "target_arl is outside the meaningful range",
-            context={
-                "parameter": "target_arl",
-                "constraint": constraint,
-                "kind": "invalid",
-                "provided": target_arl,
-            },
-            recovery_hint=(
-                "Choose a target_arl within "
-                f"[{MIN_MEANINGFUL_ARL}, {MAX_MEANINGFUL_ARL}], e.g. 370 or "
-                "500 -- common in-control ARL0 targets in the SPC literature."
-            ),
-        )
-    return numeric_target_arl
+    # ADR-011: refuses below MIN_TARGET_ARL (100) or above MAX_MEANINGFUL_ARL;
+    # returns a FittingAdvisory when inside [MIN_TARGET_ARL, VERIFIED_ARL_FLOOR).
+    advisory = classify_target_arl(
+        numeric_target_arl, max_target_arl=MAX_MEANINGFUL_ARL
+    )
+    return numeric_target_arl, advisory
 
 
 def _validate_smoothing_param(smoothing_param: float | None) -> float | None:
@@ -267,16 +284,19 @@ def fit_ewma(
     Returns
     -------
     FittedEWMA
-        The fitted artefact.
+        The fitted artefact. Carries a non-empty ``advisories`` when
+        ``target_arl`` is inside ADR-011's flagged tier (``[100, 370)``) --
+        see that ADR for why this fits rather than refuses.
 
     Raises
     ------
     InvalidParameterError
         ``baseline`` is not a ``Baseline``; ``target_arl`` is missing,
         not a real number (``bool`` included), or outside
-        ``[MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL]``; or ``smoothing_param``
-        is supplied but not a real number (``bool`` included) or outside
-        ``[MIN_SMOOTHING_PARAM, MAX_SMOOTHING_PARAM]`` (BIN-126).
+        ``[MIN_TARGET_ARL, MAX_MEANINGFUL_ARL]`` (ADR-011); or
+        ``smoothing_param`` is supplied but not a real number (``bool``
+        included) or outside ``[MIN_SMOOTHING_PARAM, MAX_SMOOTHING_PARAM]``
+        (BIN-126).
     InsufficientBaselineError
         ``baseline`` does not meet the sufficiency threshold (BIN-65
         A1/BR-1).
@@ -297,7 +317,7 @@ def fit_ewma(
     baseline = require_type(
         baseline, Baseline, parameter="baseline", type_name="Baseline"
     )
-    validated_target_arl = _require_target_arl(target_arl)
+    validated_target_arl, target_arl_advisory = _require_target_arl(target_arl)
     validated_smoothing_param = _validate_smoothing_param(smoothing_param)
     effective_smoothing_param = (
         validated_smoothing_param
@@ -424,4 +444,5 @@ def fit_ewma(
         ucl=baseline_mean + half_width,
         lcl=baseline_mean - half_width,
         cl=baseline_mean,
+        advisories=(target_arl_advisory,) if target_arl_advisory is not None else (),
     )

@@ -42,12 +42,16 @@ from caliper.baseline import (
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
 # re-exported from caliper.baseline, so steps that need the exact bound
 # values import them from the owning submodule directly.
+#
+# MIN_TARGET_ARL (100, ADR-011's hard floor) replaces MIN_MEANINGFUL_ARL (now
+# MIN_COHERENT_ARL, 1.0, no longer a legal target_arl) as the smallest legal
+# value -- see tests/unit/baseline/test_ewma_fitting.py's identical note.
 from caliper.baseline.domain.ewma_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_SMOOTHING_PARAM,
-    MIN_MEANINGFUL_ARL,
     MIN_SMOOTHING_PARAM,
 )
+from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
 from caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
@@ -80,7 +84,7 @@ _SMOOTHING_PARAM_BOUNDARIES = {
     "the largest valid value": MAX_SMOOTHING_PARAM,
 }
 _TARGET_ARL_BOUNDARIES = {
-    "the smallest meaningful value": MIN_MEANINGFUL_ARL,
+    "the smallest meaningful value": MIN_TARGET_ARL,
     "the largest meaningful value": MAX_MEANINGFUL_ARL,
 }
 

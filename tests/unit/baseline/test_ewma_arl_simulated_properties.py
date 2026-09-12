@@ -80,11 +80,11 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_ewma
-from caliper.baseline.domain.ewma_fitting import MIN_MEANINGFUL_ARL
 from caliper.baseline.domain.ewma_numerics import (
     # Formula only, not the Markov-chain calibration helper -- see below.
     _ewma_asymptotic_std_ratio,
 )
+from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
 from tests.factories import ProvenanceFactory
 from tests.support.baseline_strategies import (
     baseline_from_scores,
@@ -172,7 +172,7 @@ _MONOTONICITY_ARL_GAP_MAX = 1_000.0
 @given(
     scores=baseline_scores_strategy(),
     arl_low=st.floats(
-        min_value=MIN_MEANINGFUL_ARL,
+        min_value=MIN_TARGET_ARL,
         max_value=_MONOTONICITY_ARL_LOW_MAX,
         allow_nan=False,
     ),
@@ -188,7 +188,9 @@ def test_wider_target_arl_never_narrows_the_ewma_boundary(
     ``arl_high = arl_low + arl_gap`` with ``arl_gap >= 1.0`` guarantees
     ``arl_high > arl_low`` strictly (no float-equality edge case to guard
     against), and both stay comfortably inside
-    ``[MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL]``.
+    ``[MIN_TARGET_ARL, MAX_MEANINGFUL_ARL]`` (ADR-011 -- rebounded from
+    ``MIN_MEANINGFUL_ARL``, now ``MIN_COHERENT_ARL``, which is no longer a
+    legal ``target_arl`` at all).
     """
     # Arrange
     baseline = baseline_from_scores(scores)

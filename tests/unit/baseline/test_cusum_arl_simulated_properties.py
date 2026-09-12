@@ -72,6 +72,7 @@ from hypothesis import strategies as st
 
 from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_cusum
 from caliper.baseline.domain.cusum_fitting import _min_attainable_arl0
+from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
 from tests.factories import ProvenanceFactory
 from tests.support.baseline_strategies import (
     baseline_from_scores,
@@ -168,8 +169,19 @@ _MONOTONICITY_DIRECTION = "two_sided"
 # too -- a stronger property test than a value some margin away, and the
 # one an earlier draft of this fix (margin = infimum * 1.001, against the
 # wrong, open h=0 basis) did not exercise.
-_MONOTONICITY_ARL_LOW_MIN = _min_attainable_arl0(
-    _MONOTONICITY_REFERENCE_VALUE, _MONOTONICITY_DIRECTION
+#
+# ADR-011/BIN-131: a second, independent floor now applies on top of the
+# attainability one -- MIN_TARGET_ARL (100). At this test's fixed
+# reference_value=0.5, the attainability floor (~1.0431) sits far *below*
+# MIN_TARGET_ARL, so MIN_TARGET_ARL is the one that actually binds here;
+# `max()` keeps this correct in general (a reference_value where the
+# attainability floor exceeds 100 -- e.g. MAX_REFERENCE_VALUE, see
+# cusum_fitting.py -- would need the attainability floor instead, and this
+# expression still picks the right one without this file needing to know
+# which case it's in).
+_MONOTONICITY_ARL_LOW_MIN = max(
+    _min_attainable_arl0(_MONOTONICITY_REFERENCE_VALUE, _MONOTONICITY_DIRECTION),
+    MIN_TARGET_ARL,
 )
 
 

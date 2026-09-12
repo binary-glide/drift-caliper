@@ -117,8 +117,8 @@ _MARKOV_CHAIN_STATES = 301
 # bracket's lower edge is a small positive floor rather than 0. The upper
 # edge is expanded geometrically (see _calibrate_limit_multiplier) up to
 # this ceiling, which comfortably exceeds any L a target_arl within
-# [MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL] (ewma_fitting.py) requires in
-# practice.
+# [MIN_TARGET_ARL, MAX_MEANINGFUL_ARL] (parameter_guards.py/ewma_fitting.py,
+# ADR-011) requires in practice.
 _MIN_LIMIT_MULTIPLIER = 1e-6
 _MAX_LIMIT_MULTIPLIER = 1e5
 
@@ -240,7 +240,9 @@ def _calibrate_limit_multiplier(
     if arl_gap(lower_bound) >= 0:
         # target_arl is at or below the smallest ARL0 this discretisation can
         # represent near L=0 (its mathematical infimum is 1 -- see
-        # MIN_MEANINGFUL_ARL -- but a finite grid cannot reach exactly 1).
+        # MIN_COHERENT_ARL -- but a finite grid cannot reach exactly 1; in
+        # any case ADR-011's MIN_TARGET_ARL floor of 100 keeps target_arl
+        # from ever reaching this deep into the discretisation's own limit).
         # The smallest sensible L already meets or exceeds the target.
         achieved = _in_control_arl(smoothing_param, lower_bound, _MARKOV_CHAIN_STATES)
         return lower_bound, achieved

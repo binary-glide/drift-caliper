@@ -87,18 +87,26 @@ from caliper.baseline import (
     Baseline,
     FittedControlLimits,
     FittedEWMA,
+    FittingAdvisory,
     fit_ewma,
 )
 
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
 # re-exported from caliper.baseline, so tests that need the exact bound
 # values import them from the owning submodule directly.
+#
+# MIN_TARGET_ARL (100, ADR-011's hard floor) replaces MIN_MEANINGFUL_ARL as
+# the smallest *legal* target_arl -- MIN_COHERENT_ARL (1.0, renamed from
+# MIN_MEANINGFUL_ARL) is the older, weaker, purely-arithmetic floor and is
+# imported separately below only where a test specifically exercises the
+# now-illegal gap between the two (BIN-131).
 from caliper.baseline.domain.ewma_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_SMOOTHING_PARAM,
-    MIN_MEANINGFUL_ARL,
+    MIN_COHERENT_ARL,
     MIN_SMOOTHING_PARAM,
 )
+from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL, VERIFIED_ARL_FLOOR
 from caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
@@ -635,13 +643,26 @@ def test_raises_invalid_parameter_error_for_an_invalid_smoothing_parameter(
 
 @pytest.mark.parametrize(
     "invalid_target_arl",
-    [0.0, -10.0, MAX_MEANINGFUL_ARL * 2],
-    ids=["zero", "negative", "outside_meaningful_range"],
+    [0.0, -10.0, MAX_MEANINGFUL_ARL * 2, MIN_COHERENT_ARL, MIN_TARGET_ARL - 1e-9],
+    ids=[
+        "zero",
+        "negative",
+        "outside_meaningful_range",
+        "coherent_but_below_policy_floor",
+        "just_below_policy_floor",
+    ],
 )
 def test_raises_invalid_parameter_error_for_an_invalid_false_alarm_tolerance(
     invalid_target_arl: float,
 ) -> None:
-    """Every invalid false alarm tolerance value raises a classifiable error."""
+    """Every invalid false alarm tolerance value raises a classifiable error.
+
+    ``MIN_COHERENT_ARL`` (1.0, ADR-011's worked example) is the case that
+    matters most here: it is still mathematically coherent (``E[N] >= 1``
+    holds), and used to fit "successfully" -- alarming on nearly every
+    in-control observation. It must now be refused exactly like any other
+    out-of-range value.
+    """
     # Arrange
     baseline = _sufficient_baseline()
 
@@ -656,6 +677,87 @@ def test_raises_invalid_parameter_error_for_an_invalid_false_alarm_tolerance(
     assert error.context["provided"] == invalid_target_arl
     assert isinstance(error.context["constraint"], str)
     assert error.context["constraint"] != ""
+
+
+# --- ADR-011: three-tier target_arl policy ------------------------------------
+#
+# refused (< MIN_TARGET_ARL) is covered by the invalid-parameter test above.
+# These cover the two tiers that both fit: flagged ([MIN_TARGET_ARL,
+# VERIFIED_ARL_FLOOR)) attaches a FittingAdvisory; clean (>= VERIFIED_ARL_FLOOR)
+# does not.
+
+
+@pytest.mark.parametrize(
+    "flagged_target_arl",
+    [MIN_TARGET_ARL, VERIFIED_ARL_FLOOR - 1e-6],
+    ids=["at_policy_floor", "just_below_verified_floor"],
+)
+def test_fits_with_a_non_raising_advisory_when_target_arl_is_in_the_flagged_tier(
+    flagged_target_arl: float,
+) -> None:
+    """``target_arl`` inside ``[MIN_TARGET_ARL, VERIFIED_ARL_FLOOR)`` fits, flagged.
+
+    The maths is identical to any other target -- only the verification
+    coverage differs (ADR-011). This must fit, not raise, and disclose via
+    ``advisories``, not silently.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    result = fit_ewma(baseline, target_arl=flagged_target_arl)
+
+    # Assert
+    assert isinstance(result, FittedEWMA)
+    assert result.requested_arl == flagged_target_arl
+    assert len(result.advisories) == 1
+    advisory = result.advisories[0]
+    assert isinstance(advisory, FittingAdvisory)
+    assert advisory.kind == "target_arl_below_verified_range"
+    assert advisory.description != ""
+
+
+@pytest.mark.parametrize(
+    "clean_target_arl",
+    [VERIFIED_ARL_FLOOR, MAX_MEANINGFUL_ARL],
+    ids=["at_verified_floor", "largest_meaningful"],
+)
+def test_fits_with_no_advisory_when_target_arl_is_in_the_clean_tier(
+    clean_target_arl: float,
+) -> None:
+    """``target_arl`` at or above ``VERIFIED_ARL_FLOOR`` fits silently.
+
+    No advisory.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    result = fit_ewma(baseline, target_arl=clean_target_arl)
+
+    # Assert
+    assert isinstance(result, FittedEWMA)
+    assert result.advisories == ()
+
+
+def test_advisories_is_not_a_bool_of_the_artefact_trap() -> None:
+    """``advisories`` is a plain tuple -- ``if result.advisories:`` means what it
+    reads as, unlike ``bool(result)`` itself, which ``FittedEWMA`` still
+    forbids outright (BIN-110).
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    flagged = fit_ewma(baseline, target_arl=MIN_TARGET_ARL)
+    clean = fit_ewma(baseline, target_arl=VERIFIED_ARL_FLOOR)
+
+    # Assert -- the collection itself is meaningfully truthy/falsy
+    assert bool(flagged.advisories) is True
+    assert bool(clean.advisories) is False
+    # ...but bool() on the artefact as a whole is still forbidden.
+    with pytest.raises(TypeError):
+        bool(flagged)
 
 
 # --- Sad path: missing false alarm tolerance --------------------------------------
@@ -807,13 +909,13 @@ def test_fits_successfully_with_smoothing_parameter_at_the_valid_range_boundary(
 
 @pytest.mark.parametrize(
     "boundary_target_arl",
-    [MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL],
-    ids=["smallest_meaningful", "largest_meaningful"],
+    [MIN_TARGET_ARL, MAX_MEANINGFUL_ARL],
+    ids=["smallest_legal", "largest_meaningful"],
 )
 def test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_boundary(
     boundary_target_arl: float,
 ) -> None:
-    """Boundary value analysis: the edges of the meaningful range are accepted."""
+    """Boundary value analysis: the edges of the legal range are accepted (ADR-011)."""
     # Arrange
     baseline = _sufficient_baseline()
 
@@ -832,7 +934,7 @@ def test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_bo
 @settings(max_examples=20, deadline=None)
 @given(
     target_arl=st.floats(
-        min_value=MIN_MEANINGFUL_ARL, max_value=MAX_MEANINGFUL_ARL, allow_nan=False
+        min_value=MIN_TARGET_ARL, max_value=MAX_MEANINGFUL_ARL, allow_nan=False
     ),
     smoothing_param=st.floats(
         min_value=MIN_SMOOTHING_PARAM, max_value=MAX_SMOOTHING_PARAM, allow_nan=False
@@ -841,7 +943,14 @@ def test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_bo
 def test_ucl_is_always_above_cl_which_is_always_above_lcl(
     target_arl: float, smoothing_param: float
 ) -> None:
-    """For any valid inputs, the three reported limits are consistently ordered."""
+    """For any valid inputs, the three reported limits are consistently ordered.
+
+    Rebounded to ``MIN_TARGET_ARL`` under ADR-011/BIN-131 -- the strategy
+    previously drew from ``MIN_MEANINGFUL_ARL`` (now ``MIN_COHERENT_ARL``,
+    1.0), which is no longer a legal ``target_arl`` and would have made
+    this property test a generator of illegal inputs (the exact BIN-124
+    failure pattern).
+    """
     # Arrange
     baseline = _sufficient_baseline()
 

@@ -96,6 +96,7 @@ from caliper.baseline import (
     FittedCUSUM,
     FittedEWMA,
     FittedShewhart,
+    FittingAdvisory,
     fit_cusum,
     fit_ewma,
     fit_shewhart,
@@ -233,6 +234,7 @@ class _FakeConformingArtefact:
     requested_arl: float = _SHAPE_TEST_TARGET_ARL
     achieved_arl: float = _SHAPE_TEST_TARGET_ARL
     calibration_method: str = "unsupported_method"
+    advisories: tuple[FittingAdvisory, ...] = ()
 
 
 class _ReprRaisingConformingArtefact:
@@ -264,6 +266,7 @@ class _ReprRaisingConformingArtefact:
     requested_arl = _SHAPE_TEST_TARGET_ARL
     achieved_arl = _SHAPE_TEST_TARGET_ARL
     calibration_method = "unsupported_method"
+    advisories: tuple[FittingAdvisory, ...] = ()
 
     def __repr__(self) -> str:
         raise RuntimeError("repr exploded")

@@ -156,6 +156,7 @@ from caliper.baseline import (
     Baseline,
     FittedControlLimits,
     FittedCUSUM,
+    FittingAdvisory,
     fit_cusum,
 )
 
@@ -176,10 +177,12 @@ from caliper.baseline import (
 from caliper.baseline.domain.cusum_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_REFERENCE_VALUE,
-    MIN_MEANINGFUL_ARL,
     MIN_REFERENCE_VALUE,
+    MIN_TARGET_ARL,
     _min_attainable_arl0,
 )
+from caliper.baseline.domain.ewma_fitting import MIN_COHERENT_ARL
+from caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
 from caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
@@ -290,15 +293,15 @@ def _capture_fitting_error(
     raise AssertionError("expected fit_cusum() to raise for this scenario")
 
 
-# BIN-117: at the library default reference value, MIN_MEANINGFUL_ARL (1.0)
-# itself sits inside the unattainable zone -- the two-sided minimum
-# attainable ARL0 at DEFAULT_REFERENCE_VALUE (0.5) is ~1.0431, not 1.0.
-# This is the residual tension this file's own module docstring ("Decisions
-# this file makes" point 6) flagged rather than resolved: MIN_MEANINGFUL_ARL
-# is a library-wide mathematical floor (E[N] >= 1 for any stopping time),
-# not a per-reference-value guarantee that every meaningful ARL0 is
-# attainable. `fit_cusum` now (correctly) rejects
-# target_arl=MIN_MEANINGFUL_ARL at the default reference value, so the
+# BIN-117: at the library default reference value, MIN_COHERENT_ARL (1.0,
+# formerly MIN_MEANINGFUL_ARL) itself sits inside the unattainable zone --
+# the two-sided minimum attainable ARL0 at DEFAULT_REFERENCE_VALUE (0.5) is
+# ~1.0431, not 1.0. This is the residual tension this file's own module
+# docstring ("Decisions this file makes" point 6) flagged rather than
+# resolved: MIN_COHERENT_ARL is a library-wide mathematical floor (E[N] >=
+# 1 for any stopping time), not a per-reference-value guarantee that every
+# coherent ARL0 is attainable. `fit_cusum` now (correctly) rejects
+# target_arl=MIN_COHERENT_ARL at the default reference value, so the
 # "smallest meaningful" boundary this file exercises must be redefined as
 # the actual per-k minimum attainable value, not the library-wide floor --
 # otherwise this test would assert success for an input BIN-117's own fix
@@ -313,8 +316,15 @@ def _capture_fitting_error(
 # proves succeeds for MAX_REFERENCE_VALUE. The complementary "some margin
 # above the boundary" case is already covered separately by
 # `test_fits_successfully_when_target_arl_is_just_above_the_minimum_attainable`.
-_SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE = _min_attainable_arl0(
-    DEFAULT_REFERENCE_VALUE, "two_sided"
+#
+# ADR-011/BIN-131: a second, independent floor now applies -- MIN_TARGET_ARL
+# (100). At DEFAULT_REFERENCE_VALUE=0.5 the attainability floor (~1.0431)
+# sits far below MIN_TARGET_ARL, so MIN_TARGET_ARL is the one that actually
+# binds; `max()` keeps this correct regardless of which floor binds at a
+# given reference_value (see test_cusum_arl_simulated_properties.py's
+# identical `max()` fix for the same reasoning).
+_SMALLEST_MEANINGFUL_TARGET_ARL_AT_DEFAULT_REFERENCE_VALUE = max(
+    _min_attainable_arl0(DEFAULT_REFERENCE_VALUE, "two_sided"), MIN_TARGET_ARL
 )
 
 
@@ -819,13 +829,25 @@ def test_raises_invalid_parameter_error_for_an_invalid_reference_value(
 
 @pytest.mark.parametrize(
     "invalid_target_arl",
-    [0.0, -10.0, MAX_MEANINGFUL_ARL * 2],
-    ids=["zero", "negative", "outside_meaningful_range"],
+    [0.0, -10.0, MAX_MEANINGFUL_ARL * 2, MIN_COHERENT_ARL],
+    ids=[
+        "zero",
+        "negative",
+        "outside_meaningful_range",
+        "coherent_but_below_policy_floor",
+    ],
 )
 def test_raises_invalid_parameter_error_for_an_invalid_false_alarm_tolerance(
     invalid_target_arl: float,
 ) -> None:
-    """Every invalid false alarm tolerance value raises a classifiable error."""
+    """Every invalid false alarm tolerance value raises a classifiable error.
+
+    ``MIN_COHERENT_ARL`` (1.0) is rejected by ADR-011's policy floor
+    (``MIN_TARGET_ARL``, 100) before ``fit_cusum`` ever reaches the
+    per-``k`` attainability check (BIN-117) -- the two are independent
+    bounds and this is the one that binds first at the library default
+    ``reference_value``.
+    """
     # Arrange
     baseline = _sufficient_baseline()
 
@@ -840,6 +862,63 @@ def test_raises_invalid_parameter_error_for_an_invalid_false_alarm_tolerance(
     assert error.context["provided"] == invalid_target_arl
     assert isinstance(error.context["constraint"], str)
     assert error.context["constraint"] != ""
+
+
+# --- ADR-011: three-tier target_arl policy ------------------------------------
+#
+# refused (< MIN_TARGET_ARL) is covered by the invalid-parameter test above.
+# These cover the two tiers that both fit: flagged ([MIN_TARGET_ARL,
+# VERIFIED_ARL_FLOOR)) attaches a FittingAdvisory; clean (>= VERIFIED_ARL_FLOOR)
+# does not. Fixed at the library default reference_value, where MIN_TARGET_ARL
+# (not the per-k attainability floor, ~1.0431) is the one that binds.
+
+
+@pytest.mark.parametrize(
+    "flagged_target_arl",
+    [MIN_TARGET_ARL, VERIFIED_ARL_FLOOR - 1e-6],
+    ids=["at_policy_floor", "just_below_verified_floor"],
+)
+def test_fits_with_a_non_raising_advisory_when_target_arl_is_in_the_flagged_tier(
+    flagged_target_arl: float,
+) -> None:
+    """``target_arl`` inside ``[MIN_TARGET_ARL, VERIFIED_ARL_FLOOR)`` fits, flagged."""
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    result = fit_cusum(baseline, target_arl=flagged_target_arl)
+
+    # Assert
+    assert isinstance(result, FittedCUSUM)
+    assert result.requested_arl == flagged_target_arl
+    assert len(result.advisories) == 1
+    advisory = result.advisories[0]
+    assert isinstance(advisory, FittingAdvisory)
+    assert advisory.kind == "target_arl_below_verified_range"
+    assert advisory.description != ""
+
+
+@pytest.mark.parametrize(
+    "clean_target_arl",
+    [VERIFIED_ARL_FLOOR, MAX_MEANINGFUL_ARL],
+    ids=["at_verified_floor", "largest_meaningful"],
+)
+def test_fits_with_no_advisory_when_target_arl_is_in_the_clean_tier(
+    clean_target_arl: float,
+) -> None:
+    """``target_arl`` at or above ``VERIFIED_ARL_FLOOR`` fits silently.
+
+    No advisory.
+    """
+    # Arrange
+    baseline = _sufficient_baseline()
+
+    # Act
+    result = fit_cusum(baseline, target_arl=clean_target_arl)
+
+    # Assert
+    assert isinstance(result, FittedCUSUM)
+    assert result.advisories == ()
 
 
 # --- Sad path: missing false alarm tolerance --------------------------------------
@@ -971,8 +1050,8 @@ def test_unattainable_arl_error_distinct_recovery_hint_from_out_of_range() -> No
     as an ordinary out-of-range target_arl (same category, same required
     keys) -- ADR-002 does not need a new category for this -- but its
     recovery guidance differs, since the fix is "pick a reachable target",
-    not "pick a value inside the meaningful range" (the target here IS
-    inside [MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL])."""
+    not "pick a value inside the legal range" (the target here IS inside
+    [MIN_TARGET_ARL, MAX_MEANINGFUL_ARL])."""
     # Arrange
     baseline = _sufficient_baseline()
 
@@ -1259,7 +1338,7 @@ def test_fits_successfully_with_false_alarm_tolerance_at_the_meaningful_range_bo
 @settings(max_examples=20, deadline=None)
 @given(
     target_arl=st.floats(
-        min_value=MIN_MEANINGFUL_ARL, max_value=MAX_MEANINGFUL_ARL, allow_nan=False
+        min_value=MIN_TARGET_ARL, max_value=MAX_MEANINGFUL_ARL, allow_nan=False
     ),
     reference_value=st.floats(
         min_value=MIN_REFERENCE_VALUE, max_value=MAX_REFERENCE_VALUE, allow_nan=False
@@ -1281,6 +1360,12 @@ def test_decision_interval_is_always_positive(
     (never fails) any Hypothesis-drawn pair the fix now correctly rejects,
     so this property is only ever evaluated against combinations
     ``fit_cusum`` is actually expected to succeed on.
+
+    **Rebounded for ADR-011/BIN-131.** ``target_arl`` now draws from
+    ``[MIN_TARGET_ARL, MAX_MEANINGFUL_ARL]`` rather than
+    ``[MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL]`` -- the old floor
+    (``MIN_MEANINGFUL_ARL``, now ``MIN_COHERENT_ARL``, 1.0) is no longer a
+    legal ``target_arl`` at all, independent of attainability.
     """
     # Arrange
     assume(target_arl > _min_attainable_arl0(reference_value, "two_sided"))
