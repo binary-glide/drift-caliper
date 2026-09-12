@@ -42,9 +42,9 @@ raises when a specific attribute is actually read, or an already-covered
 boundary condition re-run here as a sanity check that the fix still holds.
 
 **What this audit found -- read before assuming everything here is green.**
-10 cases below reproduce a real, currently-live leak (BIN-126 has now closed
-all eight of the original 18 -- see that ticket's completion report). Each is
-annotated
+3 cases below reproduce a real, currently-live leak (BIN-126 has closed
+all eight of its original 18, and BIN-104 has closed all seven of its own --
+see each ticket's completion report). Each remaining case is annotated
 with :class:`KnownLeak` (ticket + the exact exception type observed) and
 the audit test turns that into ``pytest.mark.xfail(strict=True,
 raises=<that type>)`` -- tracked and green, not fixed here and not
@@ -60,8 +60,6 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-
-from pydantic import ValidationError
 
 from caliper.baseline import (
     Baseline,
@@ -356,7 +354,6 @@ _JUDGE_CASES = (
     HostileCase(
         "create_wrong_type_model_version",
         lambda: Judge.create(model_version=123),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        known_leak=KnownLeak(ticket="BIN-104", leaked_type=ValidationError),
     ),
     HostileCase(
         "create_wrong_type_criteria",
@@ -364,7 +361,6 @@ _JUDGE_CASES = (
             model_version="m1",
             criteria=123,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
-        known_leak=KnownLeak(ticket="BIN-104", leaked_type=ValidationError),
     ),
     HostileCase(
         "score_no_provider",
@@ -439,13 +435,11 @@ _MODEL_VERSION_CASES = (
     HostileCase("whitespace_only", lambda: ModelVersion(value="   ")),
     HostileCase(
         "wrong_type_int",
-        lambda: ModelVersion(value=123),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        known_leak=KnownLeak(ticket="BIN-104", leaked_type=ValidationError),
+        lambda: ModelVersion(value=123),  # type: ignore[arg-type]
     ),
     HostileCase(
         "wrong_type_none",
-        lambda: ModelVersion(value=None),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        known_leak=KnownLeak(ticket="BIN-104", leaked_type=ValidationError),
+        lambda: ModelVersion(value=None),  # type: ignore[arg-type]
     ),
 )
 
@@ -454,8 +448,7 @@ _SCORING_CRITERIA_CASES = (
     HostileCase("whitespace_only", lambda: ScoringCriteria(value="\t\n")),
     HostileCase(
         "wrong_type_int",
-        lambda: ScoringCriteria(value=123),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        known_leak=KnownLeak(ticket="BIN-104", leaked_type=ValidationError),
+        lambda: ScoringCriteria(value=123),  # type: ignore[arg-type]
     ),
 )
 
@@ -479,7 +472,6 @@ _SCORING_RESULT_CASES = (
             reasoning="r",
             provenance=ProvenanceFactory(),
         ),
-        known_leak=KnownLeak(ticket="BIN-104", leaked_type=ValidationError),
     ),
 )
 
@@ -487,10 +479,9 @@ _PROVENANCE_CASES = (
     HostileCase(
         "wrong_type_model_version",
         lambda: Provenance(
-            model_version="not a ModelVersion",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            model_version="not a ModelVersion",  # type: ignore[arg-type]
             scoring_criteria=ScoringCriteriaFactory(),
         ),
-        known_leak=KnownLeak(ticket="BIN-104", leaked_type=ValidationError),
     ),
 )
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.errors import InvalidParameterError
+from caliper.measurement.domain.type_guards import require_str
 
 # Shared with judge.py, which reports the same constraint for the "missing"
 # case before a ModelVersion is ever constructed. Not part of the public API
@@ -34,19 +35,19 @@ class ModelVersion(BaseModel):
     path -- there is no way to build a ``ModelVersion`` that wraps an empty
     or whitespace-only ``str``.
 
-    That claim is about *blank* values and is deliberately narrow. A
-    wrong-*typed* argument (``ModelVersion(value=123)``) is rejected by
-    Pydantic's core coercion, which runs *before* this validator, so it
-    surfaces as ``pydantic_core.ValidationError`` rather than a
-    ``CaliperError``. See ``BIN-104``.
+    A wrong-*typed* argument (``ModelVersion(value=123)``) is rejected by
+    ``reject_wrong_type`` below, a ``mode="before"`` validator that runs
+    ahead of Pydantic's own core coercion (BIN-104) -- so both a blank
+    value and a wrong-typed one raise the same ``InvalidParameterError``,
+    never a raw ``pydantic_core.ValidationError``.
 
     Raises
     ------
     InvalidParameterError
-        ``value`` is empty or contains only whitespace.
-        ``context["kind"]`` is always ``"invalid"`` here -- a value was
-        supplied, just not one that satisfies the constraint. The
-        ``"missing"`` case (no value supplied at all) is a distinct
+        ``value`` is not a ``str``, or is empty or contains only
+        whitespace. ``context["kind"]`` is always ``"invalid"`` here -- a
+        value was supplied, just not one that satisfies the constraint.
+        The ``"missing"`` case (no value supplied at all) is a distinct
         condition handled by callers such as ``Judge.create`` before a
         ``ModelVersion`` is ever constructed.
     """
@@ -54,6 +55,19 @@ class ModelVersion(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     value: str
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def reject_wrong_type(cls, v: object) -> object:
+        """Reject a non-``str`` ``value`` before Pydantic's core coercion runs.
+
+        See ``caliper.measurement.domain.type_guards`` for why this is a
+        ``mode="before"`` validator and why it raises ``InvalidParameterError``
+        directly rather than ``ValueError`` (BIN-104).
+        """
+        return require_str(
+            v, parameter="model_version", constraint=MODEL_VERSION_CONSTRAINT
+        )
 
     @field_validator("value")
     @classmethod

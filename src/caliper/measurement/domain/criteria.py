@@ -22,6 +22,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.errors import InvalidParameterError
+from caliper.measurement.domain.type_guards import require_str
 
 SCORING_CRITERIA_CONSTRAINT = (
     "must be a non-empty string that is not entirely whitespace"
@@ -40,10 +41,10 @@ class ScoringCriteria(BaseModel):
     for every construction path -- there is no way to build a
     ``ScoringCriteria`` that wraps an empty or whitespace-only ``str``.
 
-    As with ``ModelVersion``, that claim covers *blank* values only. A
-    wrong-*typed* argument is rejected by Pydantic's core coercion before
-    this validator runs, and surfaces as ``pydantic_core.ValidationError``
-    rather than a ``CaliperError``. See ``BIN-104``.
+    A wrong-*typed* argument is rejected by ``reject_wrong_type`` below, a
+    ``mode="before"`` validator that runs ahead of Pydantic's own core
+    coercion (BIN-104) -- so it raises the same ``InvalidParameterError`` a
+    blank value does, never a raw ``pydantic_core.ValidationError``.
 
     Unlike ``ModelVersion``, there is no "missing" case for this value
     object: every scenario in
@@ -54,13 +55,26 @@ class ScoringCriteria(BaseModel):
     Raises
     ------
     InvalidParameterError
-        ``value`` is empty or contains only whitespace.
-        ``context["kind"]`` is always ``"invalid"``.
+        ``value`` is not a ``str``, or is empty or contains only
+        whitespace. ``context["kind"]`` is always ``"invalid"``.
     """
 
     model_config = ConfigDict(frozen=True)
 
     value: str
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def reject_wrong_type(cls, v: object) -> object:
+        """Reject a non-``str`` ``value`` before Pydantic's core coercion runs.
+
+        See ``caliper.measurement.domain.type_guards`` for why this is a
+        ``mode="before"`` validator and why it raises ``InvalidParameterError``
+        directly rather than ``ValueError`` (BIN-104).
+        """
+        return require_str(
+            v, parameter="scoring_criteria", constraint=SCORING_CRITERIA_CONSTRAINT
+        )
 
     @field_validator("value")
     @classmethod

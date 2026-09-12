@@ -18,15 +18,31 @@ it is exercised (a tuple of :class:`HostileCase`\\s) or why it is excluded
 
 ## The scoreboard -- read this line first
 
-**10 known leaks are pinned as expected failures below, tracked as
-``BIN-104`` (7) and ``BIN-127`` (3). The suite is green
+**3 known leaks are pinned as expected failures below, tracked as
+``BIN-127`` (3). The suite is green
 today because of that pinning, not because the leaks are fixed. That
-count is expected to fall to zero as each ticket closes** --
+count is expected to fall to zero as the ticket closes** --
 ``strict=True`` (see below) means a fix silently makes its case XPASS,
 which fails the suite until the now-stale marker is deleted, so the count
-cannot quietly drift upward either. Anyone reading a file with 10 xfails
+cannot quietly drift upward either. Anyone reading a file with 3 xfails
 needs one number, not an investigation: this is the plan, not a scandal,
 and it is a plan with a forcing function attached.
+
+**BIN-104 was originally 7 cases; all 7 are now closed** and it no longer
+appears in the tally above. ``ModelVersion``, ``ScoringCriteria``,
+``ScoringResult`` and ``Provenance`` each gained a ``mode="before"``
+``@field_validator`` (``caliper.measurement.domain.type_guards``) that
+runs ahead of Pydantic's core type coercion and raises
+``InvalidParameterError`` for a wrong-typed constructor argument, instead
+of letting Pydantic's own coercion reject it first as a raw
+``pydantic_core.ValidationError``. ``Provenance`` is the interesting one:
+ADR-006 deliberately gave it no content validator at all, reasoning that
+its invariant was structural (inherited from ``ModelVersion``/
+``ScoringCriteria``, which already cannot hold blank text) -- that
+reasoning covers *content*, not *type*, since a wrong-typed
+``model_version``/``scoring_criteria`` never constructs one of those value
+objects in the first place. See the amendment note at the end of
+ADR-006 for the full record.
 
 **BIN-126 was originally 8 cases; all 8 are now closed** and it no longer
 appears in the tally above. The wrong-typed-argument guards for
@@ -50,18 +66,24 @@ already carried, rather than designing a fourth convention.
 The grouping is load-bearing -- none of the three fixes solves either of
 the other two:
 
-* **``BIN-104`` (7 cases)** -- Pydantic's core type coercion runs *before*
-  a ``@field_validator``, so a wrong-*typed* constructor argument
+* **``BIN-104`` (closed -- all 7 of an original 7, no longer in the tally
+  above)** -- Pydantic's core type coercion runs *before* a
+  ``@field_validator``, so a wrong-*typed* constructor argument
   (``ModelVersion(value=123)``, ``Judge.create(model_version=123)``, ...)
-  never reaches Caliper's own validation code at all. The fix is a
-  ``mode="before"`` validator (or equivalent) on each affected model.
-  ⚠️ ``Provenance`` is in scope here despite having **no field validator
-  by design** (ADR-006: "there is nothing left to validate here" -- its
-  invariant is structural, inherited from ``ModelVersion``/
-  ``ScoringCriteria``). This ticket must add one where ADR-006
-  deliberately specified none, which is exactly the kind of thing a
-  targeted sweep catches and a general impression of "the value objects
-  validate" does not.
+  never reached Caliper's own validation code at all. ``ModelVersion``,
+  ``ScoringCriteria``, ``ScoringResult`` and ``Provenance`` now each carry
+  a ``mode="before"`` ``@field_validator``
+  (``caliper.measurement.domain.type_guards``) that runs ahead of that
+  core coercion. ⚠️ ``Provenance`` was in scope despite having **no field
+  validator by design** (ADR-006: "there is nothing left to validate
+  here" -- its invariant is structural, inherited from ``ModelVersion``/
+  ``ScoringCriteria``). That reasoning covers *blank content*, not *type*
+  -- a wrong-typed ``model_version``/``scoring_criteria`` never constructs
+  one of those value objects at all, so the structural guarantee never
+  engages. ``Provenance`` gained the same kind of ``mode="before"``
+  validator, checking ``isinstance`` against ``ModelVersion``/
+  ``ScoringCriteria`` directly -- see ADR-006's amendment note for the
+  full record.
 * **``BIN-126`` (closed -- all 8 of an original 8, no longer in the tally
   above)** -- A wrong-typed *argument to a function or method* (not a
   Pydantic model field) used to fail on its first use inside the function
@@ -121,7 +143,7 @@ is empty on this branch, every commit.
 
 ## `known_leak`, `xfail`, and why `raises=` is not decorative
 
-Each of the 10 cases below carries a :class:`~tests.support.
+Each of the 3 cases below carries a :class:`~tests.support.
 exception_contract_registry.KnownLeak` on its ``HostileCase`` (ticket +
 the *exact* exception type observed). ``_all_cases()`` turns that into
 ``pytest.mark.xfail(strict=True, raises=<that type>)``:
@@ -132,9 +154,11 @@ the *exact* exception type observed). ``_all_cases()`` turns that into
   staying green under a marker that no longer describes what actually
   happens. That is new information, not confirmation of the same bug --
   see each case's comment in the registry for whether a broader type
-  would have been safe to assert instead (in every one of these 12, it
-  would not: the specific type is exactly what distinguishes ``BIN-104``
-  from ``BIN-126`` from ``BIN-127``).
+  would have been safe to assert instead (in every one of these 3, it
+  would not: ``RuntimeError`` is exactly what a hostile object's own
+  attribute access raises, the same reasoning that previously
+  distinguished ``BIN-104``'s ``ValidationError`` and ``BIN-126``'s bare
+  ``AttributeError``/``TypeError`` before both tickets closed).
 * **``strict=True`` is the point, not a strictness dial.** If the
   underlying leak is fixed -- the entry point now either raises a proper
   ``CaliperError`` or does not raise at all -- the case XPASSes, and

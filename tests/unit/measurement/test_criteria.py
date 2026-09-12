@@ -174,3 +174,31 @@ def test_preserves_any_non_blank_criteria_character_for_character(rubric: str) -
 
     # Assert
     assert criteria.value == rubric
+
+
+# --- Wrong-typed construction (BIN-104) -------------------------------------
+
+
+@pytest.mark.parametrize("wrong_typed_value", [123, None, ["not", "a", "string"]])
+def test_raises_invalid_parameter_error_for_wrong_typed_value(
+    wrong_typed_value: object,
+) -> None:
+    """A wrong-typed ``value`` is rejected before Pydantic's core coercion runs.
+
+    Mirrors ``tests/unit/measurement/test_model_version.py`` -- before
+    BIN-104, ``ScoringCriteria(value=123)`` escaped as a raw
+    ``pydantic_core.ValidationError`` instead of a classifiable
+    ``CaliperError``.
+    """
+    # Act
+    with pytest.raises(InvalidParameterError) as exc_info:
+        ScoringCriteria(value=wrong_typed_value)  # type: ignore[arg-type]
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "invalid_parameter"
+    assert error.context["parameter"] == "scoring_criteria"
+    assert error.context["kind"] == "invalid"
+    assert error.context["provided"] == wrong_typed_value
+    assert isinstance(error.context["constraint"], str)
+    assert error.context["constraint"] != ""

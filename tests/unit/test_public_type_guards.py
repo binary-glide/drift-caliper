@@ -264,7 +264,7 @@ def test_baseline_record_accepts_score_across_numeric_types(
     provenance = ProvenanceFactory()
     baseline.record(
         ScoringResult(
-            score=numeric_type(0.5),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            score=numeric_type(0.5),  # type: ignore[arg-type]
             reasoning="r",
             provenance=provenance,
         )

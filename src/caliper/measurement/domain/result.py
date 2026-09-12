@@ -13,6 +13,9 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.errors import InvalidParameterError
 from caliper.measurement.domain.provenance import Provenance
+from caliper.measurement.domain.type_guards import require_real_number
+
+SCORE_CONSTRAINT = "must be a finite real number (not NaN or +/-infinity)"
 
 
 class ScoringResult(BaseModel):
@@ -37,6 +40,25 @@ class ScoringResult(BaseModel):
     reasoning: str
     provenance: Provenance
 
+    @field_validator("score", mode="before")
+    @classmethod
+    def reject_wrong_type(cls, v: object) -> object:
+        """Reject a non-numeric ``score`` before Pydantic's core coercion runs.
+
+        A wrong-typed ``score`` (e.g. ``ScoringResult(score="not a
+        float")``) used to be rejected by Pydantic's core coercion instead
+        of Caliper's own validation, surfacing as a raw
+        ``pydantic_core.ValidationError`` rather than a classifiable
+        ``CaliperError`` (BIN-104). ``int``, ``float``, and every numpy
+        numeric scalar type continue to be accepted unchanged -- this
+        guard only narrows *which* types reach Pydantic's own coercion, it
+        does not narrow the value itself (that happens afterwards, exactly
+        as before). See ``caliper.measurement.domain.type_guards`` for why
+        this is a ``mode="before"`` validator and why it raises
+        ``InvalidParameterError`` directly rather than ``ValueError``.
+        """
+        return require_real_number(v, parameter="score", constraint=SCORE_CONSTRAINT)
+
     @field_validator("score")
     @classmethod
     def must_be_finite(cls, v: float) -> float:
@@ -53,7 +75,7 @@ class ScoringResult(BaseModel):
                 "score must be a finite number",
                 context={
                     "parameter": "score",
-                    "constraint": "must be a finite float (not NaN or +/-infinity)",
+                    "constraint": SCORE_CONSTRAINT,
                     "kind": "invalid",
                     "provided": v,
                 },

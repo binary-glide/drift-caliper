@@ -6,10 +6,11 @@ section 7.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from caliper.measurement.domain.criteria import ScoringCriteria
 from caliper.measurement.domain.model_version import ModelVersion
+from caliper.measurement.domain.type_guards import require_instance
 
 
 class Provenance(BaseModel):
@@ -19,16 +20,54 @@ class Provenance(BaseModel):
     field-wise ``BaseModel`` equality, since ``ModelVersion`` and
     ``ScoringCriteria`` are themselves value-equal models.
 
-    No validator: there is nothing left to validate here. A
-    ``Provenance`` cannot hold a blank or whitespace-only model version or
-    criteria string, because ``ModelVersion`` and ``ScoringCriteria``
-    already cannot -- the invariant is structural, not re-checked.
+    **No content validator** (ADR-006 section 7): there is nothing left to
+    validate about *blank* content here. A ``Provenance`` cannot hold a
+    blank or whitespace-only model version or criteria string, because
+    ``ModelVersion`` and ``ScoringCriteria`` already cannot -- that
+    invariant is structural, not re-checked.
+
+    **That reasoning covers content, not type** (BIN-104, amending ADR-006
+    -- see the amendment note at the end of
+    ``docs/architecture/adr/006-scoring-api-surface-and-judge-provider-port.md``).
+    ``Provenance(model_version="a string")`` never constructs a
+    ``ModelVersion`` at all, so the structural guarantee above never
+    engages -- Pydantic's core coercion rejected the wrong-typed value
+    first, as a raw ``pydantic_core.ValidationError``. The two
+    ``mode="before"`` validators below close that gap: they run ahead of
+    Pydantic's core coercion and reject anything that is not already an
+    actual ``ModelVersion``/``ScoringCriteria`` instance, raising
+    ``InvalidParameterError`` instead.
     """
 
     model_config = ConfigDict(frozen=True)
 
     model_version: ModelVersion
     scoring_criteria: ScoringCriteria
+
+    @field_validator("model_version", mode="before")
+    @classmethod
+    def reject_wrong_type_model_version(cls, v: object) -> object:
+        """Reject a wrong-typed ``model_version`` (BIN-104).
+
+        Must already be a ``ModelVersion`` instance.
+        """
+        return require_instance(
+            v, ModelVersion, parameter="model_version", type_name="ModelVersion"
+        )
+
+    @field_validator("scoring_criteria", mode="before")
+    @classmethod
+    def reject_wrong_type_scoring_criteria(cls, v: object) -> object:
+        """Reject a wrong-typed ``scoring_criteria`` (BIN-104).
+
+        Must already be a ``ScoringCriteria`` instance.
+        """
+        return require_instance(
+            v,
+            ScoringCriteria,
+            parameter="scoring_criteria",
+            type_name="ScoringCriteria",
+        )
 
     def __str__(self) -> str:
         """Report the wrapped values directly, not nested wrapper reprs.

@@ -733,3 +733,56 @@ by definition.
   comparison reads more clearly in the step definition -- both hold, since
   `Provenance` holds the same `ModelVersion`/`ScoringCriteria` instances
   `Judge.score()` already validated (section 7).
+
+## Amendment (2026-09-12, `BIN-104`): `Provenance` gains a type guard, not a content validator
+
+**Status:** Accepted. Implemented by `domain-implementer` on `BIN-104`.
+
+**What section 7 said, and why it was right as far as it went.** Section 7's
+`Provenance` has "No `__post_init__`. There is nothing left to validate --
+a `Provenance` cannot hold a blank or whitespace-only model version or
+criteria string, because `ModelVersion` and `ScoringCriteria` already
+cannot." That claim is correct and remains correct: it is a claim about
+*content* (blank vs. non-blank), and `ModelVersion`/`ScoringCriteria`'s own
+validators fully close that question for any `Provenance` that actually
+holds instances of them.
+
+**What it did not cover.** `BIN-121`'s exception-contract audit found
+`Provenance(model_version="not a ModelVersion", scoring_criteria=...)`
+raises a raw `pydantic_core.ValidationError`, not `InvalidParameterError`.
+The reasoning above never engages for this input, because a plain `str`
+never becomes a `ModelVersion` in the first place -- Pydantic's own core
+type coercion rejects the field before any validator (before- or
+after-mode) belonging to `Provenance` itself would even run against an
+already-constructed value. Section 7's structural argument answers "can a
+`Provenance` hold a blank model version," not "can a `Provenance` be
+constructed at all from something that was never a `ModelVersion`." Those
+are different questions, and only the first one had been settled.
+
+**The fix.** `Provenance.model_version` and `Provenance.scoring_criteria`
+each gained a `mode="before"` `@field_validator`
+(`caliper.measurement.domain.type_guards.require_instance`) that runs
+ahead of Pydantic's core coercion and requires the raw input already be an
+instance of `ModelVersion`/`ScoringCriteria` respectively, raising
+`InvalidParameterError` (`context["kind"] == "invalid"`) otherwise. This is
+a type guard, not a content re-check -- it adds no constraint on what a
+valid `ModelVersion`/`ScoringCriteria` looks like, which stays entirely
+owned by those two types.
+
+**What did not change:** `Provenance` still has no independent opinion
+about blank content, still holds the real value objects (not raw `str`),
+and section 7's reasoning for *that* design point is unchanged and
+unweakened. This amendment closes a gap in what section 7's claim covered,
+not a defect in what it claimed.
+
+**Why this belongs here rather than only in `BIN-104`'s own record:** this
+is the second time in one day a settled ADR's premise turned out to be
+narrower than its wording implied (`BIN-130` was the first, for a different
+ADR) -- worth the same treatment ADR-002's `BIN-68` amendment received,
+appending rather than rewriting the original decision.
+
+See `docs/architecture/adr/002-error-contract-exception-taxonomy.md`'s
+`BIN-68` amendment for the precedent this follows, and
+`src/caliper/measurement/domain/type_guards.py` for the shared helper and
+its own reasoning on why it is not imported from
+`caliper.baseline.domain.parameter_guards` (separate bounded contexts).
