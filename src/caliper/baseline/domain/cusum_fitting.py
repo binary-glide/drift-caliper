@@ -93,6 +93,7 @@ from scipy.optimize import brentq
 from caliper.baseline.domain.baseline import Baseline
 from caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL, MIN_MEANINGFUL_ARL
 from caliper.baseline.domain.fitted_cusum import FittedCUSUM
+from caliper.baseline.domain.parameter_guards import require_real_number, require_type
 from caliper.baseline.domain.spc_numerics import (
     _moving_range_sigma,
     _overflow_safe_mean,
@@ -229,8 +230,15 @@ def _require_target_arl(target_arl: float | None) -> float:
                 "is a statistical commitment the engineer must own."
             ),
         )
-    if not math.isfinite(target_arl) or not (
-        MIN_MEANINGFUL_ARL <= target_arl <= MAX_MEANINGFUL_ARL
+    # BIN-126: reject a bool or a non-numeric value (e.g. a string) before
+    # any arithmetic comparison is attempted against it -- see
+    # parameter_guards.require_real_number's docstring for why this is a
+    # behavioural, not nominal, check.
+    numeric_target_arl = require_real_number(
+        target_arl, parameter="target_arl", constraint=constraint
+    )
+    if not math.isfinite(numeric_target_arl) or not (
+        MIN_MEANINGFUL_ARL <= numeric_target_arl <= MAX_MEANINGFUL_ARL
     ):
         raise InvalidParameterError(
             "target_arl is outside the meaningful range",
@@ -246,22 +254,27 @@ def _require_target_arl(target_arl: float | None) -> float:
                 "500 -- common in-control ARL0 targets in the SPC literature."
             ),
         )
-    return target_arl
+    return numeric_target_arl
 
 
-def _validate_reference_value(reference_value: float | None) -> None:
-    """Raise ``InvalidParameterError`` if a supplied ``reference_value`` is invalid.
+def _validate_reference_value(reference_value: float | None) -> float | None:
+    """Validate a supplied ``reference_value``, narrowed to ``float`` if given.
 
     ``reference_value`` is genuinely optional -- ``None`` is not validated
     here at all; ``fit_cusum`` substitutes ``DEFAULT_REFERENCE_VALUE``.
     """
     if reference_value is None:
-        return
+        return None
     constraint = (
         f"must be a finite float in [{MIN_REFERENCE_VALUE}, {MAX_REFERENCE_VALUE}]"
     )
-    if not math.isfinite(reference_value) or not (
-        MIN_REFERENCE_VALUE <= reference_value <= MAX_REFERENCE_VALUE
+    # BIN-126: reject a bool or a non-numeric value before any arithmetic
+    # comparison is attempted against it.
+    numeric_reference_value = require_real_number(
+        reference_value, parameter="reference_value", constraint=constraint
+    )
+    if not math.isfinite(numeric_reference_value) or not (
+        MIN_REFERENCE_VALUE <= numeric_reference_value <= MAX_REFERENCE_VALUE
     ):
         raise InvalidParameterError(
             "reference_value is outside the valid range",
@@ -277,6 +290,7 @@ def _validate_reference_value(reference_value: float | None) -> None:
                 f"entirely to use the library default ({DEFAULT_REFERENCE_VALUE})."
             ),
         )
+    return numeric_reference_value
 
 
 def _validate_direction(direction: str | None) -> str:
@@ -604,10 +618,18 @@ def fit_cusum(
            Siegmund's (1985) approximation, ``b = h + 1.166``, and the
            two-sided combination formula.
     """
+    # BIN-126: reject a wrong-typed baseline before any attribute on it is
+    # accessed -- previously left to leak AttributeError the moment
+    # `baseline.check_sufficiency()` below was reached.
+    baseline = require_type(
+        baseline, Baseline, parameter="baseline", type_name="Baseline"
+    )
     validated_target_arl = _require_target_arl(target_arl)
-    _validate_reference_value(reference_value)
+    validated_reference_value = _validate_reference_value(reference_value)
     effective_reference_value = (
-        reference_value if reference_value is not None else DEFAULT_REFERENCE_VALUE
+        validated_reference_value
+        if validated_reference_value is not None
+        else DEFAULT_REFERENCE_VALUE
     )
     effective_direction = _validate_direction(direction)
     _require_attainable_target_arl(

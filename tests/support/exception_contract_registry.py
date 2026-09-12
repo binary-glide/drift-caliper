@@ -42,7 +42,9 @@ raises when a specific attribute is actually read, or an already-covered
 boundary condition re-run here as a sanity check that the fix still holds.
 
 **What this audit found -- read before assuming everything here is green.**
-18 cases below reproduce a real, currently-live leak. Each is annotated
+12 cases below reproduce a real, currently-live leak (BIN-126 closed six of
+the original 18 -- see that ticket's completion report for which). Each is
+annotated
 with :class:`KnownLeak` (ticket + the exact exception type observed) and
 the audit test turns that into ``pytest.mark.xfail(strict=True,
 raises=<that type>)`` -- tracked and green, not fixed here and not
@@ -340,7 +342,6 @@ _BASELINE_CASES = (
         lambda: Baseline().check_sufficiency(
             threshold="not an int"  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
-        known_leak=KnownLeak(ticket="BIN-126", leaked_type=TypeError),
     ),
 )
 
@@ -387,7 +388,6 @@ _JUDGE_CASES = (
         lambda: _configured_judge(provider=FakeJudgeProviderPort()).score(
             agent_output=123  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
-        known_leak=KnownLeak(ticket="BIN-126", leaked_type=AttributeError),
     ),
     HostileCase(
         "score_provider_error_passthrough",
@@ -626,7 +626,6 @@ _FIT_CUSUM_CASES = (
             "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             target_arl=370.0,
         ),
-        known_leak=KnownLeak(ticket="BIN-126", leaked_type=AttributeError),
     ),
     HostileCase(
         "wrong_type_reference_value",
@@ -635,7 +634,6 @@ _FIT_CUSUM_CASES = (
             target_arl=370.0,
             reference_value="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
-        known_leak=KnownLeak(ticket="BIN-126", leaked_type=TypeError),
     ),
     HostileCase(
         "invalid_direction",
@@ -655,7 +653,6 @@ _FIT_SHEWHART_CASES = (
             "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             target_arl=370.0,
         ),
-        known_leak=KnownLeak(ticket="BIN-126", leaked_type=AttributeError),
     ),
     HostileCase(
         "wrong_type_target_arl",
@@ -663,7 +660,6 @@ _FIT_SHEWHART_CASES = (
             _BASELINE,
             target_arl="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
-        known_leak=KnownLeak(ticket="BIN-126", leaked_type=TypeError),
     ),
 )
 

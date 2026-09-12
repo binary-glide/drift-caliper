@@ -252,17 +252,38 @@ class Judge(BaseModel):
 
 
 def _require_non_blank_agent_output(agent_output: str) -> None:
-    """Reject an empty or whitespace-only ``agent_output`` (ADR-006 section 6).
+    """Reject a wrong-typed, empty, or whitespace-only ``agent_output``.
 
     Extracted from ``Judge.score()`` to keep that method under the house
     style's ~40-line guideline -- pure refactor, no behaviour change. A
     module-level function, not a method: it does not touch ``self``.
 
+    ``agent_output`` must be an actual ``str`` (BIN-126) -- checked before
+    ``.strip()`` is called on it, which previously left a wrong-typed value
+    (e.g. an ``int``) to leak a raw ``AttributeError`` rather than a
+    classifiable ``CaliperError`` (ADR-006 section 6 already requires the
+    empty/whitespace case to raise ``InvalidParameterError``; a wrong type
+    is the same class of violation, not a different one).
+
     Raises
     ------
     InvalidParameterError
-        ``agent_output`` is empty or whitespace-only.
+        ``agent_output`` is not a ``str``, or is empty or whitespace-only.
     """
+    if not isinstance(agent_output, str):
+        raise InvalidParameterError(
+            "agent_output must be a string",
+            context={
+                "parameter": "agent_output",
+                "constraint": AGENT_OUTPUT_CONSTRAINT,
+                "kind": "invalid",
+                "provided": agent_output,
+            },
+            recovery_hint=(
+                "Pass the agent's actual output as a string -- e.g. "
+                "str(agent_output) if it originates as a non-string value."
+            ),
+        )
     if agent_output.strip() == "":
         raise InvalidParameterError(
             "agent_output must be a non-empty, non-whitespace string",

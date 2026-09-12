@@ -11,9 +11,11 @@ ADR-005 for the default threshold and its rationale.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator, Sequence
 
 from caliper.baseline.domain.data_quality_concern import DataQualityConcern
+from caliper.baseline.domain.parameter_guards import require_real_number
 from caliper.baseline.domain.provenance_comparison import build_mismatches
 from caliper.baseline.domain.sufficiency_result import SufficiencyResult
 from caliper.errors import (
@@ -276,7 +278,11 @@ class Baseline:
         Raises
         ------
         InvalidParameterError
-            ``threshold`` is zero or negative.
+            ``threshold`` is zero, negative, not a real number (BIN-126),
+            or a real number with a non-zero fractional part -- ``threshold``
+            is a count of observations, and ``50.7`` is not one; accepting
+            it and silently truncating to ``50`` would report back a
+            threshold the caller never passed (BIN-126 review).
 
         Notes
         -----
@@ -290,15 +296,59 @@ class Baseline:
         """
         del chart_type  # informational only in this story -- see docstring
 
-        effective_threshold = (
-            threshold if threshold is not None else DEFAULT_SUFFICIENCY_THRESHOLD
-        )
+        constraint = "must be a positive integer"
+        if threshold is None:
+            effective_threshold: int = DEFAULT_SUFFICIENCY_THRESHOLD
+        else:
+            # BIN-126: reject a bool or a non-numeric value (e.g. a string)
+            # before the arithmetic comparison below is attempted against
+            # it -- see parameter_guards.require_real_number's docstring
+            # for why this is a behavioural, not nominal, check.
+            numeric_threshold = require_real_number(
+                threshold, parameter="threshold", constraint=constraint
+            )
+            # BIN-126 review: `threshold` is a count of observations, so a
+            # value with a non-zero fractional part (e.g. 50.7) is rejected
+            # rather than silently truncated. Truncating would both report
+            # back a threshold the caller never passed (CLAUDE.md's "what
+            # goes in should come out") and quietly change what "sufficient"
+            # means at the boundary (50.7 -> accepting at 50 observations
+            # instead of 51) -- a confident wrong answer, not a rounding
+            # nicety. The comparison against `int(numeric_threshold)` (not
+            # `float.is_integer()` -- `ty` treats a `float`-typed value as
+            # implicitly including `int` per the PEP 484 numeric tower and
+            # does not resolve `.is_integer()` against that `int` member)
+            # accepts 50.0/np.float64(50.0)/np.int64(50) (all
+            # integral-valued) and rejects 50.7, without narrowing to
+            # `isinstance(x, int)` -- which would break the numpy interop
+            # `require_real_number` exists to preserve. The `isfinite`
+            # check short-circuits first so a non-finite `threshold` (e.g.
+            # NaN) is rejected here rather than raising `ValueError` from
+            # `int(nan)`.
+            if not math.isfinite(numeric_threshold) or numeric_threshold != int(
+                numeric_threshold
+            ):
+                raise InvalidParameterError(
+                    "sufficiency threshold must be a whole number",
+                    context={
+                        "parameter": "threshold",
+                        "constraint": constraint,
+                        "kind": "invalid",
+                        "provided": threshold,
+                    },
+                    recovery_hint=(
+                        "threshold is a count of observations -- pass a "
+                        "whole-number value (e.g. 50, 50.0, or "
+                        "np.int64(50)), not a fractional one."
+                    ),
+                )
+            effective_threshold = int(numeric_threshold)
         if effective_threshold <= 0:
             raise InvalidParameterError(
                 "sufficiency threshold must be a positive integer",
                 context={
                     "parameter": "threshold",
-                    "constraint": "must be a positive integer",
+                    "constraint": constraint,
                     "kind": "invalid",
                     "provided": threshold,
                 },

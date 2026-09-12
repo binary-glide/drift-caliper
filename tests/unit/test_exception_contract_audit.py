@@ -18,15 +18,28 @@ it is exercised (a tuple of :class:`HostileCase`\\s) or why it is excluded
 
 ## The scoreboard -- read this line first
 
-**18 known leaks are pinned as expected failures below, tracked as
-``BIN-104`` (7), ``BIN-126`` (8) and ``BIN-127`` (3). The suite is green
+**12 known leaks are pinned as expected failures below, tracked as
+``BIN-104`` (7), ``BIN-126`` (2) and ``BIN-127`` (3). The suite is green
 today because of that pinning, not because the leaks are fixed. That
 count is expected to fall to zero as each ticket closes** --
 ``strict=True`` (see below) means a fix silently makes its case XPASS,
 which fails the suite until the now-stale marker is deleted, so the count
-cannot quietly drift upward either. Anyone reading a file with 18 xfails
+cannot quietly drift upward either. Anyone reading a file with 12 xfails
 needs one number, not an investigation: this is the plan, not a scandal,
 and it is a plan with a forcing function attached.
+
+**BIN-126 was originally 8 cases; 6 are closed.** The wrong-typed-argument
+guards for ``fit_cusum``'s ``baseline``/``reference_value``,
+``fit_shewhart``'s ``baseline``/``target_arl``,
+``Baseline.check_sufficiency``'s ``threshold``, and ``Judge.score``'s
+``agent_output`` now raise ``InvalidParameterError`` and their
+``known_leak`` entries are deleted. The remaining 2
+(``fit_ewma``'s ``baseline``/``smoothing_param``) are blocked on splitting
+``ewma_fitting.py`` so its dev-only beartype hook stops guarding a public
+boundary -- see
+``Projects/caliper/pending-tickets/split-ewma-fitting-so-beartype-stops-guarding-a-public-boundary.md``
+in the vault (not yet filed in Linear at the time this was written -- MCP
+token expired).
 
 ## Why three tickets, not one
 
@@ -45,15 +58,25 @@ the other two:
   deliberately specified none, which is exactly the kind of thing a
   targeted sweep catches and a general impression of "the value objects
   validate" does not.
-* **``BIN-126`` (8 cases)** -- A wrong-typed *argument to a function or
-  method* (not a Pydantic model field) fails on its first use inside the
-  function body, before any Caliper validation runs: ``math.isfinite("x")``
-  raises bare ``TypeError``, ``"x".check_sufficiency()`` raises bare
-  ``AttributeError`` (a plain ``str`` has no such method), and
-  ``beartype``'s dev-only import hook on ``ewma_fitting`` raises its own
-  ``BeartypeCallHintParamViolation`` ahead of either. Three different
-  leaked types, one root cause: nothing validates the argument's *type*
-  before using it.
+* **``BIN-126`` (2 cases remaining, of an original 8)** -- A wrong-typed
+  *argument to a function or method* (not a Pydantic model field) fails on
+  its first use inside the function body, before any Caliper validation
+  runs: ``math.isfinite("x")`` raises bare ``TypeError``,
+  ``"x".check_sufficiency()`` raises bare ``AttributeError`` (a plain
+  ``str`` has no such method), and ``beartype``'s dev-only import hook on
+  ``ewma_fitting`` raises its own ``BeartypeCallHintParamViolation`` ahead
+  of either. Three different leaked types, one root cause: nothing
+  validates the argument's *type* before using it. Six of the eight --
+  every one not routed through ``ewma_fitting``'s beartype hook -- are
+  fixed: ``fit_cusum``, ``fit_shewhart``, ``Baseline.check_sufficiency`` and
+  ``Judge.score`` now validate with a shared, behavioural (not nominal)
+  guard (``caliper.baseline.domain.parameter_guards``) that keeps accepting
+  ``int``/``np.float32``/``np.float64``/``np.int64`` and rejects ``bool``
+  explicitly, before falling back to a plain ``isinstance`` check for
+  non-numeric parameters like ``baseline``. The remaining two
+  (``fit_ewma``'s ``baseline``/``smoothing_param``) cannot be fixed the
+  same way without also splitting ``ewma_fitting.py`` -- see the scoreboard
+  note above.
 * **``BIN-127`` (3 cases)** -- An object that duck-types past an
   ``isinstance`` check but misbehaves on actual attribute access. Both
   ``Baseline.record()``/``Monitor.record()``'s duplicated
@@ -97,7 +120,7 @@ is empty on this branch, every commit.
 
 ## `known_leak`, `xfail`, and why `raises=` is not decorative
 
-Each of the 18 cases below carries a :class:`~tests.support.
+Each of the 12 cases below carries a :class:`~tests.support.
 exception_contract_registry.KnownLeak` on its ``HostileCase`` (ticket +
 the *exact* exception type observed). ``_all_cases()`` turns that into
 ``pytest.mark.xfail(strict=True, raises=<that type>)``:
@@ -108,7 +131,7 @@ the *exact* exception type observed). ``_all_cases()`` turns that into
   staying green under a marker that no longer describes what actually
   happens. That is new information, not confirmation of the same bug --
   see each case's comment in the registry for whether a broader type
-  would have been safe to assert instead (in every one of these 18, it
+  would have been safe to assert instead (in every one of these 12, it
   would not: the specific type is exactly what distinguishes ``BIN-104``
   from ``BIN-126`` from ``BIN-127``).
 * **``strict=True`` is the point, not a strictness dial.** If the

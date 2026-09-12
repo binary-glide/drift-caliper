@@ -63,6 +63,7 @@ from statistics import NormalDist
 from caliper.baseline.domain.baseline import Baseline
 from caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL, MIN_MEANINGFUL_ARL
 from caliper.baseline.domain.fitted_shewhart import FittedShewhart
+from caliper.baseline.domain.parameter_guards import require_real_number, require_type
 from caliper.baseline.domain.spc_numerics import (
     _moving_range_sigma,
     _overflow_safe_mean,
@@ -116,8 +117,15 @@ def _require_target_arl(target_arl: float | None) -> float:
                 "is a statistical commitment the engineer must own."
             ),
         )
-    if not math.isfinite(target_arl) or not (
-        MIN_MEANINGFUL_ARL <= target_arl <= MAX_MEANINGFUL_ARL
+    # BIN-126: reject a bool or a non-numeric value (e.g. a string) before
+    # any arithmetic comparison is attempted against it -- see
+    # parameter_guards.require_real_number's docstring for why this is a
+    # behavioural, not nominal, check.
+    numeric_target_arl = require_real_number(
+        target_arl, parameter="target_arl", constraint=constraint
+    )
+    if not math.isfinite(numeric_target_arl) or not (
+        MIN_MEANINGFUL_ARL <= numeric_target_arl <= MAX_MEANINGFUL_ARL
     ):
         raise InvalidParameterError(
             "target_arl is outside the meaningful range",
@@ -133,7 +141,7 @@ def _require_target_arl(target_arl: float | None) -> float:
                 "500 -- common in-control ARL0 targets in the SPC literature."
             ),
         )
-    return target_arl
+    return numeric_target_arl
 
 
 # --- Baseline statistics ------------------------------------------------------
@@ -212,6 +220,12 @@ def fit_shewhart(
         Every observation in ``baseline`` has an identical score (BIN-95
         A2/BR-2).
     """
+    # BIN-126: reject a wrong-typed baseline before any attribute on it is
+    # accessed -- previously left to leak AttributeError the moment
+    # `baseline.check_sufficiency()` below was reached.
+    baseline = require_type(
+        baseline, Baseline, parameter="baseline", type_name="Baseline"
+    )
     validated_target_arl = _require_target_arl(target_arl)
 
     sufficiency = baseline.check_sufficiency()
