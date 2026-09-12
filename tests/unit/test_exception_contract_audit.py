@@ -18,31 +18,32 @@ it is exercised (a tuple of :class:`HostileCase`\\s) or why it is excluded
 
 ## The scoreboard -- read this line first
 
-**12 known leaks are pinned as expected failures below, tracked as
-``BIN-104`` (7), ``BIN-126`` (2) and ``BIN-127`` (3). The suite is green
+**10 known leaks are pinned as expected failures below, tracked as
+``BIN-104`` (7) and ``BIN-127`` (3). The suite is green
 today because of that pinning, not because the leaks are fixed. That
 count is expected to fall to zero as each ticket closes** --
 ``strict=True`` (see below) means a fix silently makes its case XPASS,
 which fails the suite until the now-stale marker is deleted, so the count
-cannot quietly drift upward either. Anyone reading a file with 12 xfails
+cannot quietly drift upward either. Anyone reading a file with 10 xfails
 needs one number, not an investigation: this is the plan, not a scandal,
 and it is a plan with a forcing function attached.
 
-**BIN-126 was originally 8 cases; 6 are closed.** The wrong-typed-argument
-guards for ``fit_cusum``'s ``baseline``/``reference_value``,
-``fit_shewhart``'s ``baseline``/``target_arl``,
-``Baseline.check_sufficiency``'s ``threshold``, and ``Judge.score``'s
-``agent_output`` now raise ``InvalidParameterError`` and their
-``known_leak`` entries are deleted. The remaining 2
-(``fit_ewma``'s ``baseline``/``smoothing_param``) still have no such guard
--- that is the open half of ``BIN-126``'s work. **``BIN-130`` (done)**
-removed the one thing that was blocking it: ``ewma_fitting.py``'s dev-only
-beartype hook, which used to intercept these two calls with its own
-environment-dependent ``BeartypeCallHintParamViolation`` before either
-leaked anything else. Both cases now leak a stable, ordinary
-``AttributeError``/``TypeError`` instead -- identically with or without the
-beartype hook installed -- so ``BIN-126`` has nothing left to design here,
-only the guard itself to add.
+**BIN-126 was originally 8 cases; all 8 are now closed** and it no longer
+appears in the tally above. The wrong-typed-argument guards for
+``fit_cusum``'s ``baseline``/``reference_value``, ``fit_shewhart``'s
+``baseline``/``target_arl``, ``Baseline.check_sufficiency``'s
+``threshold``, ``Judge.score``'s ``agent_output``, and -- closing the
+final two -- ``fit_ewma``'s ``baseline``/``smoothing_param`` all now raise
+``InvalidParameterError`` and every ``known_leak`` entry for them is
+deleted. **``BIN-130`` (done first)** removed the thing that had been
+blocking the last two: ``ewma_fitting.py``'s dev-only beartype hook, which
+used to intercept those two calls with its own environment-dependent
+``BeartypeCallHintParamViolation`` before either leaked anything else.
+Both used to leak a stable, ordinary ``AttributeError``/``TypeError``
+instead -- identically with or without the beartype hook installed --
+which is what let ``BIN-126`` add the same
+``caliper.baseline.domain.parameter_guards`` guard the other charts
+already carried, rather than designing a fourth convention.
 
 ## Why three tickets, not one
 
@@ -61,22 +62,22 @@ the other two:
   deliberately specified none, which is exactly the kind of thing a
   targeted sweep catches and a general impression of "the value objects
   validate" does not.
-* **``BIN-126`` (2 cases remaining, of an original 8)** -- A wrong-typed
-  *argument to a function or method* (not a Pydantic model field) fails on
-  its first use inside the function body, before any Caliper validation
-  runs: ``math.isfinite("x")`` raises bare ``TypeError``,
-  ``"x".check_sufficiency()`` raises bare ``AttributeError`` (a plain
-  ``str`` has no such method). Six of the eight are fixed: ``fit_cusum``,
-  ``fit_shewhart``, ``Baseline.check_sufficiency`` and ``Judge.score`` now
-  validate with a shared, behavioural (not nominal) guard
+* **``BIN-126`` (closed -- all 8 of an original 8, no longer in the tally
+  above)** -- A wrong-typed *argument to a function or method* (not a
+  Pydantic model field) used to fail on its first use inside the function
+  body, before any Caliper validation ran: ``math.isfinite("x")`` raised
+  bare ``TypeError``, ``"x".check_sufficiency()`` raised bare
+  ``AttributeError`` (a plain ``str`` has no such method). ``fit_cusum``,
+  ``fit_shewhart``, ``Baseline.check_sufficiency``, ``Judge.score`` and --
+  closing the last two -- ``fit_ewma`` all now validate with a shared,
+  behavioural (not nominal) guard
   (``caliper.baseline.domain.parameter_guards``) that keeps accepting
   ``int``/``np.float32``/``np.float64``/``np.int64`` and rejects ``bool``
   explicitly, before falling back to a plain ``isinstance`` check for
-  non-numeric parameters like ``baseline``. The remaining two
-  (``fit_ewma``'s ``baseline``/``smoothing_param``) still lack that guard --
-  ``BIN-130`` only removed the third, environment-dependent leaked type
-  (``ewma_fitting``'s dev-only beartype hook) that used to sit ahead of
-  these two, not the guard itself; see the scoreboard note above.
+  non-numeric parameters like ``baseline``. ``BIN-130`` removed the thing
+  that had been blocking the last two: the environment-dependent leaked
+  type (``ewma_fitting``'s dev-only beartype hook) that used to sit ahead
+  of them; see the scoreboard note above.
 * **``BIN-127`` (3 cases)** -- An object that duck-types past an
   ``isinstance`` check but misbehaves on actual attribute access. Both
   ``Baseline.record()``/``Monitor.record()``'s duplicated
@@ -120,7 +121,7 @@ is empty on this branch, every commit.
 
 ## `known_leak`, `xfail`, and why `raises=` is not decorative
 
-Each of the 12 cases below carries a :class:`~tests.support.
+Each of the 10 cases below carries a :class:`~tests.support.
 exception_contract_registry.KnownLeak` on its ``HostileCase`` (ticket +
 the *exact* exception type observed). ``_all_cases()`` turns that into
 ``pytest.mark.xfail(strict=True, raises=<that type>)``:

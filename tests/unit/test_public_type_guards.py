@@ -4,13 +4,14 @@
 BIN-126 cases (``fit_ewma``/``fit_cusum``/``fit_shewhart``'s wrong-typed
 ``baseline``/``smoothing_param``/``reference_value``/``target_arl``,
 ``Baseline.check_sufficiency``'s wrong-typed ``threshold``, and
-``Judge.score``'s wrong-typed ``agent_output``) are **already** pinned as
+``Judge.score``'s wrong-typed ``agent_output``) **were** pinned as
 ``xfail(strict=True, raises=<exact type>)`` in
 ``tests/support/exception_contract_registry.py`` -- that registry, driven
-by ``tests/unit/test_exception_contract_audit.py``, already is this
-ticket's "these 8 leaks must become ``CaliperError``" spec. This file does
-not duplicate that; it covers the two things the brief says that audit is
-not enough on its own to prove:
+by ``tests/unit/test_exception_contract_audit.py``, was this ticket's
+"these 8 leaks must become ``CaliperError``" spec, and all 8 are now
+closed (their ``known_leak`` entries deleted). This file never duplicated
+that; it covers the two things the brief says that audit alone is not
+enough to prove:
 
 1. **The accept direction.** A guard that turns a wrong-typed
    ``AttributeError``/``TypeError`` into an ``InvalidParameterError`` is
@@ -38,7 +39,7 @@ not enough on its own to prove:
    acceptable resolution (bool rejected outright, or a floor that makes
    the resulting chart not alarm on nearly every observation).
 
-## beartype and fit_ewma's numeric-tower gap -- resolved by BIN-130
+## beartype and fit_ewma's numeric-tower gap -- resolved by BIN-130 and BIN-126
 
 **This section originally documented a live defect, measured by direct
 execution before this ticket's own fix landed.** ``tests/conftest.py`` used
@@ -74,11 +75,14 @@ own numeric parameters are already normalised the same way by
 ``fit_ewma``'s numeric-acceptance tests below are therefore now plain,
 environment-independent regression guards, exactly like ``fit_cusum``'s
 and ``fit_shewhart``'s. What BIN-130 did **not** touch is the *reject*
-direction: ``fit_ewma`` still has no guard against a wrong-typed or
-``bool``-typed argument (that guard is BIN-126's remaining work), so the
-bool-rejection tests for ``fit_ewma`` further below are still pinned
-``xfail`` -- but for a different, now-measured reason. See
-``_EWMA_BOOL_REJECTION_BLOCKER_REASON``.
+direction: BIN-130 alone left ``fit_ewma`` with no guard against a
+wrong-typed or ``bool``-typed argument. **BIN-126 closes that gap**, adding
+the identical ``caliper.baseline.domain.parameter_guards`` guard
+``fit_cusum``/``fit_shewhart`` already carried (``require_type`` on
+``baseline``, ``require_real_number`` on ``target_arl``/
+``smoothing_param``) -- so the bool-rejection tests for ``fit_ewma``
+further below now pass outright, exactly like ``fit_shewhart``'s and
+``fit_cusum``'s siblings, rather than staying pinned ``xfail``.
 
 ``fit_cusum``, ``fit_shewhart`` and ``Baseline.check_sufficiency`` never
 carried a beartype hook at all (see ``tests/conftest.py``), so their
@@ -142,29 +146,6 @@ _NUMERIC_TYPE_CASES = [
     pytest.param(np.int64, id="np_int64"),
     pytest.param(int, id="python_int"),
 ]
-
-# --- fit_ewma's bool rejection is still open -- BIN-126, not BIN-130 -----
-#
-# `bool` is an `int` subclass, so `target_arl=True`/`smoothing_param=True`
-# silently satisfy `fit_ewma`'s `float`-typed parameters and produce a
-# real (if degenerate, achieved_arl ~= 1) fit rather than raising anything
-# -- measured directly, identically with and without `tests/conftest.py`'s
-# beartype hook now that BIN-130 has closed that load-order instability.
-# Unlike the numeric-acceptance cases above, there is no `raises=` to pin
-# here: nothing raises at all, so the only thing that fails is
-# `pytest.raises(InvalidParameterError)` itself, reporting "DID NOT RAISE"
-# inside the test body below. `xfail(strict=True)` with no `raises=`
-# catches any exception -- including that one -- so this stays a faithful
-# tracking marker rather than a guess at what a future fix will raise.
-_EWMA_BOOL_REJECTION_BLOCKER_REASON = (
-    "BIN-126: fit_ewma has no bool-rejection guard yet. bool is an int "
-    "subclass, so target_arl=True/smoothing_param=True are silently "
-    "accepted and produce a real (if degenerate) fit rather than raising "
-    "anything, measured directly. No raises= is pinned because there is "
-    "no exception to match -- pytest.raises(InvalidParameterError) itself "
-    "reports 'DID NOT RAISE' inside the test body, and that is what this "
-    "xfail is tracking."
-)
 
 
 def _assert_caliper_error(exc: CaliperError) -> None:
@@ -391,28 +372,21 @@ def test_fit_ewma_accepts_a_fractional_smoothing_param_across_float_types(
 # InvalidParameterError, checking `isinstance(x, bool)` before any
 # `isinstance(x, int)` narrowing (bool is an int subclass).
 #
-# `fit_ewma`'s two cases are still open on BIN-126, not BIN-130 -- see
-# `_EWMA_BOOL_REJECTION_BLOCKER_REASON` above for why they carry no
-# `raises=` now that BIN-130 has closed the beartype instability that used
-# to give them one.
+# `fit_ewma`'s two cases are fixed by BIN-126, the same as `fit_cusum`'s
+# and `fit_shewhart`'s below -- no longer pinned `xfail`.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason=_EWMA_BOOL_REJECTION_BLOCKER_REASON, strict=True)
 def test_fit_ewma_rejects_bool_target_arl() -> None:
-    """OPEN (BIN-126): ``fit_ewma(target_arl=True)`` succeeds; nothing raises.
+    """Fixed by BIN-126: ``fit_ewma(target_arl=True)`` used to fit successfully.
 
-    Measured directly, identically with and without ``tests/conftest.py``'s
-    beartype hook (BIN-130 closed that instability): the call now succeeds
-    everywhere, producing ``achieved_arl`` approximately 1.0 -- see the
-    module docstring and BIN-131's reproduction. No guard against ``bool``
-    exists yet for ``fit_ewma`` (that is BIN-126's remaining work), so
-    ``pytest.raises(InvalidParameterError)`` below reports "DID NOT RAISE"
-    -- that failure, not a wrong exception type, is what this
-    ``xfail(strict=True)`` (no ``raises=``) tracks. Pinned rather than left
-    red so the suite stays green while this stays visibly tracked, and so
-    the fix landing (this XPASSes) is what actually closes the loop, not a
-    marker someone forgets to remove.
+    Measured directly before this fix, identically with and without
+    ``tests/conftest.py``'s beartype hook (BIN-130 had already closed that
+    instability): the call used to succeed everywhere, producing
+    ``achieved_arl`` approximately 1.0 -- see the module docstring and
+    BIN-131's reproduction. ``fit_ewma`` now carries the same
+    ``require_real_number`` guard ``fit_cusum``/``fit_shewhart`` already
+    had, so this raises ``InvalidParameterError`` like its siblings.
     """
     with pytest.raises(InvalidParameterError) as exc_info:
         fit_ewma(_BASELINE, target_arl=True)
@@ -421,9 +395,8 @@ def test_fit_ewma_rejects_bool_target_arl() -> None:
     assert exc_info.value.context.get("kind") == "invalid"
 
 
-@pytest.mark.xfail(reason=_EWMA_BOOL_REJECTION_BLOCKER_REASON, strict=True)
 def test_fit_ewma_rejects_bool_smoothing_param() -> None:
-    """OPEN (BIN-126): ``fit_ewma(smoothing_param=True)`` succeeds; nothing raises.
+    """Fixed by BIN-126: ``fit_ewma(smoothing_param=True)`` used to fit successfully.
 
     See ``test_fit_ewma_rejects_bool_target_arl``'s docstring -- identical
     reasoning, ``smoothing_param`` rather than ``target_arl``.

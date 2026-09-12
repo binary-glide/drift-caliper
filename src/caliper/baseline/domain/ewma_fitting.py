@@ -29,6 +29,7 @@ from caliper.baseline.domain.ewma_numerics import (
     _ewma_asymptotic_std_ratio,
 )
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
+from caliper.baseline.domain.parameter_guards import require_real_number, require_type
 from caliper.baseline.domain.spc_numerics import (
     _moving_range_sigma,
     _overflow_safe_mean,
@@ -156,8 +157,16 @@ def _require_target_arl(target_arl: float | None) -> float:
                 "is a statistical commitment the engineer must own."
             ),
         )
-    if not math.isfinite(target_arl) or not (
-        MIN_MEANINGFUL_ARL <= target_arl <= MAX_MEANINGFUL_ARL
+    # BIN-126: reject a bool or a non-numeric value (e.g. a string) before
+    # any arithmetic comparison is attempted against it -- see
+    # parameter_guards.require_real_number's docstring for why this is a
+    # behavioural, not nominal, check. Mirrors
+    # cusum_fitting._require_target_arl/shewhart_fitting._require_target_arl.
+    numeric_target_arl = require_real_number(
+        target_arl, parameter="target_arl", constraint=constraint
+    )
+    if not math.isfinite(numeric_target_arl) or not (
+        MIN_MEANINGFUL_ARL <= numeric_target_arl <= MAX_MEANINGFUL_ARL
     ):
         raise InvalidParameterError(
             "target_arl is outside the meaningful range",
@@ -173,22 +182,29 @@ def _require_target_arl(target_arl: float | None) -> float:
                 "500 -- common in-control ARL0 targets in the SPC literature."
             ),
         )
-    return target_arl
+    return numeric_target_arl
 
 
-def _validate_smoothing_param(smoothing_param: float | None) -> None:
-    """Raise ``InvalidParameterError`` if a supplied ``smoothing_param`` is invalid.
+def _validate_smoothing_param(smoothing_param: float | None) -> float | None:
+    """Validate a supplied ``smoothing_param``, narrowed to ``float`` if given.
 
     ``smoothing_param`` is genuinely optional -- ``None`` is not validated
     here at all; ``fit_ewma`` substitutes ``DEFAULT_SMOOTHING_PARAM``.
+    Mirrors ``cusum_fitting._validate_reference_value`` -- the other
+    optional, single-tuning-parameter chart.
     """
     if smoothing_param is None:
-        return
+        return None
     constraint = (
         f"must be a finite float in [{MIN_SMOOTHING_PARAM}, {MAX_SMOOTHING_PARAM}]"
     )
-    if not math.isfinite(smoothing_param) or not (
-        MIN_SMOOTHING_PARAM <= smoothing_param <= MAX_SMOOTHING_PARAM
+    # BIN-126: reject a bool or a non-numeric value before any arithmetic
+    # comparison is attempted against it.
+    numeric_smoothing_param = require_real_number(
+        smoothing_param, parameter="smoothing_param", constraint=constraint
+    )
+    if not math.isfinite(numeric_smoothing_param) or not (
+        MIN_SMOOTHING_PARAM <= numeric_smoothing_param <= MAX_SMOOTHING_PARAM
     ):
         raise InvalidParameterError(
             "smoothing_param is outside the valid range",
@@ -204,6 +220,7 @@ def _validate_smoothing_param(smoothing_param: float | None) -> None:
                 f"entirely to use the library default ({DEFAULT_SMOOTHING_PARAM})."
             ),
         )
+    return numeric_smoothing_param
 
 
 # --- Baseline statistics ------------------------------------------------------
@@ -255,9 +272,11 @@ def fit_ewma(
     Raises
     ------
     InvalidParameterError
-        ``target_arl`` is missing or outside ``[MIN_MEANINGFUL_ARL,
-        MAX_MEANINGFUL_ARL]``, or ``smoothing_param`` is supplied but
-        outside ``[MIN_SMOOTHING_PARAM, MAX_SMOOTHING_PARAM]``.
+        ``baseline`` is not a ``Baseline``; ``target_arl`` is missing,
+        not a real number (``bool`` included), or outside
+        ``[MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL]``; or ``smoothing_param``
+        is supplied but not a real number (``bool`` included) or outside
+        ``[MIN_SMOOTHING_PARAM, MAX_SMOOTHING_PARAM]`` (BIN-126).
     InsufficientBaselineError
         ``baseline`` does not meet the sufficiency threshold (BIN-65
         A1/BR-1).
@@ -271,10 +290,19 @@ def fit_ewma(
            Moving Average Control Schemes: Properties and Enhancements."
            Technometrics, 32(1), 1-12.
     """
+    # BIN-126: reject a wrong-typed baseline before any attribute on it is
+    # accessed -- previously left to leak AttributeError the moment
+    # `baseline.check_sufficiency()` below was reached. Mirrors
+    # cusum_fitting.fit_cusum/shewhart_fitting.fit_shewhart.
+    baseline = require_type(
+        baseline, Baseline, parameter="baseline", type_name="Baseline"
+    )
     validated_target_arl = _require_target_arl(target_arl)
-    _validate_smoothing_param(smoothing_param)
+    validated_smoothing_param = _validate_smoothing_param(smoothing_param)
     effective_smoothing_param = (
-        smoothing_param if smoothing_param is not None else DEFAULT_SMOOTHING_PARAM
+        validated_smoothing_param
+        if validated_smoothing_param is not None
+        else DEFAULT_SMOOTHING_PARAM
     )
 
     sufficiency = baseline.check_sufficiency()
@@ -329,19 +357,25 @@ def fit_ewma(
     # `fit_ewma`'s own signature. A pure module move alone did not close
     # it; this cast is what does.
     #
-    # This also makes `fit_ewma` consistent with `fit_cusum`/`fit_shewhart`
-    # rather than inventing a fourth convention: both already normalise
-    # their own numeric parameters to `float` at their boundary via
-    # `caliper.baseline.domain.parameter_guards.require_real_number`
-    # (BIN-126), which returns `float(value)`. `fit_ewma` has no equivalent
-    # guard yet (that remains BIN-126's open work -- it would reject a
-    # wrong type outright, which this cast deliberately does not), but the
-    # *widening* behaviour -- np.float32 promoted to float64 crossing this
-    # boundary -- is the same shape all three charts now share. `float()`
-    # never rejects anything `fit_ewma` itself accepts and is exact for
-    # every numeric type already in the acceptance matrix (int, np.float64,
-    # np.float32 promotion, np.int64) -- verified directly against
-    # `test_ewma_arl_published_values.py`, not assumed: identical
+    # This also makes `fit_ewma` consistent with `fit_cusum`/`fit_shewhart`,
+    # which normalise their own numeric parameters to `float` at their
+    # boundary via `caliper.baseline.domain.parameter_guards.require_real_number`
+    # (BIN-126). `fit_ewma` now carries the identical guard --
+    # `_require_target_arl`/`_validate_smoothing_param` both call
+    # `require_real_number`, so `validated_target_arl`/
+    # `effective_smoothing_param` already arrive here narrowed to a plain
+    # `float` (never a bool, never a bare numpy scalar) before this line
+    # ever runs. That makes the `float(...)` cast below redundant for the
+    # gap it was originally added to close, but it is left in place rather
+    # than removed: it costs nothing applied to an already-`float` value,
+    # it keeps this call site correct independently of
+    # `_require_target_arl`'s own implementation, and the *widening*
+    # behaviour -- np.float32 promoted to float64 crossing this boundary --
+    # is the same shape all three charts share via the NEP 50 reasoning
+    # below. `float()` never rejects anything `fit_ewma` itself accepts and
+    # is exact for every numeric type already in the acceptance matrix (int,
+    # np.float64, np.float32 promotion, np.int64) -- verified directly
+    # against `test_ewma_arl_published_values.py`, not assumed: identical
     # `achieved_arl` before and after for every input already exercised as
     # a plain Python `float`, since `float(x) is x`-equivalent (bit-exact)
     # whenever `x` already is one.

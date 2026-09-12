@@ -42,8 +42,8 @@ raises when a specific attribute is actually read, or an already-covered
 boundary condition re-run here as a sanity check that the fix still holds.
 
 **What this audit found -- read before assuming everything here is green.**
-12 cases below reproduce a real, currently-live leak (BIN-126 closed six of
-the original 18 -- see that ticket's completion report for which). Each is
+10 cases below reproduce a real, currently-live leak (BIN-126 has now closed
+all eight of the original 18 -- see that ticket's completion report). Each is
 annotated
 with :class:`KnownLeak` (ticket + the exact exception type observed) and
 the audit test turns that into ``pytest.mark.xfail(strict=True,
@@ -578,21 +578,6 @@ _FIT_EWMA_CASES = (
             "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             target_arl=370.0,
         ),
-        known_leak=KnownLeak(
-            # Re-pinned under BIN-130 (was `BeartypeCallHintParamViolation`).
-            # BIN-130 split `fit_ewma` out of the beartype-hooked module, so
-            # it no longer intercepts this call before the body runs --
-            # `baseline.check_sufficiency()` now genuinely executes against
-            # the string and leaks `AttributeError`, measured directly, both
-            # with and without `tests/conftest.py`'s dev-only beartype hook
-            # installed. The load-order instability the previous comment
-            # here warned about is therefore also gone: this leak is now the
-            # same type in every environment. Still a `BIN-126` fix, not a
-            # `BIN-130` one -- no guard against a wrong-typed `baseline`
-            # exists yet.
-            ticket="BIN-126",
-            leaked_type=AttributeError,
-        ),
     ),
     HostileCase(
         "wrong_type_smoothing_param",
@@ -600,16 +585,6 @@ _FIT_EWMA_CASES = (
             _BASELINE,
             target_arl=370.0,
             smoothing_param="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        ),
-        known_leak=KnownLeak(
-            # Re-pinned under BIN-130 (was `BeartypeCallHintParamViolation`,
-            # same reasoning as `wrong_type_baseline` above).
-            # `_validate_smoothing_param` calls `math.isfinite(smoothing_param)`
-            # directly, which raises `TypeError` on a non-numeric argument --
-            # measured directly, identical with and without the beartype
-            # hook. Still a `BIN-126` fix, not a `BIN-130` one.
-            ticket="BIN-126",
-            leaked_type=TypeError,
         ),
     ),
     HostileCase(
