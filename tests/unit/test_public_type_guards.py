@@ -113,7 +113,6 @@ import numpy as np
 import pytest
 
 from caliper.baseline import (
-    DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     fit_cusum,
     fit_ewma,
@@ -123,15 +122,15 @@ from caliper.errors import CaliperError, InvalidParameterError
 from caliper.measurement import ScoringResult
 from caliper.monitoring import Monitor
 from tests.factories import ProvenanceFactory, ScoringResultFactory
-from tests.support.baseline_strategies import baseline_from_scores
+from tests.support.baseline_strategies import (
+    FITTABLE_PROBE_SCORES,
+    probe_baseline,
+)
 
-# A plain, unremarkable, non-degenerate 100-observation baseline -- built
-# once and reused (mirrors the registry's own `_BASELINE` for the same
-# reason: `fit_ewma`'s Markov-chain calibration is the expensive step in
-# this file). Cycling 0..4 gives a spread of 4.0, far above
-# `tests.support.baseline_strategies.MIN_FITTABLE_SPREAD`.
-_FITTABLE_SCORES = [float(i % 5) for i in range(DEFAULT_SUFFICIENCY_THRESHOLD)]
-_BASELINE = baseline_from_scores(_FITTABLE_SCORES)
+# Bound once at import and reused across cases -- `fit_ewma`'s
+# Markov-chain calibration is the expensive step in this file. See
+# `probe_baseline()` for what the data is.
+_BASELINE = probe_baseline()
 
 # The numeric-type acceptance matrix this ticket's brief asks every
 # surface to preserve. `python_int` is deliberately included even though
@@ -507,7 +506,7 @@ def test_shewhart_monitor_does_not_signal_on_every_in_control_observation() -> N
         not monitor.record(
             ScoringResultFactory(provenance=provenance, score=score)
         ).is_in_control
-        for score in _FITTABLE_SCORES[:20]
+        for score in FITTABLE_PROBE_SCORES[:20]
     )
     assert signal_count <= 1, (
         f"{signal_count}/20 in-control observations signalled out-of-control -- "
@@ -538,7 +537,7 @@ def test_cusum_monitor_does_not_signal_on_every_in_control_observation() -> None
         not monitor.record(
             ScoringResultFactory(provenance=provenance, score=score)
         ).is_in_control
-        for score in _FITTABLE_SCORES[:20]
+        for score in FITTABLE_PROBE_SCORES[:20]
     )
     assert signal_count <= 1, (
         f"{signal_count}/20 in-control observations signalled out-of-control -- "

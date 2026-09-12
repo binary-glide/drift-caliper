@@ -307,6 +307,95 @@ The CUSUM fitting API accepts an optional direction parameter. The valid set is:
 two-sided (UCL/LCL symmetrically placed). The Shewhart I-chart is inherently
 two-sided (BIN-95 BR-8). Neither has a direction parameter.
 
+## Amendment 2026-09-12 (BIN-122): the protocol is a *reporting* contract, and gains a `HasProvenance` sibling
+
+**Status:** ✅ ratified by the product owner 2026-09-12.
+**Refs:** BIN-122 (item 3), BIN-120, BIN-127, ADR-011.
+
+### What surfaced
+
+`BIN-120` narrowed `Monitor.__init__` to the three concrete `Fitted*` types,
+because `_check()` dispatches on chart-specific detection logic. `BIN-122`'s
+scope survey then found the consequence: **the same protocol now means two
+different things at two public entry points.**
+
+| entry point | a structural conformer is | and it is |
+|---|---|---|
+| `compare_provenance` | **accepted** | **correct** — it detects a genuine mismatch |
+| `Monitor` | **rejected** | **also correct** — it needs what a third party cannot supply |
+
+Neither is a defect. `isinstance(x, FittedControlLimits)` simply told a caller
+nothing useful about which they would get.
+
+### 🚨 The measurement that settles it
+
+Counting what each entry point actually reads:
+
+```
+Monitor reads 10 attributes
+  IN the protocol    : baseline_mean, chart_type, sigma_estimate                (3)
+  NOT in the protocol: decision_interval, direction, lcl, reference_value,
+                       smoothing_param, target_value, ucl                       (7)
+
+compare_provenance reads 2 attributes
+  IN the protocol    : provenance_model_version, provenance_criteria            (2)
+  NOT in the protocol: none                                                     (0)
+```
+
+**`FittedControlLimits` covers `compare_provenance` completely and `Monitor`
+barely — 3 of 10.** The seven it misses are precisely the chart-specific
+detection boundaries **section 3 of this ADR deliberately excluded**.
+
+⚠️ **So this protocol was never a monitoring contract, and could not have become
+one without reversing section 3.** `BIN-120`'s narrowing was not a compromise
+forced by an implementation detail; it was the correct reading of a protocol
+that describes what a fitted artefact **reports**, not what `Monitor` can
+**consume**.
+
+The original decision is unchanged. What was wrong was the *implied* promise
+that structural conformance made an object usable everywhere.
+
+### Decision
+
+**1. `FittedControlLimits` is a reporting/audit contract.** It describes what
+every fitted artefact exposes for inspection, comparison and provenance
+checking. Its 12 attributes stay exactly as section 2 defines them.
+⚠️ **It is not, and never was, a plug-in interface for third-party charts.**
+Its docstring must say so.
+
+**2. Add `HasProvenance`** — a two-attribute `@runtime_checkable` protocol
+(`provenance_model_version`, `provenance_criteria`). `compare_provenance`
+accepts it. This is the part of the surface a third party **can** genuinely
+satisfy, and satisfying it means something definite: your object can be
+provenance-checked.
+
+**3. `Monitor` keeps its concrete-type check** (`BIN-120`), now recorded as
+*correct by construction* rather than a narrowing. Monitoring a chart type
+Caliper does not implement remains out of scope — `BIN-82` (Western Electric)
+is the first plausible caller and would add a concrete type, not a conformer.
+
+### Consequences
+
+**Additive for consumers.** `FittedControlLimits` keeps its name, attributes
+and `@runtime_checkable` behaviour; every existing `isinstance` check returns
+what it did before. `HasProvenance` is a new export. **No published behaviour
+changes.**
+
+⚠️ **`compare_provenance`'s annotation narrows to `HasProvenance`**, which is a
+*widening* of what it accepts in principle and identical in practice — every
+`FittedControlLimits` conformer also satisfies `HasProvenance`, since the two
+provenance attributes are a subset.
+
+**What a caller gains:** `isinstance(x, HasProvenance)` is now a true statement
+about capability. `isinstance(x, FittedControlLimits)` means "reports like a
+fitted artefact" and no longer implies "can be monitored" — which was the
+false half.
+
+⚠️ **`BIN-121`'s exception-contract registry classifies both protocols as
+"not an entry point".** Adding a public name means that registry's completeness
+meta-test will fail until `HasProvenance` is classified. **That is the gate
+working**; classify it rather than routing around it.
+
 ## Alternatives considered
 
 ### Protocol mechanism: abstract base class (ABC)

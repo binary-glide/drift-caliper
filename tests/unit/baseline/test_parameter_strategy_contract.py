@@ -119,6 +119,20 @@ stated, not silently swept in -- see
 * **Not an exception-contract audit** (``BIN-121``'s job) and **not a
   Hypothesis-scale property test** -- these are deterministic boundary
   probes, one call per discovered bound, not a generative search.
+
+**Round 3 (BIN-124, 2026-09-12).** A reopening comment found a bound this
+file's completeness check had no way to see: a ``@given`` keyword whose
+value is a bare module-level constant (``_SHARED = st.floats(...)``) rather
+than an inline call. ``hypothesis_bound_scan.py`` now resolves that case
+(Part A) and reports, as an explicit named failure rather than a silent
+zero-site result, any ``@given`` keyword it still cannot resolve -- a helper
+function call, an import from elsewhere, a ``.map()``/``.filter()`` chain
+(Part B). ``test_no_given_argument_is_left_unresolved`` below is Part B's
+half of the guard; everything above this note is unchanged from round 2 and
+now also benefits from Part A's resolution before reaching the same
+classification and probing logic. See ``hypothesis_bound_scan.py``'s own
+module docstring for the full design and its stated remaining scope
+boundaries.
 """
 
 from __future__ import annotations
@@ -133,6 +147,7 @@ from _pytest.outcomes import Failed
 from caliper.errors import CaliperError
 from tests.support.hypothesis_bound_scan import (
     BoundSite,
+    UnresolvedGivenSite,
     module_dotted_name,
     scan_tests_tree,
 )
@@ -150,7 +165,9 @@ assert _TESTS_ROOT.name == "tests", f"unexpected root resolved: {_TESTS_ROOT}"
 # Scanned once at collection time so every test below parametrizes over the
 # identical, already-computed site list -- re-scanning per test would just
 # repeat the same AST walk for no benefit.
-_ALL_SITES: tuple[BoundSite, ...] = tuple(scan_tests_tree(_TESTS_ROOT))
+_SCAN_RESULT = scan_tests_tree(_TESTS_ROOT)
+_ALL_SITES: tuple[BoundSite, ...] = _SCAN_RESULT.sites
+_UNRESOLVED_SITES: tuple[UnresolvedGivenSite, ...] = _SCAN_RESULT.unresolved
 
 _GOVERNED_GIVEN_NAMES = frozenset(p.name for p in GOVERNED_GIVEN_PARAMETERS)
 _EXCLUDED_GIVEN_NAMES = frozenset(p.name for p in EXCLUDED_GIVEN_PARAMETERS)
@@ -276,6 +293,45 @@ def test_scanner_found_the_expected_dimensions() -> None:
         "smoothing_param",
     }
     assert expected <= found_given_parameters
+
+
+def _unresolved_id(site: UnresolvedGivenSite) -> str:
+    return f"{site.file}:{site.lineno}:{site.given_parameter}"
+
+
+def test_no_given_argument_is_left_unresolved() -> None:
+    """Part B (BIN-124 round 3): every ``@given`` keyword resolves to a
+    strategy this scanner can walk for bounds, or the suite fails by name.
+
+    Deliberately a single assertion over the whole list, not a
+    parametrization over ``_UNRESOLVED_SITES`` -- ``pytest.mark.parametrize``
+    over an empty list collects zero test items, which would make this
+    check invisible (collected as nothing, indistinguishable from "not
+    written") on every green run rather than a check that actively passed.
+    See ``test_scanner_found_the_expected_dimensions`` immediately above for
+    the identical reasoning applied to the sites list itself.
+
+    A ``@given`` argument reaches ``_UNRESOLVED_SITES`` when
+    ``tests/support/hypothesis_bound_scan.py`` could not resolve it to an
+    inline strategy call or a same-file module-level name (Part A) --
+    built by a helper function, imported from another module, chained via
+    ``.map()``/``.filter()``, or otherwise composed. See that module's
+    docstring, "Part B", for the full reasoning.
+    """
+    assert not _UNRESOLVED_SITES, "\n".join(
+        [
+            f"{len(_UNRESOLVED_SITES)} @given argument(s) could not be resolved "
+            "to a strategy this scanner can verify -- rewrite each into an "
+            "inline `st.floats(...)`/`st.integers(...)`/`st.decimals(...)` "
+            "call (optionally behind a module-level constant referenced by "
+            "name), or a zero-argument call to a strategy-factory function "
+            "defined at module level under tests/:",
+            *(
+                f"  {_unresolved_id(site)} -- {site.detail}"
+                for site in _UNRESOLVED_SITES
+            ),
+        ]
+    )
 
 
 @pytest.mark.parametrize("site", _ALL_SITES, ids=[_site_id(s) for s in _ALL_SITES])

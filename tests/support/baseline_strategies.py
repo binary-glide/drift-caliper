@@ -136,3 +136,51 @@ def baseline_from_scores(scores: list[float]) -> Baseline:
     for score in scores:
         baseline.record(ScoringResultFactory(provenance=provenance, score=score))
     return baseline
+
+
+# --- The fixed probe baseline -------------------------------------------------
+#
+# Consolidated 2026-09-12 (BIN-122 review, `code-reviewer`'s recommendation)
+# from **six** byte-identical copies, not the four the review found -- two of
+# them hid under a different name (`_FITTABLE_SCORES`/`_BASELINE` in
+# `tests/support/exception_contract_registry.py` and
+# `tests/unit/test_public_type_guards.py`), which is precisely why grepping for
+# the *name* undercounts and grepping for the *literal* does not. That makes
+# this the tenth instance of the duplication pattern recorded on this project.
+#
+# Unlike `baseline_scores_strategy()` above, this carries no rejection logic
+# and no scanner-visibility constraint (BIN-124's AST scanner reads
+# `@given(...)` bounds, and a plain `Baseline` is not one). It is pure setup:
+# an ordinary, unremarkable, fittable baseline that exists only so the thing
+# actually under test -- a *parameter*, an *error contract*, a *docstring
+# claim* -- can be probed against data that would otherwise fit cleanly on all
+# three charts. It is deliberately **not** a hostile input; that is BIN-121's
+# territory, not this module's.
+#
+# Spread is 4.0, far above `MIN_FITTABLE_SPREAD` and far above the
+# moving-range underflow floor BIN-119 added, so no caller has to think about
+# degeneracy when reaching for it.
+
+FITTABLE_PROBE_SCORES = [float(i % 5) for i in range(DEFAULT_SUFFICIENCY_THRESHOLD)]
+"""Exactly ``DEFAULT_SUFFICIENCY_THRESHOLD`` scores cycling 0.0-4.0.
+
+Sized at the threshold so every probe baseline is sufficient by construction
+-- a caller probing a parameter must never have its call refused for the
+unrelated reason that the baseline was too short.
+"""
+
+
+def probe_baseline() -> Baseline:
+    """Return a **fresh** fittable probe baseline from ``FITTABLE_PROBE_SCORES``.
+
+    Returns a new instance per call rather than exposing one shared
+    module-level constant. No current caller mutates its probe -- verified
+    across all six call sites at consolidation time -- so a shared instance
+    would work today. It is a function anyway because ``Baseline`` is
+    *mutable* (``record()`` appends), and one shared instance would make a
+    future test's ``record()`` silently corrupt every other file's probe,
+    with the failure surfacing somewhere unrelated. That is the same
+    action-at-a-distance shape as the Hypothesis-strategy drift this module
+    was created to prevent; guaranteeing isolation costs one function call.
+    """
+    return baseline_from_scores(FITTABLE_PROBE_SCORES)

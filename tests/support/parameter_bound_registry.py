@@ -77,15 +77,11 @@ from dataclasses import dataclass
 from caliper.baseline import Baseline, fit_cusum, fit_ewma, fit_shewhart
 from caliper.baseline.domain.cusum_fitting import _min_attainable_arl0
 from caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
-from tests.support.baseline_strategies import baseline_from_scores
+from tests.support.baseline_strategies import probe_baseline
 
-# An ordinary, unremarkable fittable baseline -- see
-# exception_contract_registry.py's `_FITTABLE_SCORES` for the identical
-# reasoning (spread of 4.0, far above MIN_FITTABLE_SPREAD; not itself a
-# hostile input, exists only so the *parameter* under test can be probed
-# against a baseline that would otherwise fit cleanly on every chart).
-_PROBE_SCORES = [float(i % 5) for i in range(100)]
-_PROBE_BASELINE = baseline_from_scores(_PROBE_SCORES)
+# An ordinary, unremarkable fittable baseline -- see `probe_baseline()`
+# for why it is deliberately not itself a hostile input.
+_PROBE_BASELINE = probe_baseline()
 
 
 def _probe_target_arl(value: float) -> None:

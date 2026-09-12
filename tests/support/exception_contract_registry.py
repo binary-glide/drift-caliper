@@ -89,7 +89,7 @@ from tests.factories import (
     ScoringCriteriaFactory,
     ScoringResultFactory,
 )
-from tests.support.baseline_strategies import baseline_from_scores
+from tests.support.baseline_strategies import baseline_from_scores, probe_baseline
 from tests.support.fakes import FakeJudgeProviderPort
 
 # ---------------------------------------------------------------------------
@@ -100,13 +100,10 @@ from tests.support.fakes import FakeJudgeProviderPort
 # file's runtime bounded.
 # ---------------------------------------------------------------------------
 
-# 0..4 repeating gives a spread of 4.0 -- far above
-# tests/support/baseline_strategies.py's MIN_FITTABLE_SPREAD floor, and a
-# plain, unremarkable baseline no different from any other test's fixture
-# data. Not itself a hostile input; it exists only so the *parameters* below
-# can be hostile against a baseline that would otherwise fit cleanly.
-_FITTABLE_SCORES = [float(i % 5) for i in range(100)]
-_BASELINE = baseline_from_scores(_FITTABLE_SCORES)
+# Not itself a hostile input; it exists only so the *parameters* below can
+# be hostile against a baseline that would otherwise fit cleanly. See
+# `probe_baseline()`.
+_BASELINE = probe_baseline()
 
 # BIN-119 regression fixtures -- each has two distinct values (so the
 # ordinary zero-variance guard does not fire first) but its moving-range
