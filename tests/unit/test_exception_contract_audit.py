@@ -18,15 +18,18 @@ it is exercised (a tuple of :class:`HostileCase`\\s) or why it is excluded
 
 ## The scoreboard -- read this line first
 
-**3 known leaks are pinned as expected failures below, tracked as
-``BIN-127`` (3). The suite is green
-today because of that pinning, not because the leaks are fixed. That
-count is expected to fall to zero as the ticket closes** --
-``strict=True`` (see below) means a fix silently makes its case XPASS,
-which fails the suite until the now-stale marker is deleted, so the count
-cannot quietly drift upward either. Anyone reading a file with 3 xfails
-needs one number, not an investigation: this is the plan, not a scandal,
-and it is a plan with a forcing function attached.
+**Zero known leaks remain. All 18 of the original findings from this
+audit are closed** -- ``BIN-104`` (7), ``BIN-126`` (8), and now ``BIN-127``
+(the last 3) each closed their share, and none has a live
+``pytest.mark.xfail`` entry left in the registry. That is the milestone
+this file exists to reach: every case ``EXERCISABLE`` describes either
+raises a well-formed ``CaliperError`` or does not raise at all, with
+nothing pinned as a known, tracked exception. The :class:`KnownLeak` /
+``xfail(strict=True, raises=...)`` machinery is retained (see below) as
+the mechanism that would track the *next* leak this audit finds, not as a
+vestige of these three -- ``strict=True`` means a fix silently makes its
+case XPASS, which fails the suite until the now-stale marker is deleted,
+so a real regression cannot quietly reappear behind a stale marker either.
 
 **BIN-104 was originally 7 cases; all 7 are now closed** and it no longer
 appears in the tally above. ``ModelVersion``, ``ScoringCriteria``,
@@ -100,13 +103,25 @@ the other two:
   that had been blocking the last two: the environment-dependent leaked
   type (``ewma_fitting``'s dev-only beartype hook) that used to sit ahead
   of them; see the scoreboard note above.
-* **``BIN-127`` (3 cases)** -- An object that duck-types past an
-  ``isinstance`` check but misbehaves on actual attribute access. Both
-  ``Baseline.record()``/``Monitor.record()``'s duplicated
-  ``_missing_observation_fields`` (``hasattr`` only swallows
-  ``AttributeError``) and ``compare_provenance()`` (no guard equivalent to
-  ``Monitor``'s ``_safe_repr``) read a caller-supplied object's attributes
-  directly and let whatever that access raises propagate unchanged.
+* **``BIN-127`` (closed -- all 3 of an original 3, no longer in the tally
+  above)** -- An object that duck-types past an ``isinstance`` check but
+  misbehaves on actual attribute access. ``Baseline.record()``/
+  ``Monitor.record()``'s once-duplicated ``_missing_observation_fields``
+  (``hasattr`` only swallows ``AttributeError``) and ``compare_provenance()``
+  (no guard equivalent to ``Monitor``'s ``_safe_repr``) used to read a
+  caller-supplied object's attributes directly and let whatever that access
+  raised propagate unchanged. All three now go through
+  ``caliper.baseline.domain.attribute_probe`` -- one shared, guarded probe
+  used by both bounded contexts (``baseline`` and ``monitoring``) rather
+  than two independently-guarded copies -- which distinguishes "attribute
+  absent" from "attribute access raised" in ``context`` rather than
+  flattening the two, and never itself raises. ``Baseline.record()``/
+  ``Monitor.record()`` keep raising ``InvalidObservationError``;
+  ``compare_provenance()`` raises ``InvalidParameterError`` (not
+  ``ProvenanceMismatchError`` -- see that module's
+  ``_reject_if_artefact_provenance_unreadable`` docstring for why: there is
+  no actual "received" value to report when the read itself failed, only a
+  malformed ``artefact`` parameter to reject).
 
 ## A structural limit of this whole technique, stated plainly
 
@@ -143,9 +158,12 @@ is empty on this branch, every commit.
 
 ## `known_leak`, `xfail`, and why `raises=` is not decorative
 
-Each of the 3 cases below carries a :class:`~tests.support.
-exception_contract_registry.KnownLeak` on its ``HostileCase`` (ticket +
-the *exact* exception type observed). ``_all_cases()`` turns that into
+**No case below currently carries a** :class:`~tests.support.
+exception_contract_registry.KnownLeak` -- the registry's last three were
+deleted when ``BIN-127`` closed. The mechanism stays wired up in
+``_all_cases()`` for whenever the *next* one is found: a case annotated
+with :class:`~tests.support.exception_contract_registry.KnownLeak`
+(ticket + the *exact* exception type observed) turns into
 ``pytest.mark.xfail(strict=True, raises=<that type>)``:
 
 * **``raises=<exact type>``, not ``Exception``.** If a future change
@@ -153,12 +171,10 @@ the *exact* exception type observed). ``_all_cases()`` turns that into
   will not match it, and the case fails for real rather than quietly
   staying green under a marker that no longer describes what actually
   happens. That is new information, not confirmation of the same bug --
-  see each case's comment in the registry for whether a broader type
-  would have been safe to assert instead (in every one of these 3, it
-  would not: ``RuntimeError`` is exactly what a hostile object's own
-  attribute access raises, the same reasoning that previously
+  ``RuntimeError`` was exactly what BIN-127's three hostile objects' own
+  attribute access raised, the same reasoning that previously
   distinguished ``BIN-104``'s ``ValidationError`` and ``BIN-126``'s bare
-  ``AttributeError``/``TypeError`` before both tickets closed).
+  ``AttributeError``/``TypeError`` before each of those closed in turn.
 * **``strict=True`` is the point, not a strictness dial.** If the
   underlying leak is fixed -- the entry point now either raises a proper
   ``CaliperError`` or does not raise at all -- the case XPASSes, and

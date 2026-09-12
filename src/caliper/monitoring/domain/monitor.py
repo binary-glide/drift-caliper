@@ -24,23 +24,17 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from caliper.baseline.domain.attribute_probe import invalid_observation_error
 from caliper.baseline.domain.compare_provenance import compare_provenance
 from caliper.baseline.domain.fitted_control_limits import FittedControlLimits
 from caliper.baseline.domain.fitted_cusum import FittedCUSUM
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
 from caliper.baseline.domain.fitted_shewhart import FittedShewhart
-from caliper.errors import InvalidObservationError, InvalidParameterError
+from caliper.errors import InvalidParameterError
 from caliper.measurement import ScoringResult
 from caliper.monitoring.domain.delivery_failure import DeliveryFailure
 from caliper.monitoring.domain.monitoring_result import MonitoringResult
 from caliper.monitoring.domain.signal_receiver import SignalReceiver
-
-# Fields a candidate observation must expose to be treated as a complete
-# ScoringResult. Mirrors caliper.baseline.domain.baseline's identically-named
-# private helper -- duplicated here, not imported, since it is private to
-# that module and this is the Phase II instance of the same check reusing
-# InvalidObservationError, not a shared collaborator (ADR-009 section 3).
-_REQUIRED_OBSERVATION_FIELDS = ("score", "reasoning", "provenance")
 
 # Two-sided CUSUM's upper arm detects an increasing shift (improvement /
 # baseline staleness under ADR-001's higher-is-better mapping); the lower
@@ -126,17 +120,6 @@ def _describe_exception(exc: Exception) -> str:
         return str(exc)
     except Exception:
         return type(exc).__name__
-
-
-def _missing_observation_fields(candidate: object) -> list[str]:
-    """Report which ``ScoringResult`` fields ``candidate`` does not expose.
-
-    Used only after ``isinstance(candidate, ScoringResult)`` has already
-    failed, to build ``InvalidObservationError.context["missing_fields"]``.
-    """
-    return [
-        field for field in _REQUIRED_OBSERVATION_FIELDS if not hasattr(candidate, field)
-    ]
 
 
 class Monitor:
@@ -304,21 +287,7 @@ class Monitor:
             baseline provenance on either dimension.
         """
         if not isinstance(observation, ScoringResult):
-            raise InvalidObservationError(
-                "recorded observation is not a complete scoring result",
-                context={
-                    "reason": (
-                        "input is missing one or more required ScoringResult "
-                        "fields (score, reasoning, provenance)"
-                    ),
-                    "missing_fields": _missing_observation_fields(observation),
-                },
-                recovery_hint=(
-                    "Pass a complete ScoringResult (score, reasoning, "
-                    "provenance) -- typically the return value of "
-                    "Judge.score()."
-                ),
-            )
+            raise invalid_observation_error(observation)
 
         compare_provenance(observation, self._artefact)
 

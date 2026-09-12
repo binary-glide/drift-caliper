@@ -41,17 +41,22 @@ non-finite float, an object that satisfies a protocol structurally but
 raises when a specific attribute is actually read, or an already-covered
 boundary condition re-run here as a sanity check that the fix still holds.
 
-**What this audit found -- read before assuming everything here is green.**
-3 cases below reproduce a real, currently-live leak (BIN-126 has closed
-all eight of its original 18, and BIN-104 has closed all seven of its own --
-see each ticket's completion report). Each remaining case is annotated
-with :class:`KnownLeak` (ticket + the exact exception type observed) and
-the audit test turns that into ``pytest.mark.xfail(strict=True,
-raises=<that type>)`` -- tracked and green, not fixed here and not
-silenced. See the module docstring of
+**What this audit found -- read before assuming this was always green.**
+**Zero cases below are currently known leaks.** All 18 of the original
+findings this audit turned up are now closed: ``BIN-126`` closed its
+eight, ``BIN-104`` closed its seven, and ``BIN-127`` closed the
+remaining three -- an object that duck-types past an ``isinstance`` check
+but raises on actual attribute access, at ``Baseline.record()``,
+``Monitor.record()``, and ``compare_provenance()`` (see each ticket's
+completion report). The :class:`KnownLeak` machinery below is retained,
+not removed, since it is the mechanism that would track the *next* one: a
+case is annotated with :class:`KnownLeak` (ticket + the exact exception
+type observed) and the audit test turns that into
+``pytest.mark.xfail(strict=True, raises=<that type>)`` -- tracked and
+green, not silenced. See the module docstring of
 ``tests/unit/test_exception_contract_audit.py`` for the full, itemised
-list, the owning tickets, and why ``strict=True``/``raises=`` matter --
-this docstring only explains the registry mechanism.
+history and why ``strict=True``/``raises=`` matter -- this docstring only
+explains the registry mechanism.
 """
 
 from __future__ import annotations
@@ -166,9 +171,12 @@ class _RaisingScoreCandidate:
     Reproduces the case ``hasattr(candidate, "score")`` cannot safely paper
     over: ``hasattr`` only swallows ``AttributeError``, so a candidate whose
     attribute access itself misbehaves (a lazy-loading ORM-style descriptor,
-    a property backed by a closed resource) propagates that failure through
-    ``Baseline.record``'s and ``Monitor.record``'s identical
-    ``_missing_observation_fields`` helpers.
+    a property backed by a closed resource) used to propagate that failure
+    through ``Baseline.record``'s and ``Monitor.record``'s identical
+    ``_missing_observation_fields`` helpers. Both now go through the shared,
+    guarded ``caliper.baseline.domain.attribute_probe.probe_fields`` instead
+    (BIN-127) -- this case is a regression test for that fix, not a live
+    leak.
     """
 
     @property
@@ -207,9 +215,12 @@ class _RaisingProvenanceArtefact:
     ``compare_provenance()`` (unlike ``Monitor``) takes any object
     satisfying ``FittedControlLimits`` and reads
     ``artefact.provenance_model_version``/``artefact.provenance_criteria``
-    directly -- with no guard equivalent to ``Monitor``'s ``_safe_repr``
-    (``BIN-118``/``BIN-120``'s fix). This reproduces that same hazard at a
-    boundary the ``BIN-118``/``BIN-120`` fixes never touched.
+    directly. It used to do so with no guard equivalent to ``Monitor``'s
+    ``_safe_repr`` (``BIN-118``/``BIN-120``'s fix) -- a hazard neither of
+    those fixes touched. It now reads both through
+    ``caliper.baseline.domain.attribute_probe.probe_attribute`` and raises
+    ``InvalidParameterError`` instead (BIN-127); this case is a regression
+    test for that fix, not a live leak.
     """
 
     provenance_criteria = "criteria"
@@ -324,7 +335,6 @@ _BASELINE_CASES = (
     HostileCase(
         "record_hostile_raising_attribute",
         lambda: Baseline().record(_RaisingScoreCandidate()),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        known_leak=KnownLeak(ticket="BIN-127", leaked_type=RuntimeError),
     ),
     HostileCase(
         "check_sufficiency_zero_threshold",
@@ -511,7 +521,6 @@ _MONITOR_CASES = (
         lambda: Monitor(_FITTED_EWMA).record(
             _RaisingScoreCandidate()  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
-        known_leak=KnownLeak(ticket="BIN-127", leaked_type=RuntimeError),
     ),
     HostileCase(
         "record_provenance_mismatch",
@@ -544,7 +553,6 @@ _COMPARE_PROVENANCE_CASES = (
             _matching_scoring_result(),
             _RaisingProvenanceArtefact(),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
-        known_leak=KnownLeak(ticket="BIN-127", leaked_type=RuntimeError),
     ),
 )
 

@@ -14,21 +14,13 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator, Sequence
 
+from caliper.baseline.domain.attribute_probe import invalid_observation_error
 from caliper.baseline.domain.data_quality_concern import DataQualityConcern
 from caliper.baseline.domain.parameter_guards import require_real_number
 from caliper.baseline.domain.provenance_comparison import build_mismatches
 from caliper.baseline.domain.sufficiency_result import SufficiencyResult
-from caliper.errors import (
-    InvalidObservationError,
-    InvalidParameterError,
-    ProvenanceMismatchError,
-)
+from caliper.errors import InvalidParameterError, ProvenanceMismatchError
 from caliper.measurement import Provenance, ScoringResult
-
-# Fields a candidate observation must expose to be treated as a complete
-# ScoringResult. Used only to report *which* fields are missing when an
-# isinstance check has already failed -- not to duck-type acceptance itself.
-_REQUIRED_OBSERVATION_FIELDS = ("score", "reasoning", "provenance")
 
 # The library's default minimum Phase I baseline size for
 # ``check_sufficiency()`` -- 100 individual observations, applied uniformly
@@ -50,19 +42,6 @@ _ZERO_VARIANCE_CONCERN_KIND = "zero_variance"
 # is never flagged as zero-variance -- there is nothing yet to compare it
 # against. An empty baseline (0 observations) is likewise never flagged.
 _MIN_OBSERVATIONS_FOR_VARIANCE_CHECK = 2
-
-
-def _missing_observation_fields(candidate: object) -> list[str]:
-    """Report which ``ScoringResult`` fields ``candidate`` does not expose.
-
-    Used only after ``isinstance(candidate, ScoringResult)`` has already
-    failed, to build ``InvalidObservationError.context["missing_fields"]``.
-    ``candidate`` may be ``None`` or any other object -- ``hasattr`` is safe
-    against both.
-    """
-    return [
-        field for field in _REQUIRED_OBSERVATION_FIELDS if not hasattr(candidate, field)
-    ]
 
 
 def _reject_if_provenance_differs(observed: Provenance, signature: Provenance) -> None:
@@ -215,21 +194,7 @@ class Baseline:
             provenance signature.
         """
         if not isinstance(result, ScoringResult):
-            raise InvalidObservationError(
-                "recorded observation is not a complete scoring result",
-                context={
-                    "reason": (
-                        "input is missing one or more required ScoringResult "
-                        "fields (score, reasoning, provenance)"
-                    ),
-                    "missing_fields": _missing_observation_fields(result),
-                },
-                recovery_hint=(
-                    "Pass a complete ScoringResult (score, reasoning, "
-                    "provenance) -- typically the return value of "
-                    "Judge.score()."
-                ),
-            )
+            raise invalid_observation_error(result)
 
         if self._provenance_signature is None:
             self._provenance_signature = result.provenance

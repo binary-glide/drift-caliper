@@ -475,6 +475,42 @@ def test_raises_invalid_observation_error_for_an_incomplete_input() -> None:
     assert set(error.context["missing_fields"]) == {"score", "reasoning", "provenance"}
 
 
+class _RaisingScoreObservation:
+    """Not a ``ScoringResult``; its ``score`` attribute raises rather than being absent.
+
+    Used for BIN-127 -- mirrors ``test_baseline.py``'s identically-named
+    fixture, since both entry points now share
+    ``caliper.baseline.domain.attribute_probe`` and must report the same
+    ``context`` distinction.
+    """
+
+    @property
+    def score(self) -> float:
+        raise RuntimeError("boom-on-score-access")
+
+
+def test_context_distinguishes_raised_from_absent_field_access() -> None:
+    """BIN-127: a field that raises on access is reported distinctly from one
+
+    that is simply absent, in ``context`` -- not flattened into one
+    undifferentiated ``missing_fields`` list, and the raw ``RuntimeError``
+    never escapes ``record()``.
+    """
+    # Arrange
+    monitor = Monitor(_fitted_shewhart())
+    hostile = _RaisingScoreObservation()
+
+    # Act
+    with pytest.raises(InvalidObservationError) as exc_info:
+        monitor.record(hostile)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "invalid_observation"
+    assert set(error.context["missing_fields"]) == {"reasoning", "provenance"}
+    assert error.context["unreadable_fields"] == {"score": "RuntimeError"}
+
+
 # --- Edge: signals are not errors (BR-7) ----------------------------------------
 
 

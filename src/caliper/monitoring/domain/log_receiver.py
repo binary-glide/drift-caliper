@@ -8,6 +8,23 @@ this function is caught by the exact same per-receiver ``try``/``except``
 every other receiver goes through, so a logging failure surfaces on
 ``MonitoringResult.delivery_failures``, never by attempting to log the
 failure through the same logging call that just failed.
+
+⚠️ **This function does not guard its own attribute reads** (``signal.chart_type``,
+``signal.direction``, ``signal.observation.score``, ``signal.fitted_artefact``)
+against BIN-127's hazard -- a caller-supplied object whose attribute access
+raises rather than being merely absent (see
+``caliper.baseline.domain.attribute_probe`` for that guard, applied at
+``Baseline.record()``, ``Monitor.record()``, and ``compare_provenance()``).
+It relies entirely on ``Monitor._deliver()``'s per-receiver
+``try``/``except`` (ADR-010 section 4) as the one place that hazard is
+handled for every receiver, built-in or engineer-supplied alike -- the
+contract boundary is ``Monitor._deliver()``, not each receiver
+individually (confirmed by ``code-reviewer`` on ``BIN-121``; see
+``tests/support/exception_contract_registry.py``'s ``log_receiver``
+exclusion note for the verified reproduction of what happens if this
+function is ever called directly, outside that wrapper). Do not add a
+guard here -- it would duplicate, not strengthen, a contract that already
+has exactly one enforcement point.
 """
 
 from __future__ import annotations

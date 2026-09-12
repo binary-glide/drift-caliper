@@ -83,7 +83,7 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import CaliperError, ProvenanceMismatchError
+from caliper.errors import CaliperError, InvalidParameterError, ProvenanceMismatchError
 from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
 from tests.factories import ScoringResultFactory
 
@@ -409,3 +409,118 @@ def test_takes_no_acknowledge_or_force_override_parameter() -> None:
             artefact,
             force=True,  # ty: ignore[unknown-argument]
         )
+
+
+# --- BIN-127: artefact provenance attribute raises on access -----------------
+
+
+class _RaisingModelVersionArtefact:
+    """A ``FittedControlLimits``-shaped object whose model-version property raises.
+
+    ``provenance_criteria`` is genuinely present; only
+    ``provenance_model_version`` misbehaves on access -- so the raised/absent
+    distinction in ``context`` can be pinned precisely.
+    """
+
+    provenance_criteria = _CRITERIA
+
+    @property
+    def provenance_model_version(self) -> str:
+        raise RuntimeError("boom-on-provenance-access")
+
+
+class _AbsentCriteriaArtefact:
+    """A ``FittedControlLimits``-shaped object entirely lacking ``provenance_criteria``.
+
+    ``provenance_model_version`` is genuinely present -- only
+    ``provenance_criteria`` is absent, the ``hasattr``-safe case, so this
+    is distinguishable from ``_RaisingModelVersionArtefact`` above.
+    """
+
+    provenance_model_version = _MODEL_VERSION
+
+
+class _MixedProvenanceArtefact:
+    """``provenance_model_version`` raises; ``provenance_criteria`` is absent.
+
+    Both failure modes on the same object, so a single raise must report
+    both distinctly rather than only the first one probed -- mirrors the
+    mixed fixtures ``test_baseline.py``/``test_monitor.py`` use for the
+    other two BIN-127 entry points.
+    """
+
+    @property
+    def provenance_model_version(self) -> str:
+        raise RuntimeError("boom-on-provenance-access")
+
+
+def test_raises_invalid_parameter_error_when_artefact_provenance_raises() -> None:
+    """BIN-127: an artefact whose provenance attribute raises is rejected as an
+
+    invalid parameter, not treated as a provenance mismatch -- there is no
+    actual "received" value to report when the read itself failed. The raw
+    ``RuntimeError`` must never escape.
+    """
+    # Arrange
+    result = _result()
+    artefact = _RaisingModelVersionArtefact()
+
+    # Act
+    with pytest.raises(InvalidParameterError) as exc_info:
+        compare_provenance(result, artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "invalid_parameter"
+    assert error.context["parameter"] == "artefact"
+    assert error.context["kind"] == "invalid"
+    # Raised, not merely absent -- and reported as such, distinctly.
+    assert error.context["unreadable_fields"] == {
+        "provenance_model_version": "RuntimeError"
+    }
+    assert error.context["missing_fields"] == []
+
+
+def test_raises_invalid_parameter_error_when_artefact_provenance_absent() -> None:
+    """BIN-127: an artefact genuinely lacking a required provenance attribute
+
+    is rejected the same way, but reported as absent rather than raised --
+    the two are not flattened into one undifferentiated failure.
+    """
+    # Arrange
+    result = _result()
+    artefact = _AbsentCriteriaArtefact()
+
+    # Act
+    with pytest.raises(InvalidParameterError) as exc_info:
+        compare_provenance(result, artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "invalid_parameter"
+    assert error.context["missing_fields"] == ["provenance_criteria"]
+    assert error.context["unreadable_fields"] == {}
+
+
+def test_raises_invalid_parameter_error_for_mixed_absent_and_raised() -> None:
+    """BIN-127: one attribute raises, the other is absent, on the same artefact.
+
+    Each probe is classified independently, so a mixed failure reports
+    both distinctly in the same raise rather than only the first one
+    checked.
+    """
+    # Arrange
+    result = _result()
+    artefact = _MixedProvenanceArtefact()
+
+    # Act
+    with pytest.raises(InvalidParameterError) as exc_info:
+        compare_provenance(result, artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "invalid_parameter"
+    assert error.context["missing_fields"] == ["provenance_criteria"]
+    assert error.context["unreadable_fields"] == {
+        "provenance_model_version": "RuntimeError"
+    }

@@ -123,6 +123,21 @@ class _PartialObservation:
     reasoning: str
 
 
+class _RaisingScoreObservation:
+    """Not a ``ScoringResult``; its ``score`` attribute raises rather than being absent.
+
+    Used for BIN-127: ``hasattr`` only swallows ``AttributeError``, so a
+    candidate whose attribute access itself misbehaves must be
+    distinguishable, in ``context``, from one that simply lacks the
+    attribute (``_PartialObservation`` above). ``reasoning``/``provenance``
+    are genuinely absent here -- only ``score`` misbehaves on access.
+    """
+
+    @property
+    def score(self) -> float:
+        raise RuntimeError("boom-on-score-access")
+
+
 # --- SC1: happy path -- record and inspect -----------------------------------
 
 
@@ -463,6 +478,34 @@ def test_raises_invalid_observation_error_when_input_is_missing_provenance() -> 
     # `None` into the field check reports every field as missing, and
     # `"provenance" in [...]` still holds. Found by mutmut during BIN-63 review.
     assert set(error.context["missing_fields"]) == {"provenance"}
+    assert baseline.observation_count == 0
+    assert baseline.observations == ()
+
+
+def test_context_distinguishes_raised_from_absent_field_access() -> None:
+    """BIN-127: a field that raises on access is reported distinctly from one
+
+    that is simply absent, in ``context`` -- not flattened into one
+    undifferentiated ``missing_fields`` list. ``hasattr`` alone cannot make
+    this distinction (it only swallows ``AttributeError``), so this also
+    pins that the raw ``RuntimeError`` from ``_RaisingScoreObservation.score``
+    never escapes ``record()`` at all.
+    """
+    # Arrange
+    baseline = Baseline()
+    hostile = _RaisingScoreObservation()
+
+    # Act
+    with pytest.raises(InvalidObservationError) as exc_info:
+        baseline.record(hostile)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    # Assert
+    error = exc_info.value
+    assert error.category == "invalid_observation"
+    # `score` raised -- reported under `unreadable_fields`, not counted as
+    # merely absent. `reasoning`/`provenance` are genuinely absent.
+    assert set(error.context["missing_fields"]) == {"reasoning", "provenance"}
+    assert error.context["unreadable_fields"] == {"score": "RuntimeError"}
     assert baseline.observation_count == 0
     assert baseline.observations == ()
 
