@@ -61,7 +61,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from beartype.roar import BeartypeCallHintParamViolation
 from pydantic import ValidationError
 
 from caliper.baseline import (
@@ -580,16 +579,19 @@ _FIT_EWMA_CASES = (
             target_arl=370.0,
         ),
         known_leak=KnownLeak(
-            # ⚠️ This pinned type depends on `tests/conftest.py`'s dev-only
-            # beartype import hook being installed before `caliper` is
-            # imported -- stable within this suite, verified in isolation.
-            # Without the hook the same call leaks `AttributeError` instead.
-            # That instability *is* BIN-126's defect, not a flaw in this pin:
-            # a caller cannot write an `except` against a type that depends
-            # on how the library was loaded. When BIN-126 lands, both this
-            # entry and the load-order dependency go away together.
+            # Re-pinned under BIN-130 (was `BeartypeCallHintParamViolation`).
+            # BIN-130 split `fit_ewma` out of the beartype-hooked module, so
+            # it no longer intercepts this call before the body runs --
+            # `baseline.check_sufficiency()` now genuinely executes against
+            # the string and leaks `AttributeError`, measured directly, both
+            # with and without `tests/conftest.py`'s dev-only beartype hook
+            # installed. The load-order instability the previous comment
+            # here warned about is therefore also gone: this leak is now the
+            # same type in every environment. Still a `BIN-126` fix, not a
+            # `BIN-130` one -- no guard against a wrong-typed `baseline`
+            # exists yet.
             ticket="BIN-126",
-            leaked_type=BeartypeCallHintParamViolation,
+            leaked_type=AttributeError,
         ),
     ),
     HostileCase(
@@ -600,16 +602,14 @@ _FIT_EWMA_CASES = (
             smoothing_param="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
         known_leak=KnownLeak(
-            # ⚠️ This pinned type depends on `tests/conftest.py`'s dev-only
-            # beartype import hook being installed before `caliper` is
-            # imported -- stable within this suite, verified in isolation.
-            # Without the hook the same call leaks `AttributeError` instead.
-            # That instability *is* BIN-126's defect, not a flaw in this pin:
-            # a caller cannot write an `except` against a type that depends
-            # on how the library was loaded. When BIN-126 lands, both this
-            # entry and the load-order dependency go away together.
+            # Re-pinned under BIN-130 (was `BeartypeCallHintParamViolation`,
+            # same reasoning as `wrong_type_baseline` above).
+            # `_validate_smoothing_param` calls `math.isfinite(smoothing_param)`
+            # directly, which raises `TypeError` on a non-numeric argument --
+            # measured directly, identical with and without the beartype
+            # hook. Still a `BIN-126` fix, not a `BIN-130` one.
             ticket="BIN-126",
-            leaked_type=BeartypeCallHintParamViolation,
+            leaked_type=TypeError,
         ),
     ),
     HostileCase(

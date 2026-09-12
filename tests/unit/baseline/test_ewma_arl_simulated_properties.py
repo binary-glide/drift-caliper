@@ -80,8 +80,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_ewma
-from caliper.baseline.domain.ewma_fitting import (
-    MIN_MEANINGFUL_ARL,
+from caliper.baseline.domain.ewma_fitting import MIN_MEANINGFUL_ARL
+from caliper.baseline.domain.ewma_numerics import (
     # Formula only, not the Markov-chain calibration helper -- see below.
     _ewma_asymptotic_std_ratio,
 )

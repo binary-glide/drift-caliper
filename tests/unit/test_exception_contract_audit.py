@@ -34,12 +34,15 @@ guards for ``fit_cusum``'s ``baseline``/``reference_value``,
 ``Baseline.check_sufficiency``'s ``threshold``, and ``Judge.score``'s
 ``agent_output`` now raise ``InvalidParameterError`` and their
 ``known_leak`` entries are deleted. The remaining 2
-(``fit_ewma``'s ``baseline``/``smoothing_param``) are blocked on splitting
-``ewma_fitting.py`` so its dev-only beartype hook stops guarding a public
-boundary -- see
-``Projects/caliper/pending-tickets/split-ewma-fitting-so-beartype-stops-guarding-a-public-boundary.md``
-in the vault (not yet filed in Linear at the time this was written -- MCP
-token expired).
+(``fit_ewma``'s ``baseline``/``smoothing_param``) still have no such guard
+-- that is the open half of ``BIN-126``'s work. **``BIN-130`` (done)**
+removed the one thing that was blocking it: ``ewma_fitting.py``'s dev-only
+beartype hook, which used to intercept these two calls with its own
+environment-dependent ``BeartypeCallHintParamViolation`` before either
+leaked anything else. Both cases now leak a stable, ordinary
+``AttributeError``/``TypeError`` instead -- identically with or without the
+beartype hook installed -- so ``BIN-126`` has nothing left to design here,
+only the guard itself to add.
 
 ## Why three tickets, not one
 
@@ -63,20 +66,17 @@ the other two:
   its first use inside the function body, before any Caliper validation
   runs: ``math.isfinite("x")`` raises bare ``TypeError``,
   ``"x".check_sufficiency()`` raises bare ``AttributeError`` (a plain
-  ``str`` has no such method), and ``beartype``'s dev-only import hook on
-  ``ewma_fitting`` raises its own ``BeartypeCallHintParamViolation`` ahead
-  of either. Three different leaked types, one root cause: nothing
-  validates the argument's *type* before using it. Six of the eight --
-  every one not routed through ``ewma_fitting``'s beartype hook -- are
-  fixed: ``fit_cusum``, ``fit_shewhart``, ``Baseline.check_sufficiency`` and
-  ``Judge.score`` now validate with a shared, behavioural (not nominal)
-  guard (``caliper.baseline.domain.parameter_guards``) that keeps accepting
+  ``str`` has no such method). Six of the eight are fixed: ``fit_cusum``,
+  ``fit_shewhart``, ``Baseline.check_sufficiency`` and ``Judge.score`` now
+  validate with a shared, behavioural (not nominal) guard
+  (``caliper.baseline.domain.parameter_guards``) that keeps accepting
   ``int``/``np.float32``/``np.float64``/``np.int64`` and rejects ``bool``
   explicitly, before falling back to a plain ``isinstance`` check for
   non-numeric parameters like ``baseline``. The remaining two
-  (``fit_ewma``'s ``baseline``/``smoothing_param``) cannot be fixed the
-  same way without also splitting ``ewma_fitting.py`` -- see the scoreboard
-  note above.
+  (``fit_ewma``'s ``baseline``/``smoothing_param``) still lack that guard --
+  ``BIN-130`` only removed the third, environment-dependent leaked type
+  (``ewma_fitting``'s dev-only beartype hook) that used to sit ahead of
+  these two, not the guard itself; see the scoreboard note above.
 * **``BIN-127`` (3 cases)** -- An object that duck-types past an
   ``isinstance`` check but misbehaves on actual attribute access. Both
   ``Baseline.record()``/``Monitor.record()``'s duplicated

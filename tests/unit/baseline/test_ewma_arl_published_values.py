@@ -159,7 +159,7 @@ from caliper.baseline import (
     FittedEWMA,
     fit_ewma,
 )
-from caliper.baseline.domain.ewma_fitting import (
+from caliper.baseline.domain.ewma_numerics import (
     _MARKOV_CHAIN_STATES,
     _ewma_asymptotic_std_ratio,
     _in_control_arl,

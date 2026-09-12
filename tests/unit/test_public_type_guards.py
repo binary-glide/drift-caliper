@@ -13,17 +13,15 @@ not duplicate that; it covers the two things the brief says that audit is
 not enough on its own to prove:
 
 1. **The accept direction.** A guard that turns a wrong-typed
-   ``AttributeError``/``TypeError``/``BeartypeCallHintParamViolation`` into
-   an ``InvalidParameterError`` is trivially satisfiable by rejecting
-   *everything* non-``float``/non-``Baseline`` -- which would also reject
-   ``numpy.float32``, ``numpy.int64``, and plain ``int``, all of which a
-   caller can reasonably pass today. Nothing in the existing audit proves
-   the fix preserves this. The tests in "Numeric acceptance" below do --
-   for the surfaces where it is already true, they are regression guards
-   (green today, must stay green); for ``fit_ewma`` specifically, see the
-   "beartype's numeric-tower gap" note below -- three of its four cases
-   are RED today, not because of a real design decision, but because of an
-   already-broken current state this ticket must also fix.
+   ``AttributeError``/``TypeError`` into an ``InvalidParameterError`` is
+   trivially satisfiable by rejecting *everything* non-``float``/
+   non-``Baseline`` -- which would also reject ``numpy.float32``,
+   ``numpy.int64``, and plain ``int``, all of which a caller can reasonably
+   pass today. Nothing in the existing audit proves the fix preserves this.
+   The tests in "Numeric acceptance" below do -- every surface, including
+   ``fit_ewma``, is a green-today regression guard; see "beartype and
+   `fit_ewma`'s numeric-tower gap -- resolved by BIN-130" below for how
+   ``fit_ewma`` got here.
 2. **The bool-specific defect the audit cannot see at all.**
    ``bool`` is an ``int`` subclass, so ``isinstance(True, int)`` and
    Python's own duck typing let it satisfy every numeric parameter in this
@@ -40,55 +38,52 @@ not enough on its own to prove:
    acceptable resolution (bool rejected outright, or a floor that makes
    the resulting chart not alarm on nearly every observation).
 
-## beartype's numeric-tower gap -- measured, not assumed
+## beartype and fit_ewma's numeric-tower gap -- resolved by BIN-130
 
-**The brief's own "established facts" table is only half right, and this
-was verified by direct execution before writing anything below, not
-inferred from source reading.** Under ``tests/conftest.py``'s dev-only
-``beartype_package("caliper.baseline.domain.ewma_fitting")`` hook -- the
-only environment this test suite ever runs in --
-``beartype.BeartypeConf().is_pep484_tower`` is ``False`` (the library
-default; verified against the installed ``beartype==0.22.9``), so
-``fit_ewma``'s ``float``-annotated parameters do **not** implicitly accept
-``int`` at all, numpy or otherwise:
+**This section originally documented a live defect, measured by direct
+execution before this ticket's own fix landed.** ``tests/conftest.py`` used
+to hook ``beartype_package("caliper.baseline.domain.ewma_fitting")`` --
+covering ``fit_ewma`` itself, a public entry point -- and beartype's
+default ``is_pep484_tower=False`` (verified against the installed
+``beartype==0.22.9``) meant ``fit_ewma``'s ``float``-annotated parameters
+did **not** implicitly accept ``int`` at all, numpy or otherwise:
+``target_arl=np.float32(370))``, ``np.int64(370)`` and even a plain
+``370`` all raised ``BeartypeCallHintParamViolation`` inside this suite
+while succeeding in the shipped wheel (which never imports beartype) --
+the same load-order instability the registry's ``wrong_type_baseline``/
+``wrong_type_smoothing_param`` entries flagged, just for four more inputs.
+Only ``np.float64`` (a genuine ``float`` subclass) was unaffected.
 
-```
-fit_ewma(target_arl=np.float64(370))  -> OK   (np.float64 IS a float subclass)
-fit_ewma(target_arl=np.float32(370))  -> BeartypeCallHintParamViolation
-fit_ewma(target_arl=np.int64(370))    -> BeartypeCallHintParamViolation
-fit_ewma(target_arl=370)              -> BeartypeCallHintParamViolation (plain int!)
-fit_ewma(target_arl=True)             -> BeartypeCallHintParamViolation (bool, by luck)
-```
+**BIN-130 fixed this by moving the calibration internals
+(``_calibrate_limit_multiplier``, ``_ewma_asymptotic_std_ratio``,
+``_in_control_arl``) into ``caliper.baseline.domain.ewma_numerics``, hooked
+there instead, and normalising every value crossing that boundary to
+``float`` inside ``fit_ewma`` before calling into it** -- see that
+module's docstring and ``ewma_fitting.fit_ewma``'s own comment at the call
+site. A pure module split alone was not sufficient: ``fit_ewma`` calling
+the still-hooked numerics functions directly with a caller's raw ``int``/
+``np.float32``/``np.int64`` value reproduced the identical violation one
+call frame deeper, which the numeric-acceptance tests below caught by
+direct execution, not by re-reading the ticket's own acceptance criterion.
+The ``float(...)`` cast is a boundary normalisation, not a validation
+step -- it rejects nothing ``fit_ewma`` did not already accept, and it
+makes ``fit_ewma`` consistent with ``fit_cusum``/``fit_shewhart``, whose
+own numeric parameters are already normalised the same way by
+``caliper.baseline.domain.parameter_guards.require_real_number``.
 
-identically for ``smoothing_param``. Every one of those four failing calls
-is measurably a **currently-broken, non-``CaliperError`` leak already** --
-it is simply not one of the 8 the registry named, because the registry's
-own ``wrong_type_baseline``/``wrong_type_smoothing_param`` cases use a
-string, not a numeric near-miss. **This means the acceptance-matrix tests
-below for ``fit_ewma`` are three-quarters RED for a reason distinct from
-BIN-126's headline defect, but caused by the exact same missing
-boundary-level guard** -- and it means the fix cannot be "catch
-``BeartypeCallHintParamViolation`` and re-raise as ``InvalidParameterError``"
-alone: that would satisfy the reject direction while leaving the accept
-direction broken for ``int``/``np.float32``/``np.int64``, which is exactly
-the trap this brief warns about, just arriving via a different mechanism
-than a hand-written ``isinstance`` check. The beartype guard on
-``ewma_fitting``'s public functions has to go (or be reconfigured), not
-just be wrapped.
+``fit_ewma``'s numeric-acceptance tests below are therefore now plain,
+environment-independent regression guards, exactly like ``fit_cusum``'s
+and ``fit_shewhart``'s. What BIN-130 did **not** touch is the *reject*
+direction: ``fit_ewma`` still has no guard against a wrong-typed or
+``bool``-typed argument (that guard is BIN-126's remaining work), so the
+bool-rejection tests for ``fit_ewma`` further below are still pinned
+``xfail`` -- but for a different, now-measured reason. See
+``_EWMA_BOOL_REJECTION_BLOCKER_REASON``.
 
-Without the hook (i.e. the actual shipped wheel, which never imports
-beartype -- see ``tests/conftest.py``'s own docstring), every one of those
-four calls succeeds instead, matching the brief's table exactly and
-reproducing BIN-131's ``achieved_arl = 1.0000013`` figure for
-``target_arl=True``. This is the identical instability the registry's own
-``wrong_type_baseline``/``wrong_type_smoothing_param`` entries already
-flag ("a caller cannot write an except against a type that depends on how
-the library was loaded") -- measured here for four more inputs, not
-merely asserted.
-
-``fit_cusum``, ``fit_shewhart`` and ``Baseline.check_sufficiency`` carry no
-beartype hook at all (see ``tests/conftest.py``), so their acceptance
-tests below reflect one real, environment-independent behaviour.
+``fit_cusum``, ``fit_shewhart`` and ``Baseline.check_sufficiency`` never
+carried a beartype hook at all (see ``tests/conftest.py``), so their
+acceptance tests below always reflected one real, environment-independent
+behaviour -- ``fit_ewma`` now matches them.
 
 ## Error type asserted for the new (non-registry) cases
 
@@ -112,7 +107,6 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-from beartype.roar import BeartypeCallHintParamViolation
 
 from caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
@@ -138,8 +132,10 @@ _BASELINE = baseline_from_scores(_FITTABLE_SCORES)
 # The numeric-type acceptance matrix this ticket's brief asks every
 # surface to preserve. `python_int` is deliberately included even though
 # it is not a numpy type -- it is the most natural thing an engineer
-# passes (`target_arl=370`), and it is also the case beartype's
-# numeric-tower gap breaks on `fit_ewma` (see module docstring).
+# passes (`target_arl=370`). Used for all four surfaces including
+# `fit_ewma`, which needed its own fix (BIN-130) to accept every case here
+# -- see the module docstring's "beartype and fit_ewma's numeric-tower gap"
+# section.
 _NUMERIC_TYPE_CASES = [
     pytest.param(np.float32, id="np_float32"),
     pytest.param(np.float64, id="np_float64"),
@@ -147,66 +143,28 @@ _NUMERIC_TYPE_CASES = [
     pytest.param(int, id="python_int"),
 ]
 
-# --- fit_ewma is blocked, not fixed here -- see "beartype's numeric-tower
-# gap" above. Tracked as BIN-130 rather than left to fail the suite outright.
-_EWMA_BEARTYPE_BLOCKER_REASON = (
-    "BIN-130: blocked on splitting ewma_fitting.py so beartype's dev-only "
-    "import hook (tests/conftest.py) stops guarding fit_ewma, a public "
-    "boundary; a guard added to fit_ewma's body today is preempted by "
-    "BeartypeCallHintParamViolation and cannot be exercised by this suite. "
-    "When BIN-130 lands these XPASS and fail the build until removed."
+# --- fit_ewma's bool rejection is still open -- BIN-126, not BIN-130 -----
+#
+# `bool` is an `int` subclass, so `target_arl=True`/`smoothing_param=True`
+# silently satisfy `fit_ewma`'s `float`-typed parameters and produce a
+# real (if degenerate, achieved_arl ~= 1) fit rather than raising anything
+# -- measured directly, identically with and without `tests/conftest.py`'s
+# beartype hook now that BIN-130 has closed that load-order instability.
+# Unlike the numeric-acceptance cases above, there is no `raises=` to pin
+# here: nothing raises at all, so the only thing that fails is
+# `pytest.raises(InvalidParameterError)` itself, reporting "DID NOT RAISE"
+# inside the test body below. `xfail(strict=True)` with no `raises=`
+# catches any exception -- including that one -- so this stays a faithful
+# tracking marker rather than a guess at what a future fix will raise.
+_EWMA_BOOL_REJECTION_BLOCKER_REASON = (
+    "BIN-126: fit_ewma has no bool-rejection guard yet. bool is an int "
+    "subclass, so target_arl=True/smoothing_param=True are silently "
+    "accepted and produce a real (if degenerate) fit rather than raising "
+    "anything, measured directly. No raises= is pinned because there is "
+    "no exception to match -- pytest.raises(InvalidParameterError) itself "
+    "reports 'DID NOT RAISE' inside the test body, and that is what this "
+    "xfail is tracking."
 )
-
-# `raises=BeartypeCallHintParamViolation` is deliberate, not an oversight
-# of its own harness-dependence. It is **only** correct under
-# `tests/conftest.py`'s dev-only beartype hook -- outside this suite (the
-# shipped wheel, which never imports beartype) the same calls raise
-# nothing at all (the three numeric-tower cases) or leak a bare
-# `TypeError`/`AttributeError` instead (the bool-rejection cases,
-# mirroring `wrong_type_baseline`/`wrong_type_smoothing_param` in
-# `tests/support/exception_contract_registry.py`, which pins the exact
-# same type for the exact same reason). Pinning it anyway matches that
-# registry's own established precedent for this identical root cause,
-# verified directly in this environment rather than assumed, and
-# `strict=True` still does its job either way: when the module split
-# lands, `fit_ewma` either raises `InvalidParameterError` (this mark
-# XPASSes) or -- if the split changes what leaks first -- raises some
-# other foreign type (this mark's own `raises=` stops matching, and the
-# case fails for real rather than quietly staying green). Both outcomes
-# surface the moment they happen; neither can hide behind this marker.
-_EWMA_BLOCKED_NUMERIC_TYPE_CASES = [
-    pytest.param(
-        np.float32,
-        id="np_float32",
-        marks=pytest.mark.xfail(
-            reason=_EWMA_BEARTYPE_BLOCKER_REASON,
-            raises=BeartypeCallHintParamViolation,
-            strict=True,
-        ),
-    ),
-    # np.float64 IS a float subclass -- beartype's is_pep484_tower=False
-    # gap does not bite here, so this case is green today and must stay
-    # unmarked (see module docstring).
-    pytest.param(np.float64, id="np_float64"),
-    pytest.param(
-        np.int64,
-        id="np_int64",
-        marks=pytest.mark.xfail(
-            reason=_EWMA_BEARTYPE_BLOCKER_REASON,
-            raises=BeartypeCallHintParamViolation,
-            strict=True,
-        ),
-    ),
-    pytest.param(
-        int,
-        id="python_int",
-        marks=pytest.mark.xfail(
-            reason=_EWMA_BEARTYPE_BLOCKER_REASON,
-            raises=BeartypeCallHintParamViolation,
-            strict=True,
-        ),
-    ),
-]
 
 
 def _assert_caliper_error(exc: CaliperError) -> None:
@@ -336,23 +294,20 @@ def test_baseline_record_accepts_score_across_numeric_types(
 # ---------------------------------------------------------------------------
 # Numeric acceptance -- fit_ewma
 #
-# Beartype-guarded (tests/conftest.py). Only np_float64 is green today --
-# see the module docstring's "beartype's numeric-tower gap" section. The
-# other three cases are RED today for a real, measured reason: beartype's
-# default `is_pep484_tower=False` rejects int/np.float32/np.int64 against
-# a `float`-annotated parameter, regardless of BIN-126's own fix. Whoever
-# closes this ticket must also resolve that -- catching and re-raising
-# BeartypeCallHintParamViolation as InvalidParameterError is not sufficient
-# on its own, because these calls must SUCCEED, not merely raise the right
-# type.
-#
-# BIN-126 review: pinned `xfail(strict=True)` rather than left to fail the
-# suite outright -- see `_EWMA_BLOCKED_NUMERIC_TYPE_CASES`'s comment above
-# for the reasoning, including the deliberate call on `raises=`.
+# Fixed by BIN-130. `fit_ewma` used to be beartype-guarded
+# (tests/conftest.py) directly, and separately -- even after BIN-130 moved
+# the hook off `fit_ewma` itself -- calling the still-hooked
+# `ewma_numerics` functions with a caller's raw numeric type reproduced the
+# identical violation one call frame deeper. Both are closed: the hook now
+# covers only `ewma_numerics`, and `fit_ewma` normalises to `float` at the
+# two call sites crossing into it (see the module docstring's "beartype and
+# fit_ewma's numeric-tower gap" section and `ewma_fitting.fit_ewma`'s own
+# comment). All four cases below are now plain, environment-independent
+# regression guards, exactly like `fit_cusum`'s and `fit_shewhart`'s above.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("numeric_type", _EWMA_BLOCKED_NUMERIC_TYPE_CASES)
+@pytest.mark.parametrize("numeric_type", _NUMERIC_TYPE_CASES)
 def test_fit_ewma_accepts_target_arl_across_numeric_types(
     numeric_type: Callable[[float], object],
 ) -> None:
@@ -364,10 +319,57 @@ def test_fit_ewma_accepts_target_arl_across_numeric_types(
     assert math.isfinite(artefact.achieved_arl)
 
 
-@pytest.mark.parametrize("numeric_type", _EWMA_BLOCKED_NUMERIC_TYPE_CASES)
+@pytest.mark.parametrize("numeric_type", _NUMERIC_TYPE_CASES)
 def test_fit_ewma_accepts_smoothing_param_across_numeric_types(
     numeric_type: Callable[[float], object],
 ) -> None:
+    # Sample value is `1`, not `0.2` -- deliberately. `smoothing_param`'s
+    # valid range is `[MIN_SMOOTHING_PARAM, MAX_SMOOTHING_PARAM]` ==
+    # `[0.01, 1.0]`; `1` is the only integer inside it, so it is the one
+    # value every numeric type here represents identically
+    # (`int(1) == np.int64(1) == float(np.float32(1)) == 1.0`). `0.2`
+    # silently truncates to `0` under `int`/`np.int64` (`int(0.2) == 0`),
+    # which is genuinely, correctly outside the valid range -- found by
+    # direct execution during BIN-130 (previously invisible because
+    # beartype rejected `int`/`np.int64` outright before the value ever
+    # reached validation; that masking is gone now that `fit_ewma` behaves
+    # identically inside and outside the suite). This is a test-fixture
+    # fix, not a `fit_ewma` behaviour change: `0` was always, correctly,
+    # rejected.
+    artefact = fit_ewma(
+        _BASELINE,
+        target_arl=370.0,
+        smoothing_param=numeric_type(1),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+    )
+    assert artefact.chart_type == "ewma"
+    assert math.isfinite(artefact.achieved_arl)
+
+
+# ⚠️ `1` is the *only* value the test above can use across all four numeric
+# types, which makes it a weaker test than it looks: a typical smoothing
+# parameter is a fraction, and `1.0` is the degenerate end of the range
+# (the EWMA reduces to a Shewhart chart -- no smoothing at all). So the
+# float-representable types are exercised separately at a realistic value.
+# Raised by code-reviewer on BIN-130: the fixture fix above was correct but
+# narrowed coverage, and narrowing it silently would have traded one masked
+# defect for a quieter one.
+_FLOAT_ONLY_TYPE_CASES = [
+    pytest.param(float, id="python_float"),
+    pytest.param(np.float32, id="np_float32"),
+    pytest.param(np.float64, id="np_float64"),
+]
+
+
+@pytest.mark.parametrize("numeric_type", _FLOAT_ONLY_TYPE_CASES)
+def test_fit_ewma_accepts_a_fractional_smoothing_param_across_float_types(
+    numeric_type: Callable[[float], object],
+) -> None:
+    """A realistic smoothing parameter works in every float-capable type.
+
+    Complements the all-numeric-types test above, which is pinned to `1`
+    because `int`/`np.int64` cannot represent anything else inside
+    `[0.01, 1.0]`. `0.2` is the value an engineer would actually pass.
+    """
     artefact = fit_ewma(
         _BASELINE,
         target_arl=370.0,
@@ -375,6 +377,7 @@ def test_fit_ewma_accepts_smoothing_param_across_numeric_types(
     )
     assert artefact.chart_type == "ewma"
     assert math.isfinite(artefact.achieved_arl)
+    assert artefact.smoothing_param == pytest.approx(0.2, rel=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -387,27 +390,29 @@ def test_fit_ewma_accepts_smoothing_param_across_numeric_types(
 # question), every one of these must instead raise a typed
 # InvalidParameterError, checking `isinstance(x, bool)` before any
 # `isinstance(x, int)` narrowing (bool is an int subclass).
+#
+# `fit_ewma`'s two cases are still open on BIN-126, not BIN-130 -- see
+# `_EWMA_BOOL_REJECTION_BLOCKER_REASON` above for why they carry no
+# `raises=` now that BIN-130 has closed the beartype instability that used
+# to give them one.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=_EWMA_BEARTYPE_BLOCKER_REASON,
-    raises=BeartypeCallHintParamViolation,
-    strict=True,
-)
+@pytest.mark.xfail(reason=_EWMA_BOOL_REJECTION_BLOCKER_REASON, strict=True)
 def test_fit_ewma_rejects_bool_target_arl() -> None:
-    """BLOCKED (BIN-126): raises ``BeartypeCallHintParamViolation``, not our error.
+    """OPEN (BIN-126): ``fit_ewma(target_arl=True)`` succeeds; nothing raises.
 
-    Without the dev-only beartype hook (the shipped wheel), this call
-    currently *succeeds* instead, producing ``achieved_arl`` approximately
-    1.0 -- see the module docstring and BIN-131's reproduction.
-    Either way it is wrong today; only the observed failure mode differs
-    by environment. Cannot be fixed without also splitting
-    ``ewma_fitting.py`` (see ``_EWMA_BEARTYPE_BLOCKER_REASON``) -- pinned
-    ``xfail(strict=True)`` rather than left red so the suite stays green
-    while this stays visibly tracked, and so the fix landing (this XPASSes)
-    is what actually closes the loop, not a marker someone forgets to
-    remove.
+    Measured directly, identically with and without ``tests/conftest.py``'s
+    beartype hook (BIN-130 closed that instability): the call now succeeds
+    everywhere, producing ``achieved_arl`` approximately 1.0 -- see the
+    module docstring and BIN-131's reproduction. No guard against ``bool``
+    exists yet for ``fit_ewma`` (that is BIN-126's remaining work), so
+    ``pytest.raises(InvalidParameterError)`` below reports "DID NOT RAISE"
+    -- that failure, not a wrong exception type, is what this
+    ``xfail(strict=True)`` (no ``raises=``) tracks. Pinned rather than left
+    red so the suite stays green while this stays visibly tracked, and so
+    the fix landing (this XPASSes) is what actually closes the loop, not a
+    marker someone forgets to remove.
     """
     with pytest.raises(InvalidParameterError) as exc_info:
         fit_ewma(_BASELINE, target_arl=True)
@@ -416,13 +421,9 @@ def test_fit_ewma_rejects_bool_target_arl() -> None:
     assert exc_info.value.context.get("kind") == "invalid"
 
 
-@pytest.mark.xfail(
-    reason=_EWMA_BEARTYPE_BLOCKER_REASON,
-    raises=BeartypeCallHintParamViolation,
-    strict=True,
-)
+@pytest.mark.xfail(reason=_EWMA_BOOL_REJECTION_BLOCKER_REASON, strict=True)
 def test_fit_ewma_rejects_bool_smoothing_param() -> None:
-    """BLOCKED (BIN-126): raises ``BeartypeCallHintParamViolation``, not our error.
+    """OPEN (BIN-126): ``fit_ewma(smoothing_param=True)`` succeeds; nothing raises.
 
     See ``test_fit_ewma_rejects_bool_target_arl``'s docstring -- identical
     reasoning, ``smoothing_param`` rather than ``target_arl``.

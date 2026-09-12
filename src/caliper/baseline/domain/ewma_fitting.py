@@ -6,75 +6,15 @@ section 5 for the fitting signature shape and parameter semantics, and
 ADR-001/ADR-003 for the calibration method (Markov-chain approximation,
 Lucas & Saccucci 1990).
 
-## Calibration method
-
-A two-sided EWMA with fixed limits, standardised so the in-control process
-mean is 0 and the in-control process standard deviation is 1 -- the
-in-control (zero-state) ARL0 of such a chart depends only on the smoothing
-parameter ``lambda`` and the control-limit multiplier ``L``, never on the
-process's actual mean or sigma (see
-``tests/unit/baseline/test_ewma_arl_published_values.py``, "Why sigma does
-not need to be controlled"). The EWMA statistic
-
-    Z_i = lambda * X_i + (1 - lambda) * Z_(i-1),  Z_0 = 0
-
-has asymptotic (steady-state) standard deviation ``sqrt(lambda / (2 -
-lambda))`` (Roberts 1959; Lucas & Saccucci 1990 eq. 3), so fixed limits at
-multiplier ``L`` sit at ``+/- L * sqrt(lambda / (2 - lambda))`` in
-standardised units.
-
-``_in_control_arl`` computes the zero-state ARL0 for a given ``(lambda,
-L)`` pair via the Brook & Evans (1972) Markov-chain approximation, the
-method Lucas & Saccucci (1990) themselves use: the interval between the
-limits is discretised into ``_MARKOV_CHAIN_STATES`` cells (an odd count, so
-one cell sits exactly on the centre line -- required for a *zero-state*
-ARL, which starts the chain there); transition probabilities between cells
-follow from the Normal CDF of the EWMA recursion; the expected number of
-steps to absorption (leaving the interval) from the centre state is
-``(I - Q)^-1 @ ones`` evaluated at that state, where ``Q`` is the
-transient-state transition matrix (a standard first-step-analysis result
-for absorbing Markov chains).
-
-``fit_ewma`` inverts this: given ``lambda`` and a ``target_arl``, it
-root-finds (``scipy.optimize.brentq``) the ``L`` whose ``_in_control_arl``
-equals ``target_arl``, then reports both the requested value and the
-achieved value the calibration actually produced (ADR-004 section 5, A4).
-
-## Verification performed before trusting this implementation
-
-Per ``CLAUDE.md`` ("Fitting stories carry their own numerical proof") and
-the BIN-65 brief's explicit instruction, this calibration was validated
-against a closed form *before* being trusted, independently of
-``tests/unit/baseline/test_ewma_arl_published_values.py``:
-
-As ``lambda -> 1`` an EWMA degenerates to a Shewhart individuals chart
-(only the latest observation carries any weight), whose two-sided
-in-control ARL0 has the closed form ``1 / (2 * Phi(-L))``. At
-``lambda = 0.999``, ``_in_control_arl`` reproduces this closed form to
-five decimal places for ``L`` in ``{2.0, 3.0, 4.0}`` (absolute differences
-of order 1e-5 to 1e-4 against closed-form values ranging from ~22 to
-~15787) -- the same self-test this module's author used to catch a
-first-draft factor-of-2 discretisation bug (the interval spanned twice its
-true width) before it was ever committed.
-
-Separately, ``(lambda=0.5, L=3.071)`` and ``(lambda=0.03, L=2.437)`` --
-Lucas & Saccucci (1990) Table 3's own published pairs, both calibrated by
-the paper's authors to hit ARL0=500 -- reproduce ARL0 of approximately
-499.9 and 499.6 respectively under this implementation, within the 2%
-tolerance ``test_ewma_arl_published_values.py`` enforces and consistent
-with that file's own independently-recomputed reference figures (499.9,
-499.8) documented in its module docstring.
-
-References
-----------
-.. [1] Lucas, J. M. and Saccucci, M. S. (1990). "Exponentially Weighted
-       Moving Average Control Schemes: Properties and Enhancements."
-       Technometrics, 32(1), 1-12.
-
-The Brook & Evans (1972) Markov-chain approximation this module also relies
-on (see "Calibration method" above) has no full bibliographic entry
-verified anywhere in this repository -- only author/year mentions -- so it
-is deliberately not listed above.
+``fit_ewma`` is this module's only public entry point. The Markov-chain
+calibration machinery it calls -- ``_calibrate_limit_multiplier``,
+``_in_control_arl``, ``_ewma_asymptotic_std_ratio``, and the method's full
+derivation and verification -- live in ``caliper.baseline.domain.ewma_numerics``
+(split out under BIN-130, mirroring the ``spc_numerics``/BIN-94 hoist), so
+that the dev-only beartype import hook (BIN-109, ``tests/conftest.py``) can
+guard the numerics without ever guarding this public boundary. See that
+module's docstring for the calibration method and its verification against
+Lucas & Saccucci (1990) Table 3.
 """
 
 from __future__ import annotations
@@ -83,16 +23,11 @@ import math
 import statistics
 from collections.abc import Sequence
 
-import numpy as np
-from scipy.optimize import brentq
-
-# scipy.stats exposes `norm` via a lazy attribute loader with no type stub
-# mypy can see, even with `follow_untyped_imports` (pyproject.toml) -- the
-# same scipy stub-coverage gap the mypy config's own comment names. Real,
-# non-optional at runtime; only the static type is unresolvable.
-from scipy.stats import norm  # type: ignore[attr-defined]
-
 from caliper.baseline.domain.baseline import Baseline
+from caliper.baseline.domain.ewma_numerics import (
+    _calibrate_limit_multiplier,
+    _ewma_asymptotic_std_ratio,
+)
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
 from caliper.baseline.domain.spc_numerics import (
     _moving_range_sigma,
@@ -183,27 +118,6 @@ MAX_MEANINGFUL_ARL = 1_000_000.0
 # ``fit_ewma`` and ``fit_cusum`` delegate to the one shared estimator now,
 # rather than each carrying an independently-untested copy.
 _MOVING_RANGE_METHOD = "moving_range"
-
-# --- Markov-chain calibration parameters -------------------------------------
-#
-# Number of discretisation cells for the Brook & Evans (1972) Markov-chain
-# approximation (see module docstring). Not a published constant -- an
-# engineering choice balancing accuracy against calibration speed, empirically
-# validated (not merely assumed) against both a closed form and the published
-# Lucas & Saccucci (1990) Table 3 entries before being trusted; see the module
-# docstring's "Verification performed" section. Must be odd so a cell sits
-# exactly on the centre line, which the zero-state ARL calculation requires.
-_MARKOV_CHAIN_STATES = 301
-
-# Search bracket for the control-limit multiplier L during root-finding.
-# L = 0 exactly would collapse the limits onto the centre line (dividing by
-# zero is not the failure mode -- an exactly-zero interval is), so the
-# bracket's lower edge is a small positive floor rather than 0. The upper
-# edge is expanded geometrically (see _calibrate_limit_multiplier) up to
-# this ceiling, which comfortably exceeds any L a target_arl within
-# [MIN_MEANINGFUL_ARL, MAX_MEANINGFUL_ARL] requires in practice.
-_MIN_LIMIT_MULTIPLIER = 1e-6
-_MAX_LIMIT_MULTIPLIER = 1e5
 
 _CHART_TYPE = "ewma"
 _CALIBRATION_METHOD = "markov_chain"
@@ -298,150 +212,6 @@ def _validate_smoothing_param(smoothing_param: float | None) -> None:
 def _has_zero_variance(scores: Sequence[float]) -> bool:
     """Report whether every score in ``scores`` is identical."""
     return len(set(scores)) <= 1
-
-
-# --- Markov-chain ARL0 calibration --------------------------------------------
-
-
-def _ewma_asymptotic_std_ratio(smoothing_param: float) -> float:
-    """Compute the EWMA statistic's asymptotic std dev as a ratio to process std dev.
-
-    ``sqrt(lambda / (2 - lambda))`` -- Roberts (1959); Lucas & Saccucci
-    (1990) eq. 3.
-    """
-    return math.sqrt(smoothing_param / (2.0 - smoothing_param))
-
-
-def _in_control_arl(
-    smoothing_param: float, limit_multiplier: float, num_states: int
-) -> float:
-    """Zero-state in-control ARL0 for a two-sided EWMA with fixed limits.
-
-    Brook & Evans (1972) Markov-chain approximation, the method Lucas &
-    Saccucci (1990) use for their own tables. Works entirely in
-    process-sigma-standardised units (process mean 0, process std dev 1) --
-    see the module docstring's "why sigma does not need to be controlled".
-
-    Parameters
-    ----------
-    smoothing_param
-        The EWMA smoothing parameter (lambda).
-    limit_multiplier
-        The control-limit multiplier (L). The fixed limits sit at
-        ``+/- limit_multiplier * _ewma_asymptotic_std_ratio(smoothing_param)``.
-    num_states
-        Number of discretisation cells. Must be odd, so a cell sits
-        exactly on the centre line (the zero-state starting point).
-
-    Returns
-    -------
-    float
-        The expected number of in-control observations until the EWMA
-        statistic first leaves the control limits, starting from the
-        centre line.
-    """
-    half_width = limit_multiplier * _ewma_asymptotic_std_ratio(smoothing_param)
-    half_state_count = num_states // 2
-    cell_width = 2.0 * half_width / num_states
-
-    state_indices = np.arange(-half_state_count, half_state_count + 1, dtype=np.float64)
-    # Deliberately annotated `np.ndarray` rather than `NDArray[np.float64]`:
-    # beartype 0.22.9 cannot parse a parameterised NDArray against numpy
-    # 2.5's ScalarT typevar, and its claw hook instruments annotated
-    # assignments too (BIN-109). mypy infers the dtype here regardless, so
-    # nothing is lost. Revisit if beartype gains numpy 2.5 support.
-    midpoints: np.ndarray = state_indices * cell_width
-    lower_bounds = midpoints - cell_width / 2.0
-    upper_bounds = midpoints + cell_width / 2.0
-
-    # Z_new = lambda * X + (1 - lambda) * Z_old, X ~ N(0, 1) in-control.
-    # Given Z_old = midpoints[i] (a row), Z_new falls in cell j (a column)
-    # when X falls in [(lower_j - (1-lambda) z_i)/lambda, (upper_j - (1-lambda)
-    # z_i)/lambda] -- broadcast across every (from-state, to-state) pair at
-    # once rather than looping.
-    one_minus_lambda = 1.0 - smoothing_param
-    from_state = midpoints.reshape(-1, 1)
-    to_lower = lower_bounds.reshape(1, -1)
-    to_upper = upper_bounds.reshape(1, -1)
-    # Z_t = lambda * X_t + (1 - lambda) * Z_{t-1}, so reaching cell j from
-    # state S_i requires X_t = (bound - (1 - lambda) * S_i) / lambda.
-    #
-    # NOTE for anyone mutation-testing this: flipping either sign here is an
-    # *equivalent* mutant in control, and deliberately so rather than by luck.
-    # The grid is symmetric about zero and the midpoints are antisymmetric, so
-    # the flip permutes each row into its mirror image; the in-control problem
-    # is symmetric under that reversal and the centre state -- the one the ARL
-    # is read from -- is its fixed point. Measured: identical to 4 dp across
-    # lambda in {0.03, 0.05, 0.1, 0.5, 0.9}.
-    #
-    # ⚠️ That equivalence holds ONLY in control. An out-of-control ARL with a
-    # mean shift breaks the symmetry and the flip becomes a real bug. If BIN-84
-    # or a later story computes out-of-control ARLs, this stops being safe.
-    standardised_lower = (to_lower - one_minus_lambda * from_state) / smoothing_param
-    standardised_upper = (to_upper - one_minus_lambda * from_state) / smoothing_param
-    transition_matrix = norm.cdf(standardised_upper) - norm.cdf(standardised_lower)
-
-    # First-step analysis for absorbing Markov chains: the expected number
-    # of steps to absorption from every transient state solves
-    # (I - Q) @ arl = 1. The centre state (index half_state_count) is the
-    # zero-state starting point.
-    identity = np.eye(num_states)
-    steps_to_absorption = np.linalg.solve(
-        identity - transition_matrix, np.ones(num_states)
-    )
-    return float(steps_to_absorption[half_state_count])
-
-
-def _calibrate_limit_multiplier(
-    smoothing_param: float, target_arl: float
-) -> tuple[float, float]:
-    """Solve for the control-limit multiplier L achieving ``target_arl``.
-
-    Root-finds via ``scipy.optimize.brentq`` on ``L -> _in_control_arl(L) -
-    target_arl``. In-control ARL0 is monotonically increasing in L (wider
-    limits mean fewer false alarms), so the root, when bracketed, is unique.
-
-    Returns
-    -------
-    tuple[float, float]
-        A ``(limit_multiplier, achieved_arl)`` pair -- the solved L and the
-        ARL0 this implementation's own calibration computes for it (which
-        may differ very slightly from ``target_arl`` due to numerical
-        approximation, per ADR-004 section 5 / feature file assumption A4).
-    """
-
-    def arl_gap(limit_multiplier: float) -> float:
-        return (
-            _in_control_arl(smoothing_param, limit_multiplier, _MARKOV_CHAIN_STATES)
-            - target_arl
-        )
-
-    lower_bound = _MIN_LIMIT_MULTIPLIER
-    if arl_gap(lower_bound) >= 0:
-        # target_arl is at or below the smallest ARL0 this discretisation can
-        # represent near L=0 (its mathematical infimum is 1 -- see
-        # MIN_MEANINGFUL_ARL -- but a finite grid cannot reach exactly 1).
-        # The smallest sensible L already meets or exceeds the target.
-        achieved = _in_control_arl(smoothing_param, lower_bound, _MARKOV_CHAIN_STATES)
-        return lower_bound, achieved
-
-    upper_bound = 1.0
-    while arl_gap(upper_bound) < 0:
-        upper_bound *= 2.0
-        if upper_bound > _MAX_LIMIT_MULTIPLIER:
-            achieved = _in_control_arl(
-                smoothing_param, upper_bound, _MARKOV_CHAIN_STATES
-            )
-            return upper_bound, achieved
-
-    # scipy.optimize.brentq has no type stub mypy can see (same scipy
-    # stub-coverage gap as the `norm` import above); it returns a float here
-    # since `full_output` is left at its default of False.
-    limit_multiplier: float = brentq(  # type: ignore[no-untyped-call]
-        arl_gap, lower_bound, upper_bound, xtol=1e-9, rtol=1e-12, maxiter=200
-    )
-    achieved = _in_control_arl(smoothing_param, limit_multiplier, _MARKOV_CHAIN_STATES)
-    return limit_multiplier, achieved
 
 
 # --- Public API ----------------------------------------------------------------
@@ -545,13 +315,53 @@ def fit_ewma(
     baseline_spread = statistics.stdev(scores)
     sigma_estimate = _moving_range_sigma(scores)
 
+    # `float(...)` here is a boundary normalisation, not a validation step:
+    # `effective_smoothing_param`/`validated_target_arl` may be a plain `int`
+    # or a numpy scalar (`np.float32`, `np.int64`, ...) that this function
+    # has always accepted -- only `ewma_numerics`'s own functions are
+    # beartype-hooked (BIN-130), and their `float` annotations reject
+    # anything that is not literally a `float` instance under beartype's
+    # default `is_pep484_tower=False`. Without this cast, a plain
+    # `target_arl=370` would raise `BeartypeCallHintParamViolation` inside
+    # this dev-only-hooked test suite while working fine in the shipped
+    # wheel (which never imports beartype) -- exactly the load-order
+    # instability BIN-130 exists to close, just one call frame deeper than
+    # `fit_ewma`'s own signature. A pure module move alone did not close
+    # it; this cast is what does.
+    #
+    # This also makes `fit_ewma` consistent with `fit_cusum`/`fit_shewhart`
+    # rather than inventing a fourth convention: both already normalise
+    # their own numeric parameters to `float` at their boundary via
+    # `caliper.baseline.domain.parameter_guards.require_real_number`
+    # (BIN-126), which returns `float(value)`. `fit_ewma` has no equivalent
+    # guard yet (that remains BIN-126's open work -- it would reject a
+    # wrong type outright, which this cast deliberately does not), but the
+    # *widening* behaviour -- np.float32 promoted to float64 crossing this
+    # boundary -- is the same shape all three charts now share. `float()`
+    # never rejects anything `fit_ewma` itself accepts and is exact for
+    # every numeric type already in the acceptance matrix (int, np.float64,
+    # np.float32 promotion, np.int64) -- verified directly against
+    # `test_ewma_arl_published_values.py`, not assumed: identical
+    # `achieved_arl` before and after for every input already exercised as
+    # a plain Python `float`, since `float(x) is x`-equivalent (bit-exact)
+    # whenever `x` already is one.
+    #
+    # 🔍 The stronger reason, found by code-reviewer on BIN-130 and worth
+    # recording because it is not obvious: numpy's NEP 50 weak promotion
+    # keeps `1.0 - np.float32(x)` in **float32**. Without this cast a single
+    # float32 smoothing parameter would silently demote the whole
+    # Markov-chain calibration to single precision -- measured at 2.69e-12
+    # relative drift in `achieved_arl`. So the cast is a precision
+    # *safeguard*, not merely a convention match: it stops one narrow input
+    # type from changing the width of every subsequent operation. Do not
+    # remove it on the grounds that `float()` "does nothing" for a float.
     limit_multiplier, achieved_arl = _calibrate_limit_multiplier(
-        effective_smoothing_param, validated_target_arl
+        float(effective_smoothing_param), float(validated_target_arl)
     )
     half_width = (
         limit_multiplier
         * sigma_estimate
-        * _ewma_asymptotic_std_ratio(effective_smoothing_param)
+        * _ewma_asymptotic_std_ratio(float(effective_smoothing_param))
     )
 
     provenance = baseline.provenance_signature

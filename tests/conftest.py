@@ -35,10 +35,11 @@ from beartype.claw import beartype_package
 # What it buys, concretely: ``mypy --strict`` covers ``src/``, but there are two
 # places where it is explicitly silenced -- ``# type: ignore[attr-defined]`` on
 # the ``scipy.stats.norm`` import and ``# type: ignore[no-untyped-call]`` on the
-# ``brentq`` call in ``ewma_fitting.py``. scipy is largely untyped, so those are
-# holes in static coverage: the annotation claims ``float`` and nothing verifies
-# it. beartype checks at runtime exactly what mypy was told to stop checking.
-# BIN-94's Siegmund approximation adds more scipy calls and more such holes.
+# ``brentq`` call, both in ``ewma_numerics.py``. scipy is largely untyped, so
+# those are holes in static coverage: the annotation claims ``float`` and
+# nothing verifies it. beartype checks at runtime exactly what mypy was told to
+# stop checking. BIN-94's Siegmund approximation adds more scipy calls and more
+# such holes.
 #
 # ⚠️ Scoped to individual entry-point-free modules deliberately, and it must
 # never be widened to a package whose public entry points engineers call.
@@ -48,24 +49,34 @@ from beartype.claw import beartype_package
 # the six merged feature files asserting on it. Catching and translating it
 # does not work either: the violation carries prose rather than structure, so
 # ``missing_fields`` cannot be recovered from it. See BIN-109.
-beartype_package("caliper.baseline.domain.ewma_fitting")
+beartype_package("caliper.baseline.domain.ewma_numerics")
 
-# ``spc_numerics`` (hoisted during BIN-94) has no public entry point at all --
-# its only callers are other domain modules, never an engineer -- so it is the
-# clean case: nothing above needs weighing, because there is no public boundary
-# in it to guard by accident.
+# ``spc_numerics`` (hoisted during BIN-94) and ``ewma_numerics`` (split out of
+# ``ewma_fitting`` during BIN-130) have no public entry point at all -- their
+# only callers are other domain modules, never an engineer -- so both are the
+# clean case: nothing above needs weighing, because there is no public
+# boundary in either to guard by accident.
 #
-# ``cusum_fitting`` is deliberately NOT hooked: it contains ``fit_cusum``, a
-# public entry point.
+# ``ewma_fitting`` (which now holds only ``fit_ewma`` and its parameter
+# validation), ``cusum_fitting`` and ``shewhart_fitting`` are deliberately NOT
+# hooked: each contains a public entry point.
 #
-# ⚠️ ``fit_ewma`` **is** hooked, unavoidably -- ``beartype_package`` takes a
-# module, and ``fit_ewma`` shares ``ewma_fitting`` with the numerics. BIN-109
-# accepted that after checking it displaces nothing: ``fit_ewma`` already
-# leaked ``AttributeError`` on a wrong-typed baseline before beartype existed,
-# so no typed exception is replaced (unlike ``Baseline.record``, which has one
-# -- hooking its package broke five tests). Logged on BIN-104 as part of the
-# wrong-typed-argument gap. **Do not read this as a precedent for hooking a
-# boundary that does raise properly.**
+# ⚠️ Until BIN-130, ``fit_ewma`` **was** hooked, unavoidably --
+# ``beartype_package`` takes a module, and ``fit_ewma`` shared a file
+# (``ewma_fitting.py``) with these numerics. BIN-109 accepted that after
+# checking it displaced nothing at the time: ``fit_ewma`` already leaked
+# ``AttributeError`` on a wrong-typed baseline before beartype existed, so no
+# typed exception was replaced (unlike ``Baseline.record``, which has one --
+# hooking its package broke five tests). That premise expired the moment
+# BIN-126 gave ``fit_ewma`` a guard to displace -- a guard added to a hooked
+# ``fit_ewma`` was pre-empted by ``BeartypeCallHintParamViolation`` before its
+# body ever ran, unreachable inside this suite even though it worked in the
+# shipped wheel, which never imports beartype. BIN-130 split
+# ``caliper.baseline.domain.ewma_numerics`` out of ``ewma_fitting`` specifically
+# so this hook could stop covering ``fit_ewma`` while still covering the scipy
+# calls it exists for. **Do not read the surviving numerics hook as a
+# precedent for hooking a boundary that does raise properly** -- it is hooked
+# because it has no boundary to guard, not despite having one.
 beartype_package("caliper.baseline.domain.spc_numerics")
 
 
