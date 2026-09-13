@@ -260,6 +260,27 @@ EXCLUDED_FACTORY_FUNCTIONS: tuple[ExcludedParameter, ...] = (
         "target_arl/reference_value/threshold/smoothing_param are the "
         "surface being added, not scores again).",
     ),
+    ExcludedParameter(
+        "overflow_prone_scores",
+        "BIN-121 part 1: draws near +/-sys.float_info.max to exercise "
+        "moving-range overflow. Deliberately outside the fittable range "
+        "-- the test asserts fit-or-CaliperError, not fit-successfully. "
+        "Probing these bounds against a fit_* call would prove nothing: "
+        "every draw is expected to be rejected as degenerate.",
+    ),
+    ExcludedParameter(
+        "underflow_prone_scores",
+        "BIN-121 part 1: draws subnormal/near-zero perturbations to "
+        "exercise moving-range sigma underflow. Same reasoning as "
+        "overflow_prone_scores above -- every draw is expected to be "
+        "rejected as degenerate.",
+    ),
+    ExcludedParameter(
+        "signed_zero_scores",
+        "BIN-121 part 1: mixes 0.0/-0.0 and optional near-subnormal "
+        "values to exercise the zero-variance and sigma-underflow "
+        "guards. Same reasoning as the other two BIN-121 factories.",
+    ),
 )
 
 _GOVERNED_GIVEN_NAMES = frozenset(p.name for p in GOVERNED_GIVEN_PARAMETERS)

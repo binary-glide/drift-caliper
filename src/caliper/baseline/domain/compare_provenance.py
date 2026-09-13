@@ -101,6 +101,53 @@ def _reject_if_artefact_provenance_unreadable(
     )
 
 
+def _reject_if_artefact_provenance_not_str(
+    artefact: object,
+    model_version_value: object,
+    criteria_value: object,
+) -> None:
+    """Raise ``InvalidParameterError`` if either probed value is not a ``str``.
+
+    ``probe_attribute`` guards *access* -- this guards what the access
+    *returned*. ``build_mismatches`` declares ``str`` parameters and
+    evaluates ``expected != received``, so a non-``str`` value that
+    reaches it either (A) leaks a raising ``__eq__``/``__ne__`` as a
+    non-``CaliperError``, or (B) lands in
+    ``context["mismatches"]`` violating its ``dict[str, dict[str, str]]``
+    type contract. Validating here closes both defects at the boundary
+    (BIN-121).
+
+    Same error category and parameter name as
+    ``_reject_if_artefact_provenance_unreadable`` -- the artefact's
+    provenance attributes are accessible but do not satisfy the ``str``
+    contract ``FittedControlLimits`` declares, so the object still does
+    not behave as a conforming fitted artefact.
+    """
+    non_str: dict[str, str] = {}
+    if not isinstance(model_version_value, str):
+        non_str["provenance_model_version"] = type(model_version_value).__name__
+    if not isinstance(criteria_value, str):
+        non_str["provenance_criteria"] = type(criteria_value).__name__
+    if not non_str:
+        return
+
+    raise InvalidParameterError(
+        "artefact provenance attributes must be strings",
+        context={
+            "parameter": "artefact",
+            "constraint": _ARTEFACT_PROVENANCE_CONSTRAINT,
+            "kind": "invalid",
+            "provided": type(artefact).__name__,
+            "non_str_fields": non_str,
+        },
+        recovery_hint=(
+            "Pass the return value of fit_ewma(), fit_cusum(), or "
+            "fit_shewhart() -- not a custom object whose provenance "
+            "attributes return non-string values."
+        ),
+    )
+
+
 def compare_provenance(result: ScoringResult, artefact: FittedControlLimits) -> None:
     """Compare a Phase II scoring result's provenance against a fitted artefact's.
 
@@ -128,14 +175,17 @@ def compare_provenance(result: ScoringResult, artefact: FittedControlLimits) -> 
         mismatch is reported in a single raise covering both.
     InvalidParameterError
         ``artefact``'s ``provenance_model_version``/``provenance_criteria``
-        attributes are absent, or raise when accessed (BIN-127) -- an
-        object that satisfies ``FittedControlLimits`` structurally but not
-        behaviourally.
+        attributes are absent, raise when accessed (BIN-127), or return a
+        non-``str`` value (BIN-121) -- an object that satisfies
+        ``FittedControlLimits`` structurally but not behaviourally.
     """
     model_version_probe = probe_attribute(artefact, "provenance_model_version")
     criteria_probe = probe_attribute(artefact, "provenance_criteria")
     _reject_if_artefact_provenance_unreadable(
         artefact, model_version_probe, criteria_probe
+    )
+    _reject_if_artefact_provenance_not_str(
+        artefact, model_version_probe.value, criteria_probe.value
     )
 
     mismatches = build_mismatches(
