@@ -41,45 +41,29 @@ here -- it is unimplemented (``adequate()`` does not exist yet; see
 ``CLAUDE.md``'s ADR-005 section and BIN-122's scope-survey comment), so
 there is nothing yet to round-trip. That surface belongs to BIN-114.
 
-🚨 **Surfaces 1 and 2 were weakened 2026-09-12 (BIN-124 round 3,
-code-reviewer's Blocker 3) -- read this before trusting what they cover.**
+✅ **Surfaces 1 and 2 were restored 2026-09-13 by BIN-134** — read this,
+because the file spent a day asserting materially less than it appeared to.
 
-They used to parse the reported *text* (``context["constraint"]``,
-``FittingAdvisory.description``) to prove the number an engineer actually
-reads matches the number Caliper enforces -- catching drift between the
-two, which is the exact BIN-122 Instance 3 shape (the reported bound and
-the enforced bound came from the same computation and still disagreed).
-That is what "round-trips" meant for these two surfaces originally, and
-it is a genuinely stronger claim than the one below.
+Between 2026-09-12 and then, both surfaces checked only that the imported
+constant was *accepted* when fed back. They could **not** detect drift
+between the number an engineer reads and the number the library enforces,
+which is the entire point and is BIN-117's Instance 3 class of defect —
+where the reported bound and the enforced bound came from the same
+computation and still disagreed.
 
-**It was removed because it violated ADR-008** (*"error assertions use
-type + context keys, never message text"*) -- regexing ``constraint`` and
-``description`` is exactly the message-text assertion ADR-008 forbids,
-raised by ``code-reviewer`` and correctly not overridden: the existing
-``min_attainable_arl`` precedent this file's own module docstring cites as
-its worked pattern is a **structured numeric field already in ``context``**,
-not parsed prose -- that precedent argues for *adding a field*, not for
-regexing a message, and no such field exists yet for ``MIN_TARGET_ARL`` or
-``VERIFIED_ARL_FLOOR``.
+The original version got the property right and the mechanism wrong: it
+regexed the number out of ``context["constraint"]`` and
+``FittingAdvisory.description``, which ADR-008 forbids (*never assert on
+message text*), because wording is free to change without notice. A guard
+built on prose fails silently the first time someone rewords an error.
 
-**What surfaces 1 and 2 verify now, stated precisely, so this is not
-misread the way three other disclosed limitations already were this
-week:** ``test_min_target_arl_is_accepted_when_fed_back_after_rejection``
-and ``test_verified_arl_floor_is_accepted_cleanly_when_fed_back`` verify
-only that **the imported constant itself is accepted** when fed back --
-**not** that the value reported in the error/advisory text still matches
-that constant. **A future drift between the reported number and the
-enforced number -- the exact BIN-122 Instance 3 class of bug -- would not
-be caught by either test below**, because neither reads the reported text
-any more.
-
-**The stronger version is ticketed, not abandoned: BIN-134.** It needs a
-structured field before it can be rewritten honestly -- proposed:
-``InvalidParameterError.context["min_value"]``/``["max_value"]`` (floats,
-alongside the existing ``constraint`` string) for surface 1, and a
-``FittingAdvisory.boundary: float`` field for surface 2. Restore the
-text-parsing assertion (or, better, a structured-field assertion) once
-either lands.
+**BIN-134 supplied the missing mechanism** — ``context["min_value"]`` /
+``["max_value"]`` / ``["min_inclusive"]`` / ``["max_inclusive"]``, and
+``FittingAdvisory.boundary`` — so each surface now asserts *reported ==
+enforced* on a structured numeric field, feeds that value back, **and**
+checks ``nextafter`` across the edge so the reported boundary is the exact
+edge rather than an approximation of one. The prose is still emitted for
+humans; it is simply not what these assert on.
 
 **What this file cannot catch, stated rather than left implicit.**
 
@@ -103,6 +87,8 @@ either lands.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_shewhart
@@ -119,48 +105,54 @@ _PROBE_BASELINE = probe_baseline()
 # --- Surface 1: MIN_TARGET_ARL (ADR-011 hard floor) ---------------------------
 
 
-def test_min_target_arl_is_accepted_when_fed_back_after_rejection() -> None:
-    """``MIN_TARGET_ARL`` itself round-trips: refused just below it, accepted at it.
+def test_reported_min_target_arl_equals_the_enforced_floor() -> None:
+    """The floor the error **reports** is the floor the library **enforces**.
 
-    🚨 **Weakened 2026-09-12 (BIN-124 round 3, code-reviewer's Blocker 3) --
-    see this file's module docstring before trusting what this covers.**
-    This asserts only that the **imported constant** ``MIN_TARGET_ARL`` is
-    accepted when fed back -- it does **not** parse or check
-    ``context["constraint"]`` any more, so it does **not** verify that the
-    floor named in the error text an engineer actually reads still equals
-    ``MIN_TARGET_ARL``. A future drift between the two (BIN-122's Instance
-    3 class of bug) would pass this test silently. The stronger,
-    text-verifying version is ticketed as **BIN-134**, blocked on adding a
-    structured numeric field to ``InvalidParameterError.context`` (ADR-008
-    forbids regexing ``constraint`` to get there another way).
+    ✅ **Restored 2026-09-13 by BIN-134**, which added
+    ``context["min_value"]``/``["max_value"]`` as structured numeric
+    fields. Between 2026-09-12 and then this test was knowingly weaker: it
+    checked only that the imported constant was accepted, and could not
+    detect drift between the number an engineer reads and the number the
+    library applies. That is BIN-117's Instance 3 class of defect, where
+    both came from the same computation and still disagreed.
+
+    ⚠️ **Reads the bound from the error, never from the message.** ADR-008
+    forbids asserting on message text, and an earlier attempt to regex
+    ``constraint`` was correctly rejected for exactly that. The prose is
+    still emitted for humans; it is simply not what this asserts on.
     """
-    with pytest.raises(InvalidParameterError):
+    with pytest.raises(InvalidParameterError) as exc_info:
         fit_shewhart(_PROBE_BASELINE, target_arl=MIN_TARGET_ARL - 1.0)
 
-    # The round-trip this test still proves: the floor itself is accepted
-    # (ADR-011's hard floor is inclusive -- refused strictly *below*
-    # MIN_TARGET_ARL, accepted at it).
-    result = fit_shewhart(_PROBE_BASELINE, target_arl=MIN_TARGET_ARL)
+    context = exc_info.value.context
+
+    # 1. Reported == enforced. The assertion the weakened version lost.
+    assert context["min_value"] == MIN_TARGET_ARL
+    assert context["min_inclusive"] is True
+
+    # 2. The reported bound round-trips: feeding it straight back is accepted.
+    result = fit_shewhart(_PROBE_BASELINE, target_arl=context["min_value"])
     assert result.requested_arl == MIN_TARGET_ARL
+
+    # 3. Inclusive means inclusive -- just below it is still refused, so the
+    #    reported boundary is the exact edge and not an approximation of one.
+    with pytest.raises(InvalidParameterError):
+        fit_shewhart(
+            _PROBE_BASELINE, target_arl=math.nextafter(context["min_value"], 0.0)
+        )
 
 
 # --- Surface 2: VERIFIED_ARL_FLOOR (ADR-011 advisory line) --------------------
 
 
-def test_verified_arl_floor_is_accepted_cleanly_when_fed_back() -> None:
-    """``VERIFIED_ARL_FLOOR`` itself round-trips clean: flagged below it, clean at it.
+def test_reported_advisory_boundary_equals_the_enforced_tier_edge() -> None:
+    """The boundary the advisory **reports** is the tier edge the library applies.
 
-    🚨 **Weakened 2026-09-12 (BIN-124 round 3, code-reviewer's Blocker 3) --
-    see this file's module docstring before trusting what this covers.**
-    This asserts only that the **imported constant** ``VERIFIED_ARL_FLOOR``
-    is accepted with no advisory attached -- it does **not** parse or check
-    ``FittingAdvisory.description`` any more, so it does **not** verify
-    that the floor named in the advisory text an engineer actually reads
-    still equals ``VERIFIED_ARL_FLOOR``. A future drift between the two
-    (BIN-122's Instance 3 class of bug) would pass this test silently. The
-    stronger, text-verifying version is ticketed as **BIN-134**, blocked
-    on adding a structured numeric field to ``FittingAdvisory`` (ADR-008
-    forbids regexing ``description`` to get there another way).
+    ✅ **Restored 2026-09-13 by BIN-134**, which added
+    ``FittingAdvisory.boundary``. ADR-011's advisory previously embedded
+    ``370.0`` in a sentence and nowhere else, so this could only check that
+    the imported constant landed clean -- not that the advisory an engineer
+    actually reads names the same number.
     """
     flagged = fit_shewhart(_PROBE_BASELINE, target_arl=200.0)
     assert len(flagged.advisories) == 1, (
@@ -168,17 +160,19 @@ def test_verified_arl_floor_is_accepted_cleanly_when_fed_back() -> None:
         "test precondition, not the assertion under test"
     )
 
-    # The round-trip this test still proves: the floor itself lands clean.
-    # classify_target_arl uses a strict `<` comparison against
-    # VERIFIED_ARL_FLOOR (parameter_guards.py), so the floor value itself
-    # must land in the CLEAN tier, not the flagged one.
-    clean = fit_shewhart(_PROBE_BASELINE, target_arl=VERIFIED_ARL_FLOOR)
-    assert clean.advisories == (), (
-        f"target_arl=VERIFIED_ARL_FLOOR ({VERIFIED_ARL_FLOOR!r}) still "
-        "carries a flagged-tier advisory -- the floor is being treated as "
-        "inside its own flagged range, an off-by-one-boundary version of "
-        "BIN-122's Instance 3."
-    )
+    # 1. Reported == enforced.
+    boundary = flagged.advisories[0].boundary
+    assert boundary == VERIFIED_ARL_FLOOR
+
+    # 2. The reported boundary round-trips, and lands in the CLEAN tier --
+    #    classify_target_arl uses a strict `<`, so the edge itself is clean.
+    clean = fit_shewhart(_PROBE_BASELINE, target_arl=boundary)
+    assert clean.advisories == ()
+
+    # 3. Just below it is still flagged, so the reported number is the exact
+    #    edge rather than somewhere near it.
+    below = fit_shewhart(_PROBE_BASELINE, target_arl=math.nextafter(boundary, 0.0))
+    assert len(below.advisories) == 1
 
 
 # --- Surface 3: SufficiencyResult's reported gap ------------------------------

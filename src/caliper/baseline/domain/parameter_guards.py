@@ -138,6 +138,10 @@ def classify_target_arl(
                 "constraint": constraint,
                 "kind": "invalid",
                 "provided": numeric_target_arl,
+                "min_value": MIN_TARGET_ARL,
+                "max_value": max_target_arl,
+                "min_inclusive": True,
+                "max_inclusive": True,
             },
             recovery_hint=(
                 f"Choose a {parameter} within [{MIN_TARGET_ARL}, "
@@ -160,6 +164,7 @@ def classify_target_arl(
                 "same calibration method as any other target -- only the "
                 "verification coverage is thinner here."
             ),
+            boundary=VERIFIED_ARL_FLOOR,
         )
     return None
 

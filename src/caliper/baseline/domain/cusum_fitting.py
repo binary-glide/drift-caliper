@@ -290,6 +290,10 @@ def _validate_reference_value(reference_value: float | None) -> float | None:
                 "constraint": constraint,
                 "kind": "invalid",
                 "provided": reference_value,
+                "min_value": MIN_REFERENCE_VALUE,
+                "max_value": MAX_REFERENCE_VALUE,
+                "min_inclusive": True,
+                "max_inclusive": True,
             },
             recovery_hint=(
                 "Choose a reference_value within "

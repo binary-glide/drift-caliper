@@ -364,8 +364,12 @@ def test_both_non_str_dimensions_are_both_reported() -> None:
     first draft was grepping. Caught by ``code-reviewer``. ADR-008's
     remedy for prose-parsing is to assert a structured key **when one
     exists**; checking whether it does comes before concluding it cannot
-    be done. ``BIN-134`` remains open for the bounds that genuinely have
-    no such field -- it is not a blanket excuse.
+    be done. ``BIN-134`` supplied exactly such
+    fields for the range bounds (``min_value``/``max_value`` plus their
+    inclusivity flags) and is now closed -- which makes the lesson sharper,
+    not weaker: the answer to prose-parsing is a structured field, and the
+    field either already exists or gets added. It is never a reason to
+    drop the assertion.
     """
     error = _assert_rejected_as_invalid_artefact(_BothNonStrArtefact())
     _assert_offending_fields(error, "provenance_model_version", "provenance_criteria")

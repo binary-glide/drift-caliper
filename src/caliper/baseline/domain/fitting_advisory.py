@@ -78,3 +78,4 @@ class FittingAdvisory(BaseModel):
 
     kind: str
     description: str
+    boundary: float

@@ -215,6 +215,10 @@ def _validate_smoothing_param(smoothing_param: float | None) -> float | None:
                 "constraint": constraint,
                 "kind": "invalid",
                 "provided": smoothing_param,
+                "min_value": MIN_SMOOTHING_PARAM,
+                "max_value": MAX_SMOOTHING_PARAM,
+                "min_inclusive": True,
+                "max_inclusive": True,
             },
             recovery_hint=(
                 "Choose a smoothing_param within "

@@ -300,6 +300,8 @@ class Baseline:
                         "constraint": constraint,
                         "kind": "invalid",
                         "provided": threshold,
+                        "min_value": 1,
+                        "min_inclusive": True,
                     },
                     recovery_hint=(
                         "threshold is a count of observations -- pass a "
@@ -316,6 +318,8 @@ class Baseline:
                     "constraint": constraint,
                     "kind": "invalid",
                     "provided": threshold,
+                    "min_value": 1,
+                    "min_inclusive": True,
                 },
                 recovery_hint=(
                     "Pass a positive threshold, or omit it to use the "

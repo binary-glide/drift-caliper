@@ -128,6 +128,8 @@ class FittedShewhart(BaseModel):
                     "constraint": "must be a finite float greater than 0.0",
                     "kind": "invalid",
                     "provided": v,
+                    "min_value": 0.0,
+                    "min_inclusive": False,
                 },
                 recovery_hint=(
                     "A FittedShewhart cannot hold a sigma_estimate that is "
