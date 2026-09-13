@@ -56,7 +56,6 @@ external citation.
 from __future__ import annotations
 
 import statistics
-from collections.abc import Sequence
 from statistics import NormalDist
 
 from caliper.baseline.domain.baseline import Baseline
@@ -70,6 +69,7 @@ from caliper.baseline.domain.parameter_guards import (
     require_type,
 )
 from caliper.baseline.domain.spc_numerics import (
+    _has_zero_variance,
     _moving_range_sigma,
     _overflow_safe_mean,
 )
@@ -147,11 +147,6 @@ def _require_target_arl(
 
 
 # --- Baseline statistics ------------------------------------------------------
-
-
-def _has_zero_variance(scores: Sequence[float]) -> bool:
-    """Report whether every score in ``scores`` is identical."""
-    return len(set(scores)) <= 1
 
 
 # --- Closed-form tail-probability calibration ---------------------------------

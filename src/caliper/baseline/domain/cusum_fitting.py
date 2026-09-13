@@ -86,7 +86,6 @@ from __future__ import annotations
 
 import math
 import statistics
-from collections.abc import Sequence
 
 from scipy.optimize import brentq
 
@@ -101,6 +100,7 @@ from caliper.baseline.domain.parameter_guards import (
     require_type,
 )
 from caliper.baseline.domain.spc_numerics import (
+    _has_zero_variance,
     _moving_range_sigma,
     _overflow_safe_mean,
 )
@@ -556,11 +556,6 @@ def _calibrate_decision_interval(
 
 
 # --- Baseline statistics ------------------------------------------------------
-
-
-def _has_zero_variance(scores: Sequence[float]) -> bool:
-    """Report whether every score in ``scores`` is identical."""
-    return len(set(scores)) <= 1
 
 
 # --- Public API ----------------------------------------------------------------

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import math
 import statistics
-from collections.abc import Sequence
 
 from caliper.baseline.domain.baseline import Baseline
 from caliper.baseline.domain.ewma_numerics import (
@@ -40,6 +39,7 @@ from caliper.baseline.domain.parameter_guards import (
     require_type,
 )
 from caliper.baseline.domain.spc_numerics import (
+    _has_zero_variance,
     _moving_range_sigma,
     _overflow_safe_mean,
 )
@@ -230,11 +230,6 @@ def _validate_smoothing_param(smoothing_param: float | None) -> float | None:
 
 
 # --- Baseline statistics ------------------------------------------------------
-
-
-def _has_zero_variance(scores: Sequence[float]) -> bool:
-    """Report whether every score in ``scores`` is identical."""
-    return len(set(scores)) <= 1
 
 
 # --- Public API ----------------------------------------------------------------

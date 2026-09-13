@@ -104,6 +104,30 @@ _NON_FINITE_SIGMA_REASON = "non_finite_sigma_estimate"
 _SIGMA_UNDERFLOW_REASON = "sigma_estimate_underflow"
 
 
+def _has_zero_variance(scores: Sequence[float]) -> bool:
+    """Report whether every score in ``scores`` is identical.
+
+    Hoisted here under BIN-125 from three byte-identical copies in
+    ``ewma_fitting``/``cusum_fitting``/``shewhart_fitting``, confirmed
+    still identical by comparing parsed bodies at the time of the move
+    rather than by eye. Follows the precedent set by ``_moving_range_sigma``
+    (BIN-94) and ``_overflow_safe_mean`` (BIN-123): a predicate every chart
+    shares belongs in the numerical layer, not copied per chart.
+
+    ⚠️ **The risk this closes is divergence under a future rejection, not
+    disagreement today.** BIN-119 added a second baseline rejection and put
+    it in the shared ``_moving_range_sigma``, so all three charts inherited
+    it automatically. Landing in per-chart copies instead would have needed
+    writing three times, and a miss in one produces a chart that silently
+    accepts what the other two refuse.
+
+    ⚠️ **This is a move, not a redesign.** Zero-variance detection is a
+    BIN-119-adjacent rejection rule with merged scenarios depending on its
+    exact behaviour; the predicate is unchanged.
+    """
+    return len(set(scores)) <= 1
+
+
 def _overflow_safe_mean(values: Sequence[float]) -> float:
     """Exactly-rounded mean, tolerating a running sum that overflows float64.
 
