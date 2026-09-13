@@ -211,7 +211,13 @@ import pytest
 
 import caliper
 from caliper.errors import CaliperError
-from tests.support.exception_contract_registry import EXCLUDED, EXERCISABLE
+from tests.support.exception_contract_registry import (
+    EXCLUDED,
+    EXERCISABLE,
+    GRID_KINDS,
+    ExercisableEntryPoint,
+    InputKind,
+)
 
 _EXCLUDED_NAMES = frozenset(entry.name for entry in EXCLUDED)
 _EXERCISABLE_NAMES = frozenset(entry.name for entry in EXERCISABLE)
@@ -350,4 +356,110 @@ def test_exception_escaping_public_entry_point_is_a_caliper_error(
         pytest.fail(
             f"{entry_point_name}::{case_id} let a non-CaliperError escape: "
             f"{type(exc).__module__}.{type(exc).__name__}: {exc}"
+        )
+
+
+def test_every_entry_point_covers_or_excuses_every_input_kind() -> None:
+    """The grid is complete: each entry point x each kind is a case or a reason.
+
+    **This is BIN-136's whole mechanism**, and it is one dimension wider
+    than ``test_every_public_name_is_classified`` above. That test forces
+    *name* coverage -- a new export cannot ship unaudited. It says nothing
+    about *which hostile inputs* a name is probed with, and that gap is
+    not theoretical: ``compare_provenance`` was registered, exercised, and
+    reported clean while leaking a raw ``RuntimeError``, because no case
+    anywhere passed an object whose comparison raises. A missing name
+    failed the build; a missing input **kind** was invisible.
+
+    ⚠️ **``GRID_KINDS`` is derived from ``InputKind``, not listed**, so
+    adding a member fails this test for every entry point that has not yet
+    considered it. That is deliberate and is the point -- a new kind is a
+    question to be asked of the whole surface, not of whoever happens to
+    remember.
+
+    ⚠️ **An ``n/a`` reason is a claim about the code and must be able to
+    become false.** "Takes no string argument" stops being true the day a
+    string parameter is added, and a reader can check it. "Not applicable"
+    cannot be wrong, which is why the length floor below exists -- it is a
+    crude proxy for "someone thought about this", and it is the difference
+    between this grid and a rubber stamp.
+    """
+    failures: list[str] = []
+
+    for entry_point in EXERCISABLE:
+        covered = {
+            case.kind
+            for case in entry_point.cases
+            if case.kind is not InputKind.REGRESSION_ANCHOR
+        }
+        excused = set(entry_point.not_applicable)
+
+        both = covered & excused
+        if both:
+            failures.append(
+                f"{entry_point.name}: {sorted(k.value for k in both)} is both "
+                "exercised and excused -- if a case exists, the kind applies; "
+                "delete the not_applicable entry."
+            )
+
+        missing = [k for k in GRID_KINDS if k not in covered and k not in excused]
+        if missing:
+            failures.append(
+                f"{entry_point.name}: no case and no stated reason for "
+                f"{sorted(k.value for k in missing)}. Add a HostileCase, or a "
+                "not_applicable entry saying why the kind cannot reach it."
+            )
+
+        stale = excused - set(GRID_KINDS)
+        if stale:
+            failures.append(
+                f"{entry_point.name}: excuses {sorted(k.value for k in stale)}, "
+                "which is not a grid kind -- REGRESSION_ANCHOR is excluded from "
+                "the grid and needs no excuse."
+            )
+
+    assert not failures, "\n".join(failures)
+
+
+@pytest.mark.parametrize(
+    "entry_point", EXERCISABLE, ids=lambda entry_point: entry_point.name
+)
+def test_not_applicable_reasons_are_substantive(
+    entry_point: ExercisableEntryPoint,
+) -> None:
+    """Every ``n/a`` reason says something specific enough to be checked.
+
+    🚨 **The failure mode this guards is the one that would make BIN-136
+    worse than useless.** A grid filled with "not applicable" is a
+    completeness claim backed by nothing, and it would read as stronger
+    than the curated list it replaced -- the precise defect BIN-136 was
+    filed to fix, reintroduced with more ceremony.
+
+    A length floor cannot verify that a reason is *true*; nothing
+    automatic can. It only makes the empty gesture inconvenient enough to
+    notice in review. The real check is a reader asking "would I know if
+    this stopped being true?" -- and the worked reasons on ``Baseline``,
+    ``Provenance`` and ``compare_provenance`` are the standard to match.
+
+    ⚠️ **That limitation is measured, not assumed** (2026-09-13). Two
+    mutations were run against the completed grid:
+
+    * deleting ``Monitor``'s ``COMPARISON_RAISES`` excuse -- **caught**,
+      naming the entry point and the kind
+    * prefixing a real reason with *"This is not applicable here at all
+      for any reason whatsoever truly and the remainder is unused padding
+      text"* -- **passed**
+
+    **The second is the honest ceiling of this test.** Do not read a green
+    run as evidence the reasons are sound; read it as evidence none is
+    *blank*. Reviewing the reasons is a human job and stays one.
+    """
+    for kind, reason in entry_point.not_applicable.items():
+        assert len(reason.split()) >= 8, (
+            f"{entry_point.name}/{kind.value}: {reason!r} is too short to be "
+            "a reason. State what about this entry point makes the kind "
+            "unreachable, in terms a reader can check against the code."
+        )
+        assert reason.strip().lower() not in {"n/a", "not applicable", "none"}, (
+            f"{entry_point.name}/{kind.value}: placeholder reason."
         )

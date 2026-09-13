@@ -62,8 +62,9 @@ explains the registry mechanism.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 from caliper.baseline import (
@@ -229,6 +230,59 @@ class _RaisingProvenanceArtefact:
         raise RuntimeError("boom-on-provenance-access")
 
 
+class _NonStrProvenanceArtefact:
+    """Provenance attributes read cleanly and return the wrong type (BIN-121 B).
+
+    Distinct from :class:`_RaisingProvenanceArtefact`, whose attributes
+    raise on *access*. Here the read succeeds -- and hands back something
+    that is not a ``str``, which then flowed into
+    ``context["mismatches"]``, declared ``dict[str, dict[str, str]]``.
+    """
+
+    provenance_model_version = 123
+    provenance_criteria = "rubric"
+
+
+class _HostileStr(str):
+    """A ``str`` **subclass** whose comparison raises -- BIN-139's input.
+
+    🚨 **The subclassing is the whole point, and an earlier draft of this
+    case missed it.** BIN-121's guard is ``isinstance(value, str)``, so a
+    plain hostile object is rejected as ``ATTRIBUTE_RETURNS_HOSTILE``
+    *before any comparison happens* -- the case passed, was named for the
+    comparison, and never reached one. A ``str`` subclass is the only
+    input that satisfies the guard **and** still hijacks ``__eq__``, so it
+    is the only input that genuinely exercises ``COMPARISON_RAISES`` here.
+
+    ⚠️ **A distinct failure shape from the one BIN-136 was built for**:
+    not a missing cell, but a cell filled by a case that could not reach
+    the behaviour it claimed. The grid makes a cell visible; it cannot
+    verify the case is aimed correctly. Aiming it correctly exposed
+    BIN-139 immediately.
+    """
+
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError("eq exploded")
+
+    def __ne__(self, other: object) -> bool:
+        raise RuntimeError("ne exploded")
+
+    def __hash__(self) -> int:
+        return 0
+
+
+class _HostileComparisonArtefact:
+    """Provenance whose value passes the str guard and then raises on compare.
+
+    See :class:`_HostileStr`. This is BIN-139's reproduction, held here as
+    the ``COMPARISON_RAISES`` case for ``compare_provenance`` and marked
+    with :class:`KnownLeak` until the guard is fixed.
+    """
+
+    provenance_model_version = _HostileStr("m-1")
+    provenance_criteria = "rubric"
+
+
 class _RaisingReprReceiver:
     """A ``SignalReceiver`` that raises, and whose own ``__repr__`` also raises.
 
@@ -249,6 +303,106 @@ class _RaisingReprReceiver:
 # ---------------------------------------------------------------------------
 # Registry data model
 # ---------------------------------------------------------------------------
+
+
+class InputKind(Enum):
+    """The kinds of hostile input an entry point can be probed with.
+
+    **This enumeration is the point of BIN-136.** Before it, the registry
+    forced *name* coverage -- every name in ``caliper.__all__`` must be
+    classified -- but said nothing about *which hostile inputs* each name
+    was probed with. A missing name failed the build; a missing input
+    **kind** was invisible.
+
+    That is not hypothetical. ``compare_provenance`` was registered,
+    exercised, and reported clean while leaking a raw ``RuntimeError``,
+    because no case anywhere passed an object whose *comparison* raises
+    (BIN-121 part 3, found by a hand audit that happened to run).
+
+    ⚠️ **The enumeration is global, not per-entry-point, and that is the
+    load-bearing choice.** Letting each entry point declare which kinds
+    *it* considers applicable would not have caught the defect above --
+    nobody would have thought to declare ``COMPARISON_RAISES`` relevant to
+    ``compare_provenance``, which is exactly why it was missed. Every kind
+    is crossed against every entry point, and inapplicability must be
+    *stated and justified* rather than assumed by omission.
+
+    **Adding a member here deliberately fails the build** until every
+    entry point either covers it or records why it cannot apply. That cost
+    is the feature.
+    """
+
+    WRONG_TYPE = "wrong_type"
+    """An argument of an entirely wrong type -- ``None``, ``int`` for a model."""
+
+    EMPTY_STRING = "empty_string"
+    """An empty or whitespace-only string where text is required."""
+
+    NON_FINITE_FLOAT = "non_finite_float"
+    """``NaN`` or ``±inf`` where a real number is required."""
+
+    ATTRIBUTE_ACCESS_RAISES = "attribute_access_raises"
+    """A duck-typed object that satisfies a protocol structurally but raises
+    when an attribute is actually read (BIN-127's class)."""
+
+    ATTRIBUTE_RETURNS_HOSTILE = "attribute_returns_hostile"
+    """A duck-typed object whose attribute *returns* successfully, but
+    returns something unusable -- the wrong type, or an object that
+    misbehaves later.
+
+    ⚠️ **Distinct from ``ATTRIBUTE_ACCESS_RAISES``, and the distinction is
+    exactly what BIN-127's fix did not cover.** Guarding the read says
+    nothing about what the read produced."""
+
+    COMPARISON_RAISES = "comparison_raises"
+    """An object whose ``__eq__``/``__ne__`` raises when Caliper compares
+    it. The kind that escaped the pre-BIN-136 registry entirely."""
+
+    OUT_OF_RANGE_VALUE = "out_of_range_value"
+    """The right type, an illegal value -- ``threshold=0``, a negative
+    count, a ``target_arl`` below ADR-011's floor, a smoothing parameter
+    outside ``(0, 1]``.
+
+    ⚠️ **Added while prototyping BIN-136 on three entry points, which is
+    what the prototype was for.** The taxonomy was seeded from the five
+    kinds the old registry's prose enumerated plus BIN-121's two, and this
+    kind was in none of them -- yet ``Baseline``'s existing
+    ``check_sufficiency(threshold=0)`` and ``threshold=-1`` cases had been
+    probing it all along, unnamed. **A kind the registry was already
+    exercising, that its own description did not mention**, is the
+    clearest possible evidence that the prose enumeration was never a
+    coverage claim.
+
+    ⚠️ Do not merge this into ``WRONG_TYPE``. Type rejection happens at a
+    different boundary (Pydantic ``mode="before"`` guards, BIN-104/126)
+    from range rejection (explicit checks in ``parameter_guards``), and
+    conflating them would let an entry point look covered for one while
+    missing the other entirely."""
+
+    REGRESSION_ANCHOR = "regression_anchor"
+    """Not a hostile input at all -- a legitimate call kept here to pin a
+    previously-broken path, or to confirm an already-correct
+    ``CaliperError`` still passes through unchanged.
+
+    ⚠️ **Excluded from the grid** (see ``GRID_KINDS``): it is not a
+    question one can ask of every entry point, so requiring an ``n/a``
+    reason for it everywhere would be noise. It exists as a member rather
+    than by making ``kind`` optional, because an optional field is one a
+    new case can silently forget to set -- which is the precise failure
+    mode this ticket is closing, and it would be perverse to reintroduce
+    it in the fix."""
+
+
+GRID_KINDS: tuple[InputKind, ...] = tuple(
+    kind for kind in InputKind if kind is not InputKind.REGRESSION_ANCHOR
+)
+"""The kinds every entry point must either exercise or excuse.
+
+Derived from :class:`InputKind` rather than listed, so a new member joins
+the grid automatically -- and immediately fails the completeness test for
+every entry point that has not considered it. **That failure is the
+mechanism, not an inconvenience.**
+"""
 
 
 @dataclass(frozen=True)
@@ -299,15 +453,29 @@ class HostileCase:
 
     id: str
     invoke: Callable[[], Any]
+    kind: InputKind
     known_leak: KnownLeak | None = None
 
 
 @dataclass(frozen=True)
 class ExercisableEntryPoint:
-    """A public name that is a caller-invoked operation, with its hostile cases."""
+    """A public name that is a caller-invoked operation, with its hostile cases.
+
+    ``not_applicable`` records, per :class:`InputKind` this entry point has
+    no case for, *why the kind cannot reach it*. The completeness meta-test
+    requires every kind to be either exercised or excused here, so omission
+    is not an option.
+
+    ⚠️ **The reasons carry the whole value and must be falsifiable.** "This
+    entry point takes no string argument" stays true, or visibly stops
+    being true when a string parameter is added. "Not applicable" is a
+    shrug that will be copied into the next thirty cells and audited by
+    nobody.
+    """
 
     name: str
     cases: tuple[HostileCase, ...]
+    not_applicable: Mapping[InputKind, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -326,43 +494,81 @@ _BASELINE_CASES = (
     HostileCase(
         "record_none",
         lambda: Baseline().record(None),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "record_wrong_type_int",
         lambda: Baseline().record(123),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "record_hostile_raising_attribute",
         lambda: Baseline().record(_RaisingScoreCandidate()),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        kind=InputKind.ATTRIBUTE_ACCESS_RAISES,
     ),
     HostileCase(
         "check_sufficiency_zero_threshold",
         lambda: Baseline().check_sufficiency(threshold=0),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
     ),
     HostileCase(
         "check_sufficiency_negative_threshold",
         lambda: Baseline().check_sufficiency(threshold=-1),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
     ),
     HostileCase(
         "check_sufficiency_wrong_type_threshold",
         lambda: Baseline().check_sufficiency(
             threshold="not an int"  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
 )
+
+_BASELINE_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "record() takes a ScoringResult, check_sufficiency() an int. "
+        "Neither takes a string; the strings inside a ScoringResult are "
+        "already non-blank by ModelVersion/ScoringCriteria construction."
+    ),
+    InputKind.NON_FINITE_FLOAT: (
+        "The only float is ScoringResult.score, which its own "
+        "@field_validator rejects as non-finite before a Baseline sees it "
+        "(ADR-006 OQ-2) -- covered under ScoringResult. check_sufficiency "
+        "takes an int and rejects non-integral values outright."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "record() reads attributes off the candidate via probe_fields "
+        "(BIN-127), but every value read is then handed to Pydantic "
+        "construction or compared against Caliper's own Provenance, both "
+        "of which reject a wrong type. ⚠️ This is the kind that broke "
+        "compare_provenance -- the difference is that record() validates "
+        "what it read and compare_provenance did not."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "record() compares provenance, but both sides are Caliper's own "
+        "Provenance objects: the stored one and the candidate's, the "
+        "latter already Pydantic-validated. A caller-supplied object "
+        "never reaches the comparison. Verified during BIN-121, which "
+        "deliberately left Baseline.record() unchanged for this reason."
+    ),
+}
 
 _JUDGE_CASES = (
     HostileCase(
         "create_missing_model_version",
         lambda: Judge.create(model_version=None),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "create_blank_model_version",
         lambda: Judge.create(model_version="   "),
+        kind=InputKind.EMPTY_STRING,
     ),
     HostileCase(
         "create_wrong_type_model_version",
         lambda: Judge.create(model_version=123),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "create_wrong_type_criteria",
@@ -370,28 +576,33 @@ _JUDGE_CASES = (
             model_version="m1",
             criteria=123,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "score_no_provider",
         lambda: Judge.create(model_version="m1", criteria="c1").score(agent_output="x"),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "score_no_criteria",
         lambda: Judge.create(
             model_version="m1", provider=FakeJudgeProviderPort()
         ).score(agent_output="x"),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "score_blank_output",
         lambda: _configured_judge(provider=FakeJudgeProviderPort()).score(
             agent_output="   "
         ),
+        kind=InputKind.EMPTY_STRING,
     ),
     HostileCase(
         "score_wrong_type_output",
         lambda: _configured_judge(provider=FakeJudgeProviderPort()).score(
             agent_output=123  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "score_provider_error_passthrough",
@@ -404,6 +615,7 @@ _JUDGE_CASES = (
                 )
             )
         ).score(agent_output="x"),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "score_malformed_response_passthrough",
@@ -416,6 +628,7 @@ _JUDGE_CASES = (
                 )
             )
         ).score(agent_output="x"),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "score_judge_refusal_passthrough",
@@ -428,6 +641,7 @@ _JUDGE_CASES = (
                 )
             )
         ).score(agent_output="x"),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "score_provider_returns_nonfinite_score",
@@ -436,30 +650,134 @@ _JUDGE_CASES = (
                 response=JudgeProviderResponse(score=float("nan"), reasoning="r")
             )
         ).score(agent_output="x"),
+        kind=InputKind.NON_FINITE_FLOAT,
     ),
 )
 
+_JUDGE_NA: Mapping[InputKind, str] = {
+    InputKind.OUT_OF_RANGE_VALUE: (
+        "Neither Judge.create() nor Judge.score() takes a bounded numeric "
+        "parameter. model_version and criteria are strings; agent_output is "
+        "a string; provider is a protocol object. The score itself is "
+        "validated by ScoringResult's field_validator, not Judge."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "Judge.create() takes str/None for model_version and criteria, "
+        "and a concrete JudgeProviderPort for provider -- no duck-typed "
+        "object is ever probed for attributes by Judge. score() delegates "
+        "to the provider's .score() method, which is protocol-dispatched, "
+        "not attribute-probed."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- Judge never reads attributes "
+        "off a caller-supplied duck-typed object. model_version, criteria, "
+        "and agent_output are scalars; the provider is called, not probed."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "Neither Judge.create() nor Judge.score() compares a "
+        "caller-supplied object. model_version and criteria are wrapped "
+        "into Pydantic value objects at creation; score() delegates to "
+        "the provider and assembles a ScoringResult -- no equality check "
+        "on any caller-supplied value occurs."
+    ),
+}
+
 _MODEL_VERSION_CASES = (
-    HostileCase("blank", lambda: ModelVersion(value="")),
-    HostileCase("whitespace_only", lambda: ModelVersion(value="   ")),
+    HostileCase(
+        "blank",
+        lambda: ModelVersion(value=""),
+        kind=InputKind.EMPTY_STRING,
+    ),
+    HostileCase(
+        "whitespace_only",
+        lambda: ModelVersion(value="   "),
+        kind=InputKind.EMPTY_STRING,
+    ),
     HostileCase(
         "wrong_type_int",
         lambda: ModelVersion(value=123),  # type: ignore[arg-type]
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "wrong_type_none",
         lambda: ModelVersion(value=None),  # type: ignore[arg-type]
+        kind=InputKind.WRONG_TYPE,
     ),
 )
 
+_MODEL_VERSION_NA: Mapping[InputKind, str] = {
+    InputKind.NON_FINITE_FLOAT: (
+        "Has no numeric field. ModelVersion wraps a single str value; "
+        "no float reaches its constructor or any validator."
+    ),
+    InputKind.OUT_OF_RANGE_VALUE: (
+        "Has no bounded field. The only invariant is non-blankness, "
+        "which is EMPTY_STRING's concern -- there is no range a valid "
+        "string can fall outside."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "Takes a str, not a duck-typed object. The mode='before' "
+        "field_validator (BIN-104) rejects anything that is not "
+        "already a str before any attribute would be read."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- no attribute of a "
+        "caller-supplied object is read. The constructor takes "
+        "a single str value."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "Constructing a ModelVersion compares nothing. ModelVersion "
+        "values are compared elsewhere (Provenance equality inside "
+        "Baseline.record and compare_provenance), but by then both "
+        "sides are Caliper's own validated value objects."
+    ),
+}
+
 _SCORING_CRITERIA_CASES = (
-    HostileCase("blank", lambda: ScoringCriteria(value="")),
-    HostileCase("whitespace_only", lambda: ScoringCriteria(value="\t\n")),
+    HostileCase(
+        "blank",
+        lambda: ScoringCriteria(value=""),
+        kind=InputKind.EMPTY_STRING,
+    ),
+    HostileCase(
+        "whitespace_only",
+        lambda: ScoringCriteria(value="\t\n"),
+        kind=InputKind.EMPTY_STRING,
+    ),
     HostileCase(
         "wrong_type_int",
         lambda: ScoringCriteria(value=123),  # type: ignore[arg-type]
+        kind=InputKind.WRONG_TYPE,
     ),
 )
+
+_SCORING_CRITERIA_NA: Mapping[InputKind, str] = {
+    InputKind.NON_FINITE_FLOAT: (
+        "Has no numeric field. ScoringCriteria wraps a single str value; "
+        "no float reaches its constructor or any validator."
+    ),
+    InputKind.OUT_OF_RANGE_VALUE: (
+        "Has no bounded field. The only invariant is non-blankness, "
+        "which is EMPTY_STRING's concern -- there is no range a valid "
+        "string can fall outside."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "Takes a str, not a duck-typed object. The mode='before' "
+        "field_validator (BIN-104) rejects anything that is not "
+        "already a str before any attribute would be read."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- no attribute of a "
+        "caller-supplied object is read. The constructor takes "
+        "a single str value."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "Constructing a ScoringCriteria compares nothing. "
+        "ScoringCriteria values are compared elsewhere (Provenance "
+        "equality inside Baseline.record and compare_provenance), but "
+        "by then both sides are Caliper's own validated value objects."
+    ),
+}
 
 _SCORING_RESULT_CASES = (
     HostileCase(
@@ -467,12 +785,14 @@ _SCORING_RESULT_CASES = (
         lambda: ScoringResult(
             score=float("nan"), reasoning="r", provenance=ProvenanceFactory()
         ),
+        kind=InputKind.NON_FINITE_FLOAT,
     ),
     HostileCase(
         "infinite_score",
         lambda: ScoringResult(
             score=float("inf"), reasoning="r", provenance=ProvenanceFactory()
         ),
+        kind=InputKind.NON_FINITE_FLOAT,
     ),
     HostileCase(
         "wrong_type_score",
@@ -481,8 +801,44 @@ _SCORING_RESULT_CASES = (
             reasoning="r",
             provenance=ProvenanceFactory(),
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
 )
+
+_SCORING_RESULT_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "The only string field is reasoning, which has no non-blank "
+        "requirement (ADR-006 section 7: 'No constraint is placed on "
+        "reasoning content'). score is a float and provenance is a "
+        "Provenance -- neither is a string. An empty reasoning is a "
+        "valid ScoringResult."
+    ),
+    InputKind.OUT_OF_RANGE_VALUE: (
+        "score is 'unconstrained but must be finite' (ADR-006 OQ-2). "
+        "There is no range to fall outside -- every finite float is a "
+        "valid score. The finiteness check is NON_FINITE_FLOAT, not a "
+        "range bound."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "Takes concrete Pydantic types: float for score, str for "
+        "reasoning, Provenance for provenance. No duck-typed object "
+        "is ever probed for attributes -- the mode='before' "
+        "field_validators (BIN-104) reject anything that is not the "
+        "expected type before any attribute would be read."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- no attribute of a "
+        "caller-supplied object is read. All three constructor "
+        "parameters are concrete types validated at the Pydantic "
+        "boundary."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "Constructing a ScoringResult compares nothing. ScoringResult "
+        "values are compared later (Provenance equality in "
+        "Baseline.record and compare_provenance), but by then both "
+        "sides are Caliper's own validated value objects."
+    ),
+}
 
 _PROVENANCE_CASES = (
     HostileCase(
@@ -491,8 +847,49 @@ _PROVENANCE_CASES = (
             model_version="not a ModelVersion",  # type: ignore[arg-type]
             scoring_criteria=ScoringCriteriaFactory(),
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
 )
+
+# The sparsest entry point in the registry -- one case, five excuses. It is
+# the honest worst case for the grid's cost, and the reasons are still
+# specific: `Provenance` is a two-field frozen value object over two other
+# value objects, so most kinds genuinely cannot reach it.
+_PROVENANCE_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "Holds ModelVersion and ScoringCriteria, not str -- deliberately, "
+        "per ADR-006: `Provenance holds ModelVersion and ScoringCriteria, "
+        "not str, and has no field validator of its own` because those "
+        "value objects already cannot hold blank text. A blank string "
+        "cannot reach this constructor without first being rejected by "
+        "one of them, which ModelVersion/ScoringCriteria cover here."
+    ),
+    InputKind.NON_FINITE_FLOAT: (
+        "Has no numeric field. Both fields are value objects "
+        "(ModelVersion and ScoringCriteria), each wrapping a str."
+    ),
+    InputKind.OUT_OF_RANGE_VALUE: (
+        "Has no bounded field. Both fields are value objects whose only "
+        "invariant is non-blankness, which is EMPTY_STRING's concern and "
+        "theirs to enforce, not a range."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "Takes no duck-typed object. Both fields are concrete Pydantic "
+        "value-object types, coerced and validated at construction; a "
+        "structural look-alike is rejected as WRONG_TYPE above rather "
+        "than having its attributes read."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same reason as ATTRIBUTE_ACCESS_RAISES -- no attribute of a "
+        "caller-supplied object is ever read."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "Constructing a Provenance compares nothing. Provenance values ARE "
+        "compared, but by Baseline.record() and compare_provenance(), "
+        "which carry that kind themselves -- and by then both sides are "
+        "Caliper's own value objects."
+    ),
+}
 
 _MONITOR_CASES = (
     HostileCase(
@@ -500,51 +897,106 @@ _MONITOR_CASES = (
         lambda: Monitor(
             artefact="not an artefact"  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "construct_none",
         lambda: Monitor(artefact=None),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "construct_structural_third_party",
         lambda: Monitor(artefact=_ThirdPartyArtefact()),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "record_wrong_type_observation",
         lambda: Monitor(_FITTED_EWMA).record(
             None  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "record_hostile_raising_attribute",
         lambda: Monitor(_FITTED_EWMA).record(
             _RaisingScoreCandidate()  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.ATTRIBUTE_ACCESS_RAISES,
     ),
     HostileCase(
         "record_provenance_mismatch",
         lambda: Monitor(_FITTED_EWMA).record(_mismatched_scoring_result()),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "cusum_sigma_underflow_reaching_record_regression_bin119",
         _cusum_monitor_record_after_sigma_underflow,
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "record_absorbs_raising_repr_receiver",
         lambda: Monitor(_FITTED_EWMA, receivers=[_RaisingReprReceiver()]).record(
             _matching_scoring_result(score=_FITTED_EWMA.ucl + 1000.0)
         ),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
 )
+
+_MONITOR_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "Takes no string parameter. __init__ takes a FittedControlLimits "
+        "artefact (narrowed to three concrete types via isinstance), a "
+        "bool, and a sequence of callables. record() takes a "
+        "ScoringResult (isinstance check). No string reaches either "
+        "entry point directly."
+    ),
+    InputKind.NON_FINITE_FLOAT: (
+        "Takes no direct numeric parameter. The only float is "
+        "ScoringResult.score, which its own @field_validator rejects "
+        "as non-finite before Monitor.record() ever sees it (ADR-006 "
+        "OQ-2). Monitor's chart-specific arithmetic operates on "
+        "already-validated ScoringResult.score values."
+    ),
+    InputKind.OUT_OF_RANGE_VALUE: (
+        "Takes no bounded numeric parameter. retain_history is a bool "
+        "(configuration, not an SPC quantity); receivers is a sequence "
+        "of callables. Neither has a range to fall outside. The "
+        "artefact's own parameters (ARL, sigma, etc.) are already "
+        "validated at fit time."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Monitor.__init__'s isinstance check narrows the artefact to "
+        "one of three concrete Pydantic types (FittedEWMA/FittedCUSUM/"
+        "FittedShewhart) -- a duck-typed look-alike is rejected at the "
+        "gate (construct_structural_third_party above). record()'s "
+        "isinstance check requires a real ScoringResult. No duck-typed "
+        "object survives to have its attributes read for their values."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "Monitor.record() delegates provenance comparison to "
+        "compare_provenance(), but by then both sides are Caliper's "
+        "own types: the artefact is a concrete Fitted* (narrowed at "
+        "construction) and the observation is a real ScoringResult "
+        "(isinstance check). No caller-supplied object whose "
+        "__eq__/__ne__ could raise reaches a comparison."
+    ),
+}
 
 _COMPARE_PROVENANCE_CASES = (
     HostileCase(
         "matching_provenance",
         lambda: compare_provenance(_matching_scoring_result(), _FITTED_EWMA),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "mismatched_provenance",
         lambda: compare_provenance(_mismatched_scoring_result(), _FITTED_EWMA),
+        kind=InputKind.REGRESSION_ANCHOR,
+    ),
+    HostileCase(
+        "wrong_type_artefact",
+        lambda: compare_provenance(_matching_scoring_result(), 123),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "hostile_artefact_raising_on_access",
@@ -552,23 +1004,76 @@ _COMPARE_PROVENANCE_CASES = (
             _matching_scoring_result(),
             _RaisingProvenanceArtefact(),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.ATTRIBUTE_ACCESS_RAISES,
+    ),
+    # 🚨 The two cases BIN-136 exists for. Both were absent while this
+    # entry point was registered, exercised and reported clean.
+    HostileCase(
+        "artefact_provenance_returns_non_str",
+        lambda: compare_provenance(
+            _matching_scoring_result(),
+            _NonStrProvenanceArtefact(),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        kind=InputKind.ATTRIBUTE_RETURNS_HOSTILE,
+    ),
+    HostileCase(
+        "artefact_provenance_comparison_raises",
+        lambda: compare_provenance(
+            _matching_scoring_result(),
+            _HostileComparisonArtefact(),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        kind=InputKind.COMPARISON_RAISES,
+        known_leak=KnownLeak("BIN-139", RuntimeError),
     ),
 )
 
+_COMPARE_PROVENANCE_NA: Mapping[InputKind, str] = {
+    InputKind.OUT_OF_RANGE_VALUE: (
+        "Takes no bounded value. Comparison is exact string equality on "
+        "two dimensions; neither has a range to fall outside."
+    ),
+    InputKind.EMPTY_STRING: (
+        "Takes no string argument. Both parameters are objects; the only "
+        "strings reached are ModelVersion.value/ScoringCriteria.value, "
+        "which their own value objects already reject when blank "
+        "(BIN-57, BIN-58) and which ScoringCriteria/ModelVersion cover here."
+    ),
+    InputKind.NON_FINITE_FLOAT: (
+        "Takes no numeric argument. Provenance comparison is exact string "
+        "equality on two dimensions (`Criteria equality is exact`); no "
+        "float reaches this call."
+    ),
+}
+
 _FIT_EWMA_CASES = (
-    HostileCase("missing_target_arl", lambda: fit_ewma(_BASELINE, target_arl=None)),
-    HostileCase("nan_target_arl", lambda: fit_ewma(_BASELINE, target_arl=math.nan)),
+    HostileCase(
+        "missing_target_arl",
+        lambda: fit_ewma(_BASELINE, target_arl=None),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "nan_target_arl",
+        lambda: fit_ewma(_BASELINE, target_arl=math.nan),
+        kind=InputKind.NON_FINITE_FLOAT,
+    ),
+    HostileCase(
+        "out_of_range_target_arl",
+        lambda: fit_ewma(_BASELINE, target_arl=50.0),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
     HostileCase(
         "sigma_overflow_regression_bin119",
         lambda: fit_ewma(
             baseline_from_scores(_SIGMA_OVERFLOW_SCORES), target_arl=370.0
         ),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "sigma_underflow_regression_bin119",
         lambda: fit_ewma(
             baseline_from_scores(_SIGMA_UNDERFLOW_SCORES), target_arl=370.0
         ),
+        kind=InputKind.REGRESSION_ANCHOR,
     ),
     HostileCase(
         "wrong_type_baseline",
@@ -576,6 +1081,7 @@ _FIT_EWMA_CASES = (
             "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             target_arl=370.0,
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "wrong_type_smoothing_param",
@@ -584,21 +1090,59 @@ _FIT_EWMA_CASES = (
             target_arl=370.0,
             smoothing_param="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "out_of_range_smoothing_param",
         lambda: fit_ewma(_BASELINE, target_arl=370.0, smoothing_param=5.0),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
     ),
 )
 
+_FIT_EWMA_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "Takes Baseline and floats only -- no string parameter. "
+        "smoothing_param and target_arl are floats; baseline is "
+        "a Baseline instance. No string reaches this call."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "baseline is narrowed to Baseline via require_type() "
+        "(parameter_guards) before any attribute is accessed. "
+        "smoothing_param and target_arl are scalar floats validated "
+        "by require_real_number(). No duck-typed object survives "
+        "to have its attributes probed."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- no attribute of a "
+        "caller-supplied duck-typed object is read. baseline is "
+        "type-checked, and both numeric parameters are scalar floats."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "fit_ewma() compares nothing caller-supplied. Numeric "
+        "comparisons are against constants (MIN_TARGET_ARL, "
+        "MAX_MEANINGFUL_ARL, smoothing param bounds), never against "
+        "another caller-supplied object."
+    ),
+}
+
 _FIT_CUSUM_CASES = (
-    HostileCase("missing_target_arl", lambda: fit_cusum(_BASELINE, target_arl=None)),
+    HostileCase(
+        "missing_target_arl",
+        lambda: fit_cusum(_BASELINE, target_arl=None),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "nan_target_arl",
+        lambda: fit_cusum(_BASELINE, target_arl=math.nan),
+        kind=InputKind.NON_FINITE_FLOAT,
+    ),
     HostileCase(
         "wrong_type_baseline",
         lambda: fit_cusum(
             "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             target_arl=370.0,
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "wrong_type_reference_value",
@@ -607,25 +1151,75 @@ _FIT_CUSUM_CASES = (
             target_arl=370.0,
             reference_value="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "invalid_direction",
         lambda: fit_cusum(_BASELINE, target_arl=370.0, direction="bogus"),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
     ),
     HostileCase(
         "unattainable_target_arl",
         lambda: fit_cusum(_BASELINE, target_arl=1.0, reference_value=5.0),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
     ),
 )
 
+_FIT_CUSUM_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "Takes Baseline, floats, and a direction string from a fixed "
+        "set ('two_sided'/'upper'/'lower'). direction is validated "
+        "against _VALID_DIRECTIONS membership, not as freeform text -- "
+        "an empty string is rejected the same way 'bogus' is "
+        "(invalid_direction above), which is OUT_OF_RANGE_VALUE, not "
+        "EMPTY_STRING. No parameter accepts freeform text."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "baseline is narrowed to Baseline via require_type() "
+        "(parameter_guards) before any attribute is accessed. "
+        "target_arl and reference_value are scalar floats validated "
+        "by require_real_number(). direction is a str checked "
+        "against a fixed set. No duck-typed object survives to have "
+        "its attributes probed."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- no attribute of a "
+        "caller-supplied duck-typed object is read. All parameters "
+        "are concrete types validated before use."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "fit_cusum() compares nothing caller-supplied against another "
+        "caller-supplied object. Numeric comparisons are against "
+        "constants (MIN_TARGET_ARL, reference_value bounds); "
+        "direction is compared against a frozenset of string "
+        "literals. No __eq__/__ne__ on caller-supplied objects is "
+        "invoked."
+    ),
+}
+
 _FIT_SHEWHART_CASES = (
-    HostileCase("missing_target_arl", lambda: fit_shewhart(_BASELINE, target_arl=None)),
+    HostileCase(
+        "missing_target_arl",
+        lambda: fit_shewhart(_BASELINE, target_arl=None),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "nan_target_arl",
+        lambda: fit_shewhart(_BASELINE, target_arl=math.nan),
+        kind=InputKind.NON_FINITE_FLOAT,
+    ),
+    HostileCase(
+        "out_of_range_target_arl",
+        lambda: fit_shewhart(_BASELINE, target_arl=50.0),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
     HostileCase(
         "wrong_type_baseline",
         lambda: fit_shewhart(
             "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             target_arl=370.0,
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
     HostileCase(
         "wrong_type_target_arl",
@@ -633,21 +1227,53 @@ _FIT_SHEWHART_CASES = (
             _BASELINE,
             target_arl="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
+        kind=InputKind.WRONG_TYPE,
     ),
 )
 
+_FIT_SHEWHART_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "Takes Baseline and a float only -- no string parameter. "
+        "Unlike fit_cusum, there is no direction discriminator or "
+        "any other string input."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "baseline is narrowed to Baseline via require_type() "
+        "(parameter_guards) before any attribute is accessed. "
+        "target_arl is a scalar float validated by "
+        "require_real_number(). No duck-typed object survives "
+        "to have its attributes probed."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- no attribute of a "
+        "caller-supplied duck-typed object is read. Both parameters "
+        "are concrete types validated before use."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "fit_shewhart() compares nothing caller-supplied against "
+        "another caller-supplied object. The only comparison is "
+        "target_arl against numeric constants (MIN_TARGET_ARL, "
+        "MAX_MEANINGFUL_ARL). No __eq__/__ne__ on caller-supplied "
+        "objects is invoked."
+    ),
+}
+
 EXERCISABLE: tuple[ExercisableEntryPoint, ...] = (
-    ExercisableEntryPoint("Baseline", _BASELINE_CASES),
-    ExercisableEntryPoint("Judge", _JUDGE_CASES),
-    ExercisableEntryPoint("ModelVersion", _MODEL_VERSION_CASES),
-    ExercisableEntryPoint("ScoringCriteria", _SCORING_CRITERIA_CASES),
-    ExercisableEntryPoint("ScoringResult", _SCORING_RESULT_CASES),
-    ExercisableEntryPoint("Provenance", _PROVENANCE_CASES),
-    ExercisableEntryPoint("Monitor", _MONITOR_CASES),
-    ExercisableEntryPoint("compare_provenance", _COMPARE_PROVENANCE_CASES),
-    ExercisableEntryPoint("fit_ewma", _FIT_EWMA_CASES),
-    ExercisableEntryPoint("fit_cusum", _FIT_CUSUM_CASES),
-    ExercisableEntryPoint("fit_shewhart", _FIT_SHEWHART_CASES),
+    ExercisableEntryPoint("Baseline", _BASELINE_CASES, _BASELINE_NA),
+    ExercisableEntryPoint("Judge", _JUDGE_CASES, _JUDGE_NA),
+    ExercisableEntryPoint("ModelVersion", _MODEL_VERSION_CASES, _MODEL_VERSION_NA),
+    ExercisableEntryPoint(
+        "ScoringCriteria", _SCORING_CRITERIA_CASES, _SCORING_CRITERIA_NA
+    ),
+    ExercisableEntryPoint("ScoringResult", _SCORING_RESULT_CASES, _SCORING_RESULT_NA),
+    ExercisableEntryPoint("Provenance", _PROVENANCE_CASES, _PROVENANCE_NA),
+    ExercisableEntryPoint("Monitor", _MONITOR_CASES, _MONITOR_NA),
+    ExercisableEntryPoint(
+        "compare_provenance", _COMPARE_PROVENANCE_CASES, _COMPARE_PROVENANCE_NA
+    ),
+    ExercisableEntryPoint("fit_ewma", _FIT_EWMA_CASES, _FIT_EWMA_NA),
+    ExercisableEntryPoint("fit_cusum", _FIT_CUSUM_CASES, _FIT_CUSUM_NA),
+    ExercisableEntryPoint("fit_shewhart", _FIT_SHEWHART_CASES, _FIT_SHEWHART_NA),
 )
 
 # ---------------------------------------------------------------------------
