@@ -41,6 +41,7 @@ from caliper.baseline.domain.fitted_cusum import FittedCUSUM
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
 from caliper.baseline.domain.fitted_shewhart import FittedShewhart
 from caliper.baseline.domain.fitting_advisory import FittingAdvisory
+from caliper.baseline.domain.has_provenance import HasProvenance
 from caliper.baseline.domain.shewhart_fitting import fit_shewhart
 from caliper.baseline.domain.sufficiency_result import SufficiencyResult
 
@@ -56,6 +57,7 @@ __all__ = [
     "FittedEWMA",
     "FittedShewhart",
     "FittingAdvisory",
+    "HasProvenance",
     "SufficiencyResult",
     "compare_provenance",
     "fit_cusum",

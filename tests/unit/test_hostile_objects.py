@@ -509,7 +509,7 @@ def test_hostile_str_subclass_with_matching_content_does_not_raise() -> None:
     """
     artefact = _MatchingHostileStrArtefact()
 
-    compare_provenance(_result(), artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+    compare_provenance(_result(), artefact)
 
 
 def test_hostile_str_subclass_with_differing_content_raises_caliper_error() -> None:
@@ -523,7 +523,7 @@ def test_hostile_str_subclass_with_differing_content_raises_caliper_error() -> N
     artefact = _DifferingHostileStrArtefact()
 
     with pytest.raises(ProvenanceMismatchError) as exc_info:
-        compare_provenance(_result(), artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        compare_provenance(_result(), artefact)
 
     assert "model_version" in exc_info.value.mismatches
 
@@ -544,7 +544,7 @@ def test_reported_mismatch_values_are_exact_str_not_the_hostile_subclass() -> No
     artefact = _DifferingHostileStrArtefact()
 
     with pytest.raises(ProvenanceMismatchError) as exc_info:
-        compare_provenance(_result(), artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        compare_provenance(_result(), artefact)
 
     expected = exc_info.value.mismatches["model_version"]["expected"]
     assert type(expected) is str, (
@@ -565,7 +565,7 @@ def test_legitimate_str_subclass_is_accepted() -> None:
     """
     artefact = _LegitimateStrSubclassArtefact()
 
-    compare_provenance(_result(), artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+    compare_provenance(_result(), artefact)
 
 
 def test_model_version_coerces_a_str_subclass_to_exact_str() -> None:

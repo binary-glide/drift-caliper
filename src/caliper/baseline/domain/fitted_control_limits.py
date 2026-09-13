@@ -26,7 +26,23 @@ from caliper.baseline.domain.fitting_advisory import FittingAdvisory
 
 @runtime_checkable
 class FittedControlLimits(Protocol):
-    """Consumer contract for any fitted artefact, regardless of chart type."""
+    """Reporting and audit contract for any fitted artefact, regardless of chart type.
+
+    This protocol describes what a fitted artefact **reports** -- the shared
+    attributes ``Monitor``, ``compare_provenance``, and callers use to inspect
+    an artefact's identity, provenance, and calibration outcome. It is not a
+    plug-in interface for third-party chart types: ``Monitor`` requires chart-
+    specific detection logic (decision interval, control limits, target value,
+    smoothing parameters) that this protocol deliberately omits, and enforces
+    concrete-type checks at construction that a structural conformer alone
+    cannot satisfy (BIN-120). Third-party objects that need only provenance
+    comparison should satisfy ``HasProvenance`` instead, which carries only
+    the two attributes ``compare_provenance`` reads.
+
+    See ADR-004's 2026-09-12 amendment for the measurement that established
+    this distinction: ``Monitor`` reads ten attributes, seven of which are
+    outside this protocol.
+    """
 
     @property
     def chart_type(self) -> str:

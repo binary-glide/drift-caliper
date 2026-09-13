@@ -75,6 +75,9 @@ _RETAINED_DOMAIN_EXPORTS = (
     # fitted artefact when target_arl is inside the flagged tier. Same
     # export shape as DataQualityConcern above, added rather than retained.
     "FittingAdvisory",
+    # Added under BIN-135 (ADR-004 amendment 2026-09-12) -- the
+    # two-attribute provenance protocol that compare_provenance accepts.
+    "HasProvenance",
     "SufficiencyResult",
     "fit_cusum",
     "fit_ewma",

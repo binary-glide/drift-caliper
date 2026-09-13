@@ -20,7 +20,7 @@ OQ-9).
 
 **BIN-127: reading ``artefact``'s provenance is guarded.** Unlike
 ``Monitor`` (narrowed at construction to the three concrete ``Fitted*``
-types), this function accepts anything satisfying ``FittedControlLimits``
+types), this function accepts anything satisfying ``HasProvenance``
 structurally, and reads ``artefact.provenance_model_version``/
 ``provenance_criteria`` directly. An object that duck-types past that
 protocol but raises when one of those two attributes is actually read --
@@ -33,14 +33,19 @@ turned into ``InvalidParameterError`` instead. **Not ``ProvenanceMismatchError``
 from __future__ import annotations
 
 from caliper.baseline.domain.attribute_probe import AttributeProbe, probe_attribute
-from caliper.baseline.domain.fitted_control_limits import FittedControlLimits
+from caliper.baseline.domain.has_provenance import HasProvenance
 from caliper.baseline.domain.provenance_comparison import build_mismatches
 from caliper.errors import InvalidParameterError, ProvenanceMismatchError
 from caliper.measurement import ScoringResult
 
+# Names HasProvenance, the protocol this function actually annotates
+# (ADR-004's 2026-09-12 amendment, BIN-135), rather than
+# FittedControlLimits -- which is a strict superset and would overstate
+# what this function requires. Every fitted artefact satisfies both, so the
+# concrete suggestion stays the same for the common case.
 _ARTEFACT_PROVENANCE_CONSTRAINT = (
     "must expose readable provenance_model_version and provenance_criteria "
-    "string attributes (a FittedControlLimits-conforming object -- the "
+    "string attributes (a HasProvenance-conforming object -- typically the "
     "return value of fit_ewma(), fit_cusum(), or fit_shewhart())"
 )
 
@@ -94,7 +99,7 @@ def _reject_if_artefact_provenance_unreadable(
         recovery_hint=(
             "Pass the return value of fit_ewma(), fit_cusum(), or "
             "fit_shewhart() -- not a custom object that merely satisfies "
-            "FittedControlLimits structurally. Its provenance_model_version "
+            "HasProvenance structurally. Its provenance_model_version "
             "and provenance_criteria attributes must both be readable "
             "strings."
         ),
@@ -174,7 +179,7 @@ def _require_artefact_provenance_str(
     )
 
 
-def compare_provenance(result: ScoringResult, artefact: FittedControlLimits) -> None:
+def compare_provenance(result: ScoringResult, artefact: HasProvenance) -> None:
     """Compare a Phase II scoring result's provenance against a fitted artefact's.
 
     Parameters
@@ -182,9 +187,12 @@ def compare_provenance(result: ScoringResult, artefact: FittedControlLimits) -> 
     result
         The Phase II observation whose provenance is being checked.
     artefact
-        Any chart type's fitted artefact. Compared uniformly via the
-        shared ``FittedControlLimits`` protocol -- no chart-type-specific
-        branching (BR-6).
+        Any object satisfying ``HasProvenance`` -- the two-attribute
+        provenance protocol (ADR-004 amendment 2026-09-12). In practice
+        this is a fitted artefact returned by ``fit_ewma()``,
+        ``fit_cusum()``, or ``fit_shewhart()``, but the function reads
+        only ``provenance_model_version`` and ``provenance_criteria``,
+        so any conformer is accepted.
 
     Returns
     -------

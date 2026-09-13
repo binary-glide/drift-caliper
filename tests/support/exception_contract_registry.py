@@ -1008,7 +1008,7 @@ _COMPARE_PROVENANCE_CASES = (
         "hostile_artefact_raising_on_access",
         lambda: compare_provenance(
             _matching_scoring_result(),
-            _RaisingProvenanceArtefact(),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            _RaisingProvenanceArtefact(),
         ),
         kind=InputKind.ATTRIBUTE_ACCESS_RAISES,
     ),
@@ -1026,7 +1026,7 @@ _COMPARE_PROVENANCE_CASES = (
         "artefact_provenance_comparison_raises",
         lambda: compare_provenance(
             _matching_scoring_result(),
-            _HostileComparisonArtefact(),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            _HostileComparisonArtefact(),
         ),
         kind=InputKind.COMPARISON_RAISES,
     ),
@@ -1371,6 +1371,15 @@ EXCLUDED: tuple[ExcludedEntryPoint, ...] = (
         "and type hints. The concrete artefact types it describes "
         "(FittedEWMA/FittedCUSUM/FittedShewhart) are handled separately "
         "below.",
+    ),
+    ExcludedEntryPoint(
+        "HasProvenance",
+        "A `@runtime_checkable` typing.Protocol (ADR-004 amendment "
+        "2026-09-12, BIN-135), not a callable or constructible entry "
+        "point -- it exists for `isinstance` checks and type hints on "
+        "compare_provenance's artefact parameter. A strict subset of "
+        "FittedControlLimits carrying only the two provenance attributes; "
+        "same exclusion reasoning as FittedControlLimits above.",
     ),
     ExcludedEntryPoint(
         "FittedEWMA",

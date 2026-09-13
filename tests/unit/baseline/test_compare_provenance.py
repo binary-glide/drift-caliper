@@ -467,7 +467,7 @@ def test_raises_invalid_parameter_error_when_artefact_provenance_raises() -> Non
 
     # Act
     with pytest.raises(InvalidParameterError) as exc_info:
-        compare_provenance(result, artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        compare_provenance(result, artefact)
 
     # Assert
     error = exc_info.value

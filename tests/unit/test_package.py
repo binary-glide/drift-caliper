@@ -67,6 +67,7 @@ _REQUIRED_TOP_LEVEL_NAMES = frozenset(
         "SufficiencyResult",
         "DataQualityConcern",
         "FittedControlLimits",
+        "HasProvenance",
         "FittedEWMA",
         "FittedCUSUM",
         "FittedShewhart",
