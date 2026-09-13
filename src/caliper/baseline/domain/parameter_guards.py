@@ -89,6 +89,95 @@ coverage differs, which is why this is a disclosure, not a refusal."""
 _TARGET_ARL_BELOW_VERIFIED_RANGE_KIND = "target_arl_below_verified_range"
 
 
+def _target_arl_constraint(max_target_arl: float) -> str:
+    """Build the range description used in every ``target_arl`` error message.
+
+    One definition, consolidated under BIN-141 from four byte-identical
+    f-strings -- one here and one in each of
+    ``ewma_fitting``/``cusum_fitting``/``shewhart_fitting``. The prose is
+    untested by design (ADR-008 keeps ``constraint`` human-facing), which
+    is precisely why copies of it drift without anything failing.
+    """
+    return f"must be a finite float in [{MIN_TARGET_ARL}, {max_target_arl}]"
+
+
+def _require_target_arl(
+    target_arl: float | None,
+    *,
+    chart_name: str,
+    max_target_arl: float,
+) -> tuple[float, FittingAdvisory | None]:
+    """Validate a caller's ``target_arl`` and classify it against ADR-011's tiers.
+
+    ``target_arl`` is optional in the Python signature but **required by
+    Caliper's validation** (ADR-004 section 5, closing ADR-002's open
+    dependency): omitting it is a classifiable ``CaliperError``, never
+    Python's ``TypeError``. Returning the validated value rather than
+    ``None`` lets callers skip a redundant ``is None`` narrowing check that
+    this function has already ruled out.
+
+    Consolidated under BIN-141 from three copies in
+    ``ewma_fitting``/``cusum_fitting``/``shewhart_fitting`` that differed
+    **only** in the chart name inside the missing-parameter message.
+
+    ⚠️ **Private, and imported across modules -- deliberately.** That is the
+    established convention here (``_moving_range_sigma``,
+    ``_overflow_safe_mean`` and ``_has_zero_variance`` are all private and
+    imported from ``spc_numerics``), and it has a second effect worth
+    naming: this function is then covered by
+    ``tests/unit/test_no_duplicate_private_helpers.py``, the very guard
+    this ticket adds. Left public, the consolidation would not have been
+    protected by its own meta-test. Raised by ``code-reviewer``.
+
+    ⚠️ **That difference is deliberate and is preserved via ``chart_name``.**
+    It is the message an engineer reads at the moment they are refused, and
+    naming their chart is better DX than a generic string. Flattening it
+    would trade a real improvement for tidiness -- and since ADR-008 leaves
+    message text untested, nothing would have caught the loss.
+
+    Parameters
+    ----------
+    target_arl
+        The caller's value, or ``None`` when they omitted the argument.
+    chart_name
+        How this chart names itself in the missing-parameter message --
+        ``"EWMA"``, ``"CUSUM"``, ``"Shewhart I-chart"``.
+    max_target_arl
+        The chart's own ceiling. Passed rather than imported: it lives in
+        ``ewma_fitting``, which imports *this* module, so reaching for it
+        here would invert the dependency.
+
+    Returns
+    -------
+    tuple[float, FittingAdvisory | None]
+        The validated value, and ADR-011's flagged-tier advisory when one
+        applies.
+    """
+    constraint = _target_arl_constraint(max_target_arl)
+    if target_arl is None:
+        raise InvalidParameterError(
+            f"target_arl is required to fit {chart_name} control limits",
+            context={
+                "parameter": "target_arl",
+                "constraint": constraint,
+                "kind": "missing",
+            },
+            recovery_hint=(
+                "Specify target_arl explicitly -- the in-control ARL0 "
+                "(false alarm tolerance) you want the fitted chart to "
+                "achieve, e.g. 370 or 500. Caliper will not choose this on "
+                "your behalf: it is a statistical commitment the engineer "
+                "must own."
+            ),
+        )
+
+    numeric_target_arl = require_real_number(
+        target_arl, parameter="target_arl", constraint=constraint
+    )
+    advisory = classify_target_arl(numeric_target_arl, max_target_arl=max_target_arl)
+    return numeric_target_arl, advisory
+
+
 def classify_target_arl(
     numeric_target_arl: float,
     *,
@@ -127,7 +216,7 @@ def classify_target_arl(
         ``numeric_target_arl`` is not finite, is below ``MIN_TARGET_ARL``,
         or is above ``max_target_arl``.
     """
-    constraint = f"must be a finite float in [{MIN_TARGET_ARL}, {max_target_arl}]"
+    constraint = _target_arl_constraint(max_target_arl)
     if not math.isfinite(numeric_target_arl) or not (
         MIN_TARGET_ARL <= numeric_target_arl <= max_target_arl
     ):

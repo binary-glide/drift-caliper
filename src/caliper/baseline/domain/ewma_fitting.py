@@ -31,10 +31,8 @@ from caliper.baseline.domain.ewma_numerics import (
     _ewma_asymptotic_std_ratio,
 )
 from caliper.baseline.domain.fitted_ewma import FittedEWMA
-from caliper.baseline.domain.fitting_advisory import FittingAdvisory
 from caliper.baseline.domain.parameter_guards import (
-    MIN_TARGET_ARL,
-    classify_target_arl,
+    _require_target_arl,
     require_real_number,
     require_type,
 )
@@ -135,56 +133,6 @@ _ZERO_VARIANCE_REASON = "zero_variance"
 
 
 # --- Parameter validation ----------------------------------------------------
-
-
-def _require_target_arl(
-    target_arl: float | None,
-) -> tuple[float, FittingAdvisory | None]:
-    """Validate ``target_arl``, returning it narrowed to ``float`` plus any advisory.
-
-    ``target_arl`` is optional in the Python signature but required by
-    Caliper's validation (ADR-004 section 5, closing ADR-002's open
-    dependency): omitting it is a classifiable ``CaliperError``, never
-    Python's ``TypeError``. Returning the validated value (rather than
-    ``None``) lets callers avoid a redundant ``is None`` narrowing check
-    after this function has already ruled that case out.
-
-    The range check itself, and the ADR-011 flagged-tier disclosure, are
-    delegated to ``parameter_guards.classify_target_arl`` -- shared verbatim
-    with ``cusum_fitting``/``shewhart_fitting`` rather than tripled, per the
-    BIN-124 lesson about identical validation logic drifting out of sync
-    across the three fitting modules.
-    """
-    constraint = f"must be a finite float in [{MIN_TARGET_ARL}, {MAX_MEANINGFUL_ARL}]"
-    if target_arl is None:
-        raise InvalidParameterError(
-            "target_arl is required to fit EWMA control limits",
-            context={
-                "parameter": "target_arl",
-                "constraint": constraint,
-                "kind": "missing",
-            },
-            recovery_hint=(
-                "Specify target_arl explicitly -- the in-control ARL0 (false "
-                "alarm tolerance) you want the fitted chart to achieve, e.g. "
-                "370 or 500. Caliper will not choose this on your behalf: it "
-                "is a statistical commitment the engineer must own."
-            ),
-        )
-    # BIN-126: reject a bool or a non-numeric value (e.g. a string) before
-    # any arithmetic comparison is attempted against it -- see
-    # parameter_guards.require_real_number's docstring for why this is a
-    # behavioural, not nominal, check. Mirrors
-    # cusum_fitting._require_target_arl/shewhart_fitting._require_target_arl.
-    numeric_target_arl = require_real_number(
-        target_arl, parameter="target_arl", constraint=constraint
-    )
-    # ADR-011: refuses below MIN_TARGET_ARL (100) or above MAX_MEANINGFUL_ARL;
-    # returns a FittingAdvisory when inside [MIN_TARGET_ARL, VERIFIED_ARL_FLOOR).
-    advisory = classify_target_arl(
-        numeric_target_arl, max_target_arl=MAX_MEANINGFUL_ARL
-    )
-    return numeric_target_arl, advisory
 
 
 def _validate_smoothing_param(smoothing_param: float | None) -> float | None:
@@ -301,7 +249,9 @@ def fit_ewma(
     baseline = require_type(
         baseline, Baseline, parameter="baseline", type_name="Baseline"
     )
-    validated_target_arl, target_arl_advisory = _require_target_arl(target_arl)
+    validated_target_arl, target_arl_advisory = _require_target_arl(
+        target_arl, chart_name="EWMA", max_target_arl=MAX_MEANINGFUL_ARL
+    )
     validated_smoothing_param = _validate_smoothing_param(smoothing_param)
     effective_smoothing_param = (
         validated_smoothing_param
