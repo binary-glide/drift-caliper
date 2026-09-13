@@ -40,6 +40,21 @@ It is a library, not a platform. It emits into wherever you already log
 - **Severity** — `warning` on first signal, `critical` on 3+ consecutive or a
   score below a hard floor
 
+## Reading the source
+
+Comments, tests and ADRs cite internal tracker IDs (`BIN-123`). **No tracker
+access is needed** — each is explained where it appears, and the ID is a
+citation rather than a lookup.
+
+They are kept deliberately. A note reading *"`str.__str__(value)`, not
+`str(value)` — the latter dispatches to the subclass's `__str__`, which is
+hijackable exactly like `__eq__`"* is a decision someone made once, for a
+reason, after something went wrong. The ID marks it as a defect that was
+found and fixed rather than a hypothetical someone thought of.
+
+Design decisions live in [`docs/architecture/adr/`](docs/architecture/adr/),
+including the ones that were rejected and why.
+
 ## Install
 
 Not yet published.

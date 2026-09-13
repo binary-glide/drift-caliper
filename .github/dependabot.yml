@@ -1,0 +1,63 @@
+# Dependabot configuration.
+#
+# Two ecosystems, and they are worth very different amounts here -- see the
+# note under each. Verified 2026-09-13 against dependabot-core rather than
+# the docs: GitHub's supported-ecosystems table still omits `uv`, while
+# dependabot-core/uv/ registers it (`register_label_details("uv", ...)`) and
+# carries commits from within the last week. Trusting the table would have
+# meant falling back to `pip`, which does not read uv.lock.
+version: 2
+
+updates:
+  # --- GitHub Actions -------------------------------------------------------
+  #
+  # The higher-value half, and the reason this file exists now rather than at
+  # launch.
+  #
+  # Caliper's library code is not its attack surface: src/ has zero
+  # security-relevant sinks, which is why CodeQL (BIN-129) is expected to
+  # find nothing. The real exposure is the release workflow -- BIN-88 will
+  # add one holding `id-token: write`, able to publish to PyPI under the
+  # maintainer's identity. A stale or compromised third-party action there is
+  # the one genuine supply-chain path this project has.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "⬆️ chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # --- Python (uv) ----------------------------------------------------------
+  #
+  # ⚠️ Deliberately narrower than the default, because most of what Dependabot
+  # would otherwise raise here is noise for *this* project.
+  #
+  # Runtime dependencies carry LOWER BOUNDS ONLY (ADR-001, which criticised
+  # Frouros for upper bounds propagating into consumers' resolution). A
+  # library pinned `numpy>=2.0` needs no PR when numpy 2.5 ships -- the
+  # constraint is already satisfied. Raising a lower bound is a deliberate
+  # compatibility decision, not a chore, and must not arrive as an
+  # auto-merged bump.
+  #
+  # So version updates are restricted to the dev toolchain, where currency
+  # genuinely matters (ruff, ty, mypy, pytest, hypothesis, mutmut) and where
+  # a bump is cheap to evaluate -- the four gates either pass or they do not.
+  #
+  # 🚨 Security updates are NOT restricted by `allow` and will still be
+  # raised for runtime dependencies. That is the behaviour we want: a CVE in
+  # numpy or scipy is exactly the case where raising a lower bound is
+  # correct, and it should interrupt.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "⬆️ chore(deps)"
+    allow:
+      - dependency-type: development
+    groups:
+      dev-toolchain:
+        patterns: ["*"]
