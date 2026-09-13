@@ -122,6 +122,45 @@ _MARKOV_CHAIN_STATES = 301
 _MIN_LIMIT_MULTIPLIER = 1e-6
 _MAX_LIMIT_MULTIPLIER = 1e5
 
+# --- False alarm tolerance (target ARL0) meaningful range -------------------
+#
+# MIN_COHERENT_ARL = 1.0 is not an engineering choice -- it is a
+# mathematical floor. ARL0 is defined as the expectation of a stopping time
+# (the count of in-control observations until the first false alarm), and
+# that count is a positive integer -- it is always at least 1, because the
+# very first observation is itself a trial that can trigger an alarm.
+# E[N] >= 1 for any N supported on {1, 2, 3, ...} follows directly from the
+# definition of expectation; no value below 1 is a coherent ARL0 to request.
+#
+# Renamed from MIN_MEANINGFUL_ARL under ADR-011 (2026-09-12): this constant
+# was correctly derived but wrongly named -- it names the smallest
+# *arithmetically coherent* ARL0, not the smallest *useful* one, and the gap
+# between those two claims is exactly what let target_arl=1.0 fit
+# "successfully" while alarming on nearly every in-control observation
+# (BIN-131). It is no longer the enforced lower bound on target_arl -- that
+# is now caliper.baseline.domain.parameter_guards.MIN_TARGET_ARL (100.0),
+# ADR-011's hard floor, a much stronger claim ("the field tabulates nothing
+# smaller") than this one ("the arithmetic is still coherent"). This
+# constant is kept, unused in the validation path below, purely for its
+# derivation -- ADR-011 requires keeping the comment verbatim.
+#
+# Internal-only: absent from both caliper.__all__ and
+# caliper.baseline.__all__, and not reachable via hasattr on either package
+# (test_baseline_package_exports.py pins this) -- so renaming it carries no
+# deprecation burden.
+MIN_COHERENT_ARL = 1.0
+
+# Sentinel returned by _in_control_arl when the Markov-chain solve
+# produces incoherent output (non-finite or sub-1 ARL -- see that
+# function's postcondition comment for the full reasoning). Not a
+# statistical constant: an engineering threshold whose only requirement
+# is that it exceeds MAX_MEANINGFUL_ARL (1e6, ewma_fitting.py) by a
+# wide margin, so _calibrate_limit_multiplier's bracket expansion reads
+# it as "ARL >> target" and stops doubling. Its exact magnitude is
+# immaterial -- it is never reported as an achieved_arl (that is always
+# re-evaluated at the solved root, which lies in the trustworthy region).
+_ILL_CONDITIONED_ARL_SENTINEL = 1e15
+
 
 def _ewma_asymptotic_std_ratio(smoothing_param: float) -> float:
     """Compute the EWMA statistic's asymptotic std dev as a ratio to process std dev.
@@ -159,6 +198,16 @@ def _in_control_arl(
         The expected number of in-control observations until the EWMA
         statistic first leaves the control limits, starting from the
         centre line.
+
+        ⚠️ **Except when the linear solve is ill-conditioned**, in which
+        case this returns ``_ILL_CONDITIONED_ARL_SENTINEL`` rather than a
+        computed ARL. That happens at large ``L``, where the absorption
+        probability underflows and ``np.linalg.solve`` returns values
+        oscillating between ±1e15 without failing (BIN-140). The sentinel
+        is a stand-in for "astronomically large", which is the truth in
+        that regime. See the postcondition comment at the return site for
+        why the substitution is sound and why the sentinel can never reach
+        a caller as a reported ``achieved_arl``.
     """
     half_width = limit_multiplier * _ewma_asymptotic_std_ratio(smoothing_param)
     half_state_count = num_states // 2
@@ -209,7 +258,37 @@ def _in_control_arl(
     steps_to_absorption = np.linalg.solve(
         identity - transition_matrix, np.ones(num_states)
     )
-    return float(steps_to_absorption[half_state_count])
+    arl = float(steps_to_absorption[half_state_count])
+
+    # Postcondition (BIN-140): E[N] >= 1 for any stopping time N
+    # supported on {1, 2, 3, ...} -- the mathematical floor for any ARL
+    # (ADR-011). When (I - Q) is ill-conditioned (small lambda with
+    # large L), np.linalg.solve returns garbage: values oscillating
+    # between large positive and negative magnitudes, because the
+    # absorption probability has underflowed to zero. The true ARL in
+    # this regime is astronomically large -- the chart almost never
+    # signals. Replacing incoherent output with
+    # _ILL_CONDITIONED_ARL_SENTINEL correctly represents this:
+    # _calibrate_limit_multiplier's bracket expansion reads it as
+    # "ARL >> target" and stops doubling, giving brentq a bracket whose
+    # lower end is in the well-conditioned region where the true root
+    # lives. The sentinel is never reported as an achieved_arl -- that
+    # is always re-evaluated at the solved root.
+    #
+    # ⚠️ That last claim is true *because* the sentinel exceeds
+    # MAX_MEANINGFUL_ARL, not by construction. _calibrate_limit_multiplier
+    # has one path that returns _in_control_arl's value directly (the
+    # _MAX_LIMIT_MULTIPLIER bail-out); the sentinel cannot reach it only
+    # because a sentinel-valued gap is hugely positive for any legal
+    # target, so the bracket loop always exits first. That relationship
+    # between the two constants is load-bearing and is pinned by
+    # test_ewma_solve_postcondition.py::
+    # test_sentinel_exceeds_every_legal_target_arl -- if MAX_MEANINGFUL_ARL
+    # ever rose above the sentinel, the sentinel WOULD be reportable as an
+    # achieved_arl, which is the exact defect class BIN-140 fixed.
+    if not math.isfinite(arl) or arl < MIN_COHERENT_ARL:
+        return _ILL_CONDITIONED_ARL_SENTINEL
+    return arl
 
 
 def _calibrate_limit_multiplier(

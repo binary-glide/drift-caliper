@@ -25,6 +25,9 @@ from collections.abc import Sequence
 
 from caliper.baseline.domain.baseline import Baseline
 from caliper.baseline.domain.ewma_numerics import (
+    MIN_COHERENT_ARL as MIN_COHERENT_ARL,  # re-export: see below
+)
+from caliper.baseline.domain.ewma_numerics import (
     _calibrate_limit_multiplier,
     _ewma_asymptotic_std_ratio,
 )
@@ -96,31 +99,13 @@ DEFAULT_SMOOTHING_PARAM = 0.2
 
 # --- False alarm tolerance (target ARL0) meaningful range -------------------
 #
-# MIN_COHERENT_ARL = 1.0 is not an engineering choice -- it is a
-# mathematical floor. ARL0 is defined as the expectation of a stopping time
-# (the count of in-control observations until the first false alarm), and
-# that count is a positive integer -- it is always at least 1, because the
-# very first observation is itself a trial that can trigger an alarm.
-# E[N] >= 1 for any N supported on {1, 2, 3, ...} follows directly from the
-# definition of expectation; no value below 1 is a coherent ARL0 to request.
-#
-# Renamed from MIN_MEANINGFUL_ARL under ADR-011 (2026-09-12): this constant
-# was correctly derived but wrongly named -- it names the smallest
-# *arithmetically coherent* ARL0, not the smallest *useful* one, and the gap
-# between those two claims is exactly what let target_arl=1.0 fit
-# "successfully" while alarming on nearly every in-control observation
-# (BIN-131). It is no longer the enforced lower bound on target_arl -- that
-# is now caliper.baseline.domain.parameter_guards.MIN_TARGET_ARL (100.0),
-# ADR-011's hard floor, a much stronger claim ("the field tabulates nothing
-# smaller") than this one ("the arithmetic is still coherent"). This
-# constant is kept, unused in the validation path below, purely for its
-# derivation -- ADR-011 requires keeping the comment verbatim.
-#
-# Internal-only: absent from both caliper.__all__ and
-# caliper.baseline.__all__, and not reachable via hasattr on either package
-# (test_baseline_package_exports.py pins this) -- so renaming it carries no
-# deprecation burden.
-MIN_COHERENT_ARL = 1.0
+# MIN_COHERENT_ARL is defined in ewma_numerics.py and re-exported here,
+# where it has always been imported from. It moved down under BIN-140:
+# ewma_numerics needs it for the Markov solve's postcondition, and a
+# second local copy was the eleventh instance of this project's
+# duplication pattern. The circular import that copy cited applies only
+# to importing *up* -- ewma_fitting already imports from ewma_numerics,
+# so moving the constant down is clean.
 
 # MAX_MEANINGFUL_ARL has no comparable mathematical ceiling -- ARL0 grows
 # without bound as L -> infinity. 1,000,000 is an engineering default, not a
