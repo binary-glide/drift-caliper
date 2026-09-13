@@ -310,7 +310,16 @@ two-sided (BIN-95 BR-8). Neither has a direction parameter.
 ## Amendment 2026-09-12 (BIN-122): the protocol is a *reporting* contract, and gains a `HasProvenance` sibling
 
 **Status:** ✅ ratified by the product owner 2026-09-12.
-**Refs:** BIN-122 (item 3), BIN-120, BIN-127, ADR-011.
+🚧 **Decision only — NOT YET IMPLEMENTED. Tracked by BIN-135.**
+**Refs:** BIN-122 (item 3), BIN-120, BIN-127, BIN-135, ADR-011.
+
+⚠️ **Read the rest of this amendment as a specification, not a description.**
+As of `trunk` `bbff502`, `HasProvenance` exists nowhere in `src/`, `tests/` or
+`docs/domain-model.md`; `compare_provenance` still annotates
+`artefact: FittedControlLimits`; and `FittedControlLimits`' docstring does not
+yet carry the disclaimer section 1 below requires of it. Everything section 1
+of the original ADR decided **is** implemented — this is the 2026-09-12
+amendment alone.
 
 ### What surfaced
 
