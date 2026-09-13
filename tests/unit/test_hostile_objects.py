@@ -46,7 +46,11 @@ from __future__ import annotations
 import pytest
 
 from caliper.baseline import compare_provenance
-from caliper.errors import CaliperError, InvalidParameterError
+from caliper.errors import (
+    CaliperError,
+    InvalidParameterError,
+    ProvenanceMismatchError,
+)
 from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"
@@ -427,3 +431,166 @@ def test_caliper_error_is_not_value_error_subclass() -> None:
     """
     assert not issubclass(CaliperError, ValueError)
     assert not issubclass(CaliperError, AssertionError)
+
+
+# ===================================================================
+# BIN-139 -- a str SUBCLASS passes isinstance and can still hijack
+# comparison. BIN-121's guard checked the type and passed the original
+# object on; the fix normalises to an exact str at the boundary.
+# ===================================================================
+
+
+class _HostileStrSubclass(str):
+    """Passes ``isinstance(x, str)``; raises on comparison, ``str()`` and ``repr()``.
+
+    ``__str__`` and ``__repr__`` are hostile too, deliberately: they pin
+    that the fix uses ``str.__str__(value)`` rather than ``str(value)``.
+    The latter dispatches to this override and merely relocates the defect.
+    """
+
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError("eq exploded")
+
+    def __ne__(self, other: object) -> bool:
+        raise RuntimeError("ne exploded")
+
+    def __str__(self) -> str:
+        raise RuntimeError("str exploded")
+
+    def __repr__(self) -> str:
+        raise RuntimeError("repr exploded")
+
+    def __hash__(self) -> int:
+        return 0
+
+
+class _LegitimateStrSubclass(str):
+    """A perfectly ordinary ``str`` subclass -- the false-rejection guard."""
+
+
+class _MatchingHostileStrArtefact:
+    """Hostile ``str`` subclass whose content matches the result's provenance."""
+
+    provenance_model_version = _HostileStrSubclass(_MODEL_VERSION)
+    provenance_criteria = _CRITERIA
+
+
+class _DifferingHostileStrArtefact:
+    """Hostile ``str`` subclass whose content differs -- BIN-139's reproduction."""
+
+    provenance_model_version = _HostileStrSubclass("a-different-version")
+    provenance_criteria = _CRITERIA
+
+
+class _LegitimateStrSubclassArtefact:
+    """A well-behaved ``str`` subclass -- must still be accepted."""
+
+    provenance_model_version = _LegitimateStrSubclass(_MODEL_VERSION)
+    provenance_criteria = _CRITERIA
+
+
+def test_hostile_str_subclass_with_matching_content_does_not_raise() -> None:
+    """Matching content compares equal, and the hostile ``__eq__`` never runs.
+
+    🚨 **No error is the correct outcome, and it is worth being explicit
+    about why**, because "hostile input" reads like "must be rejected".
+    The artefact's provenance *content* matches the result's, so the
+    provenance is not mismatched and there is nothing to refuse. Being an
+    unusual subclass is not Caliper's business -- rejecting it would be
+    the tightening BIN-139 explicitly declined (``type(value) is str``
+    refuses legitimate subclasses too).
+
+    What this pins is that the comparison happens on normalised values, so
+    the override cannot fire at all.
+    """
+    artefact = _MatchingHostileStrArtefact()
+
+    compare_provenance(_result(), artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+
+def test_hostile_str_subclass_with_differing_content_raises_caliper_error() -> None:
+    """Differing content raises ``ProvenanceMismatchError``, not ``RuntimeError``.
+
+    The BIN-139 regression proper: before the fix this leaked
+    ``RuntimeError: ne exploded`` out of a public entry point, because
+    ``isinstance(value, str)`` admits a subclass and ``build_mismatches``
+    then evaluated ``!=`` on it.
+    """
+    artefact = _DifferingHostileStrArtefact()
+
+    with pytest.raises(ProvenanceMismatchError) as exc_info:
+        compare_provenance(_result(), artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    assert "model_version" in exc_info.value.mismatches
+
+
+def test_reported_mismatch_values_are_exact_str_not_the_hostile_subclass() -> None:
+    """``context["mismatches"]`` holds exact ``str``, never the caller's subclass.
+
+    ⚠️ **Stronger than BIN-121's defect B, which only required a ``str``.**
+    ``isinstance`` was satisfied by the hostile subclass, so "is a str"
+    was already true while the value was still a live grenade: a consumer
+    doing ``e.mismatches["model_version"]["expected"] == "x"`` -- the
+    obvious thing to write -- would have detonated it in their own code,
+    outside any Caliper try/except.
+
+    Normalising at the boundary means the type in ``context`` is exactly
+    ``str``, so the error can be inspected safely.
+    """
+    artefact = _DifferingHostileStrArtefact()
+
+    with pytest.raises(ProvenanceMismatchError) as exc_info:
+        compare_provenance(_result(), artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+    expected = exc_info.value.mismatches["model_version"]["expected"]
+    assert type(expected) is str, (
+        f"context value is {type(expected).__name__}; a caller comparing it "
+        "would run the subclass's __eq__ outside Caliper's control"
+    )
+    # The comparison a consumer would actually write must be safe.
+    assert expected == "a-different-version"
+
+
+def test_legitimate_str_subclass_is_accepted() -> None:
+    """A well-behaved ``str`` subclass still works -- the fix is not a tightening.
+
+    🚨 **This is the test that stops BIN-139 being "fixed" by
+    ``type(value) is str``.** That one-liner closes the leak and refuses
+    every legitimate subclass with it, turning a leak into a false
+    rejection of a valid artefact.
+    """
+    artefact = _LegitimateStrSubclassArtefact()
+
+    compare_provenance(_result(), artefact)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+
+def test_model_version_coerces_a_str_subclass_to_exact_str() -> None:
+    """``ModelVersion.value`` is an exact ``str``, even given a subclass.
+
+    🚨 **This pins the assumption an ``n/a`` reason depends on**, which is
+    otherwise the weakest link in BIN-136's grid. ``Baseline.record()``
+    calls the same ``build_mismatches`` that leaked here, and its
+    ``COMPARISON_RAISES`` cell is excused on the grounds that both sides
+    are Caliper's own ``Provenance`` objects. That excuse is only true
+    because **Pydantic coerces a ``str`` subclass to exact ``str`` at
+    construction** -- verified, not assumed.
+
+    ⚠️ **If Pydantic's coercion behaviour ever changed, the excuse would
+    become false silently and ``Baseline.record()`` would inherit BIN-139
+    without anything failing.** An ``n/a`` reason is a claim about the
+    code; this is the test that makes this one falsifiable rather than
+    merely plausible -- the standard BIN-136's own docstrings set for
+    every cell.
+    """
+    hostile = _HostileStrSubclass("m-1")
+    assert isinstance(hostile, str)
+
+    model_version = ModelVersion(value=hostile)
+
+    assert type(model_version.value) is str, (
+        "ModelVersion no longer normalises a str subclass -- "
+        "Baseline.record()'s COMPARISON_RAISES exclusion in "
+        "tests/support/exception_contract_registry.py is now WRONG, and "
+        "that path has inherited BIN-139. Fix the exclusion, not this test."
+    )
+    assert model_version.value == "m-1"

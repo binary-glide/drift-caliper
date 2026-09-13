@@ -101,12 +101,12 @@ def _reject_if_artefact_provenance_unreadable(
     )
 
 
-def _reject_if_artefact_provenance_not_str(
+def _require_artefact_provenance_str(
     artefact: object,
     model_version_value: object,
     criteria_value: object,
-) -> None:
-    """Raise ``InvalidParameterError`` if either probed value is not a ``str``.
+) -> tuple[str, str]:
+    """Validate both probed values are ``str``, and return them as exact ``str``.
 
     ``probe_attribute`` guards *access* -- this guards what the access
     *returned*. ``build_mismatches`` declares ``str`` parameters and
@@ -122,6 +122,30 @@ def _reject_if_artefact_provenance_not_str(
     provenance attributes are accessible but do not satisfy the ``str``
     contract ``FittedControlLimits`` declares, so the object still does
     not behave as a conforming fitted artefact.
+
+    🚨 **Returning normalised values, rather than only rejecting, is
+    BIN-139's fix and the distinction matters.** ``isinstance(value, str)``
+    admits a ``str`` **subclass**, which can override ``__eq__``/``__ne__``
+    -- so BIN-121's guard let such a value through to
+    ``build_mismatches``, whose ``!=`` then leaked a raw ``RuntimeError``
+    out of a public entry point. The type check alone was never enough:
+    what reaches the comparison has to *be* an exact ``str``.
+
+    ⚠️ **Normalisation is of type only, never content.** Provenance
+    comparison is exact string equality -- no stripping, no case folding,
+    no Unicode normalisation (ratified 2026-09-10, BIN-63 OQ-6 / BIN-68
+    OQ-2) -- and ``str.__str__`` changes no characters.
+
+    ⚠️ **``str.__str__(value)``, not ``str(value)``.** ``str(value)``
+    dispatches to the subclass's ``__str__``, which is hijackable exactly
+    like ``__eq__`` and merely relocates the defect; the unbound base-class
+    call cannot be overridden. Verified: against a subclass overriding
+    both, ``str(v)`` raises and ``str.__str__(v)`` returns a clean ``str``.
+
+    ⚠️ **This deliberately does NOT reject ``str`` subclasses.** Tightening
+    to ``type(value) is str`` would refuse a legitimate subclass -- trading
+    a leak for a false rejection of a valid artefact. A subclass whose
+    *content* matches is a match.
     """
     non_str: dict[str, str] = {}
     if not isinstance(model_version_value, str):
@@ -129,7 +153,9 @@ def _reject_if_artefact_provenance_not_str(
     if not isinstance(criteria_value, str):
         non_str["provenance_criteria"] = type(criteria_value).__name__
     if not non_str:
-        return
+        # Both are `str`; normalise away any subclass before anything
+        # compares or stores them (BIN-139).
+        return str.__str__(model_version_value), str.__str__(criteria_value)
 
     raise InvalidParameterError(
         "artefact provenance attributes must be strings",
@@ -184,14 +210,14 @@ def compare_provenance(result: ScoringResult, artefact: FittedControlLimits) -> 
     _reject_if_artefact_provenance_unreadable(
         artefact, model_version_probe, criteria_probe
     )
-    _reject_if_artefact_provenance_not_str(
+    expected_model_version, expected_criteria = _require_artefact_provenance_str(
         artefact, model_version_probe.value, criteria_probe.value
     )
 
     mismatches = build_mismatches(
-        expected_model_version=model_version_probe.value,
+        expected_model_version=expected_model_version,
         received_model_version=result.provenance.model_version.value,
-        expected_criteria=criteria_probe.value,
+        expected_criteria=expected_criteria,
         received_criteria=result.provenance.scoring_criteria.value,
     )
     if not mismatches:

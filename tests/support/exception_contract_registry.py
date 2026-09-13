@@ -274,12 +274,18 @@ class _HostileStr(str):
 class _HostileComparisonArtefact:
     """Provenance whose value passes the str guard and then raises on compare.
 
-    See :class:`_HostileStr`. This is BIN-139's reproduction, held here as
-    the ``COMPARISON_RAISES`` case for ``compare_provenance`` and marked
-    with :class:`KnownLeak` until the guard is fixed.
+    See :class:`_HostileStr`. BIN-139's reproduction, kept as the
+    ``COMPARISON_RAISES`` case for ``compare_provenance`` now that the
+    guard normalises probed values to exact ``str``.
+
+    ⚠️ **The version deliberately differs from the result's**, so this
+    reaches the comparison *and* the error path. A matching hostile value
+    returns silently -- correct, since the content matches, but it would
+    exercise only half of what the fix has to get right. The matching
+    variant is pinned in ``tests/unit/test_hostile_objects.py``.
     """
 
-    provenance_model_version = _HostileStr("m-1")
+    provenance_model_version = _HostileStr("a-different-version")
     provenance_criteria = "rubric"
 
 
@@ -1023,7 +1029,6 @@ _COMPARE_PROVENANCE_CASES = (
             _HostileComparisonArtefact(),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
         kind=InputKind.COMPARISON_RAISES,
-        known_leak=KnownLeak("BIN-139", RuntimeError),
     ),
 )
 
