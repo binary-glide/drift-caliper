@@ -216,7 +216,19 @@ field already carries the meaning.
 | `history` (property) | — | `tuple[MonitoringResult, ...]` | — |
 | `clear_history()` | — | `None` | — |
 
-**Constructor validation (domain-modeller decision, not escalated — no scenario exercises this path):** `Monitor.__init__` checks `isinstance(artefact, FittedControlLimits)`, the same pattern already used for `Judge.provider: JudgeProviderPort` — both are `@runtime_checkable` Protocols, so this is a structural check, not a new mechanism. On failure, raise `InvalidParameterError` (`context["parameter"] == "artefact"`, `context["kind"] == "invalid"`), consistent with every other constructor-time rejection in the taxonomy. None of BIN-69's nine scenarios or BIN-72's nine scenarios constructs a `Monitor` from something that is not a real fitted artefact, so this is not a tested requirement — it is offered as the obvious, taxonomy-consistent default for `backend-test-writer`/`domain-implementer` to confirm, not a product decision requiring escalation.
+🚨 **Constructor validation — SUPERSEDED 2026-09-12, corrected here 2026-09-14.**
+
+**`Monitor.__init__` narrows to the three concrete types**, `FittedEWMA`/`FittedCUSUM`/`FittedShewhart` — **not** a structural `isinstance(artefact, FittedControlLimits)` check.
+
+⚠️ **This section previously specified the structural check, and that specification was wrong.** `BIN-120` found the defect it causes: a duck-typed object satisfies the protocol, passes construction, and then raises `AssertionError` from `record()`, because `Monitor` reads **ten** attributes of which **seven are outside the protocol** (`decision_interval`, `direction`, `lcl`, `reference_value`, `smoothing_param`, `target_value`, `ucl`).
+
+ADR-004's 2026-09-12 amendment settles why: **`FittedControlLimits` is a *reporting* contract, not a *monitoring* one.** `isinstance(x, FittedControlLimits)` means *"reports like a fitted artefact"* and never meant *"can be monitored"*. `BIN-135` added **`HasProvenance`** as the two-attribute protocol a third party genuinely can satisfy, and `compare_provenance` accepts that.
+
+**The concrete-type check is correct by construction, not a narrowing of intent.** Monitoring a chart type Caliper does not implement is out of scope; the first plausible caller (`BIN-82`, Western Electric rules) would add a concrete type, not a structural conformer.
+
+⚠️ **The correction was recorded in this document's changelog but not here**, so the normative section continued to specify superseded behaviour for two days — found by external review 2026-09-14. **A changelog entry does not correct a specification.**
+
+On failure, raise `InvalidParameterError` (`context["parameter"] == "artefact"`, `context["kind"] == "invalid"`), consistent with every other constructor-time rejection in the taxonomy. On failure, raise `InvalidParameterError` (`context["parameter"] == "artefact"`, `context["kind"] == "invalid"`), consistent with every other constructor-time rejection in the taxonomy. None of BIN-69's nine scenarios or BIN-72's nine scenarios constructs a `Monitor` from something that is not a real fitted artefact, so this is not a tested requirement — it is offered as the obvious, taxonomy-consistent default for `backend-test-writer`/`domain-implementer` to confirm, not a product decision requiring escalation.
 
 **Design note:** Like `Baseline`, `Monitor` has aggregate-like properties — it enforces invariants on what it accepts and encapsulates its own accumulator and history — without the transactional semantics that define an aggregate in DDD: no unit of work wraps a `record()` call, no commit, no rollback (see "Structural Departures from Service-Oriented DDD" above, which already establishes this for `Baseline` and applies identically here). `Monitor` is **not** an aggregate root in the strict DDD sense; it is the domain's second, and — after this pass — only other, mutable single-owner object, alongside `Baseline`. Unlike `Baseline`, `Monitor` is not itself a collection: `.history` returns a plain `tuple`, and `Monitor` defines no `__len__`/`__iter__`/`__repr__` of its own — an engineer inspects `monitor.history`, never `monitor` directly (ADR-009 §6, deliberately rejecting a bespoke `MonitoringHistory` collection type to avoid a second, structurally-identical-to-`Baseline` type on the public surface — see BIN-72's review finding M3).
 
@@ -979,12 +991,12 @@ These are the operations the ten feature files establish. They replace the "serv
 | Fit Shewhart | BIN-95 | `Baseline`, `target_arl` | `FittedShewhart` | Baseline — **implemented** (BIN-95) |
 | Review artefact | BIN-66 | Any `FittedControlLimits` | Read properties; `audit_summary()` | Baseline — **implemented** (BIN-66) |
 | Compare provenance | BIN-68 | `ScoringResult`, `FittedControlLimits` | Confirms compatibility or raises `ProvenanceMismatchError` | Baseline — **implemented** (BIN-68) |
-| Create monitor | BIN-69, BIN-75 | `FittedControlLimits`, optional `retain_history: bool`, optional `receivers: Sequence[SignalReceiver]` (ADR-010) | `Monitor` | Monitoring — **domain-modelled (ADR-009 + ADR-010)**, ready for backend-test-writer, not yet implemented |
-| Record Phase II observation | BIN-69, BIN-75 | `ScoringResult` | `MonitoringResult` (now carrying `direction`, `fitted_artefact`, `delivery_failures` — ADR-010) | Monitoring — **domain-modelled (ADR-009 + ADR-010)**, ready for backend-test-writer, not yet implemented. Raises `ProvenanceMismatchError`, `InvalidObservationError`; never raises for a signal or a delivery failure. |
-| Review monitoring history | BIN-72 | (none) | `tuple[MonitoringResult, ...]` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented. Zero-config by default. |
-| Clear monitoring history | BIN-72 | (none) | `None` | Monitoring — **domain-modelled (ADR-009 + this pass)**, ready for backend-test-writer, not yet implemented. Manual escape hatch, no automatic eviction policy in R1. |
-| Deliver a signal to configured receivers | BIN-75 | (implicit — part of `record()`) | Each configured `SignalReceiver` invoked with the `MonitoringResult`; failures absorbed into `delivery_failures` | Monitoring — **domain-modelled (ADR-010)**, ready for backend-test-writer, not yet implemented. Synchronous, inside `record()`, only on a genuine signal. Never raises. |
-| Log a signal via the built-in receiver | BIN-76 | `MonitoringResult` (as any `SignalReceiver`) | `None` (writes a `WARNING`-level record to `logging.getLogger("caliper.monitoring")`) | Monitoring — **domain-modelled (ADR-010 §6)**, ready for backend-test-writer, not yet implemented. `caliper.monitoring.log_receiver`, stdlib `logging` only. |
+| Create monitor | BIN-69, BIN-75 | one of `FittedEWMA`/`FittedCUSUM`/`FittedShewhart` (⚠️ **not** any `FittedControlLimits` — BIN-120), optional `retain_history: bool`, optional `receivers: Sequence[SignalReceiver]` (ADR-010) | `Monitor` | Monitoring — **implemented** |
+| Record Phase II observation | BIN-69, BIN-75 | `ScoringResult` | `MonitoringResult` (now carrying `direction`, `fitted_artefact`, `delivery_failures` — ADR-010) | Monitoring — **implemented**. Raises `ProvenanceMismatchError`, `InvalidObservationError`; never raises for a signal or a delivery failure. |
+| Review monitoring history | BIN-72 | (none) | `tuple[MonitoringResult, ...]` | Monitoring — **implemented**. Zero-config by default. |
+| Clear monitoring history | BIN-72 | (none) | `None` | Monitoring — **implemented**. Manual escape hatch, no automatic eviction policy in R1. |
+| Deliver a signal to configured receivers | BIN-75 | (implicit — part of `record()`) | Each configured `SignalReceiver` invoked with the `MonitoringResult`; failures absorbed into `delivery_failures` | Monitoring — **implemented**. Synchronous, inside `record()`, only on a genuine signal. Never raises. |
+| Log a signal via the built-in receiver | BIN-76 | `MonitoringResult` (as any `SignalReceiver`) | `None` (writes a `WARNING`-level record to `logging.getLogger("caliper.monitoring")`) | Monitoring — **implemented** as `log_receiver` (a function, not a `LogReceiver` class). `caliper.monitoring.log_receiver`, stdlib `logging` only. |
 
 **Fitting parameter semantics (ADR-004 section 5):**
 - `target_arl`: **optional in Python signature** (default `None`), **required by Caliper validation**. Omitting raises `InvalidParameterError(kind="missing")`.
@@ -1117,12 +1129,26 @@ is proceeding on the old baseline with the new judge.
 
 ---
 
-> **Keeping this table honest.** The status column drifted through `BIN-63` and
-> `BIN-64` — both shipped while their rows still read "not yet implemented",
-> because the first omission was then read as precedent by the next story.
+> 🚨 **Keeping this table honest — and this note did not work.** The status
+> column drifted through `BIN-63` and `BIN-64`, which prompted the warning
+> below. **It then drifted again through the entire `Monitor` family** —
+> create, record, review history, clear history, signal delivery, log receiver —
+> all shipped under `BIN-69`/`BIN-72`/`BIN-75`/`BIN-76` while their rows still
+> read "not yet implemented". Found by external review on 2026-09-14, not by
+> anyone reading this note.
+>
 > **Update the row in the same PR that implements the operation.** This document
 > is canonical (the vault copy is a pointer), so a stale status here is a wrong
 > answer to the question a new agent most often asks of it: what already exists?
+>
+> ⚠️ **Treat the recurrence as evidence about the mechanism, not about
+> diligence.** A warning sitting beside the thing it guards, naming the exact
+> failure and its exact cause, still did not prevent that failure a second time.
+> That is `BIN-128`'s thesis in its purest form: **a rule with no mechanical
+> representation is enforced by attention, and attention is what fails.** If
+> this drifts a third time, the answer is a test that reads this table and
+> checks each claimed-unimplemented operation is genuinely absent from
+> `caliper.__all__` — not a more strongly worded note.
 
 ## Validation Checklist
 

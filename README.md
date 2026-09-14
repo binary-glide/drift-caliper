@@ -29,7 +29,9 @@ It is a library, not a platform. It emits into wherever you already log
 ## Design
 
 - **Charts** — EWMA (primary; gradual drift), CUSUM (sustained shifts),
-  Shewhart I-chart (acute failures), p-chart (pass/fail judges)
+  Shewhart I-chart (acute failures). Binary pass/fail rubrics are **not yet
+  supported** — see [ADR-001's 2026-09-13 amendment](docs/architecture/adr/001-spc-engine-in-house-with-scipy.md)
+  for why a p-chart was rejected and what replaces it
 - **API** — `@monitor.watch` decorator as the happy path,
   `async with monitor.trace()` for multi-step agents, `.record()` for framework
   callbacks (LangGraph, PydanticAI)
