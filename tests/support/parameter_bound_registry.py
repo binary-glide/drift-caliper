@@ -276,6 +276,20 @@ EXCLUDED_FACTORY_FUNCTIONS: tuple[ExcludedParameter, ...] = (
         "rejected as degenerate.",
     ),
     ExcludedParameter(
+        "structured_large_magnitude_scores",
+        "BIN-142: alternating +/-M with M capped at float_info.max / 2, so "
+        "sigma estimation succeeds and the chart-specific limit arithmetic "
+        "is actually reached. Excluded for the opposite reason to its three "
+        "siblings above -- they are excluded because every draw is expected "
+        "to be REJECTED, this one because the outcome is legitimately "
+        "chart-dependent: measured over 200 draws, EWMA fits all 200 while "
+        "Shewhart refuses 128 of them, since 3*sigma has no sub-1 factor to "
+        "absorb. Probing one boundary value against a single fit_* call "
+        "would assert a uniform answer where there correctly is none. The "
+        "property the draws are there to check is asserted directly by "
+        "_assert_fit_or_caliper_error, over every float field.",
+    ),
+    ExcludedParameter(
         "signed_zero_scores",
         "BIN-121 part 1: mixes 0.0/-0.0 and optional near-subnormal "
         "values to exercise the zero-variance and sigma-underflow "

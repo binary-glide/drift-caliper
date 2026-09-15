@@ -56,10 +56,12 @@ from __future__ import annotations
 import math
 import sys
 from collections.abc import Callable
+from typing import cast
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import BaseModel
 
 from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
@@ -125,6 +127,45 @@ def overflow_prone_scores(
         )
         scores.append(score)
     return scores
+
+
+@st.composite
+def structured_large_magnitude_scores(
+    draw: st.DrawFn,
+    size: int = DEFAULT_SUFFICIENCY_THRESHOLD,
+) -> list[float]:
+    """Alternating +/-M, drawn so sigma estimation *succeeds* (BIN-142).
+
+    🚨 **This strategy exists because** ``overflow_prone_scores`` **cannot reach
+    the region BIN-142 lived in, and that was measured rather than assumed.**
+    Over 200 draws with the fix disabled: **195 rejected at sigma estimation,
+    5 fit with finite limits, 0 reached the defect.**
+
+    The reason generalises past this bug. ``overflow_prone_scores`` draws each
+    score *independently* from the float64 extremes, so across 100 draws some
+    consecutive pair almost always differs by more than ``float_info.max``,
+    sigma overflows, and BIN-119's guard rejects the baseline before any
+    chart-specific arithmetic runs. **The defect needed a *structure* --
+    strict alternation at a magnitude whose pairwise difference still fits --
+    and an independent-draw strategy essentially never produces one.**
+
+    ⚠️ This is the limitation `CLAUDE.md` already records for this project's
+    Hypothesis usage ("every strategy draws each parameter independently"),
+    caught in the wild. Widening a strategy *outward* does not help; the
+    region is inside the existing bounds and structured.
+
+    ``M`` is capped so ``2 * M`` stays finite, which is exactly the condition
+    for sigma estimation to succeed.
+    """
+    magnitude = draw(
+        st.floats(
+            min_value=1e300,
+            max_value=sys.float_info.max / 2.0,
+            allow_nan=False,
+            allow_infinity=False,
+        )
+    )
+    return [magnitude if index % 2 else -magnitude for index in range(size)]
 
 
 @st.composite
@@ -218,12 +259,25 @@ def _assert_fit_or_caliper_error(
     """Assert the fit-or-CaliperError property for one chart and one baseline.
 
     Either the fit raises ``CaliperError`` (a legitimate rejection -- any
-    subtype is acceptable), or the returned artefact satisfies the
-    documented invariants on its shared-core fields:
+    subtype is acceptable), or **every float field on the returned artefact
+    is finite**, plus the two positivity invariants:
 
+    * every ``float``-annotated field is finite (BIN-142)
     * ``sigma_estimate`` is finite and positive (BIN-119 artefact invariant)
     * ``achieved_arl`` is finite and positive
-    * ``baseline_mean`` is finite
+
+    🚨 **This previously checked three named shared-core fields, and that is
+    exactly how BIN-142 escaped a property test written for overflow-prone
+    baselines.** ``ucl`` and ``lcl`` are chart-*specific*, deliberately
+    outside the ``FittedControlLimits`` protocol (ADR-004), and this helper
+    was typed against the protocol -- so it could not see the fields that
+    overflowed. ``fit_ewma`` returned ``ucl=inf`` with
+    ``achieved_arl == 370.0``, and all three assertions passed.
+
+    ⚠️ **The fields are enumerated from the model rather than listed**, so a
+    new chart-specific float is covered the day it is added. Listing them by
+    hand is the failure this is fixing; a hand-maintained list would
+    reproduce it one field later.
 
     A non-``CaliperError`` exception (``OverflowError``,
     ``ZeroDivisionError``, ``ValueError``, etc.) is the failure this
@@ -252,21 +306,25 @@ def _assert_fit_or_caliper_error(
     # weaken silently rather than fail. Re-measure before trusting it after
     # any such change (the BIN-124 class of drift, in a different guise).
 
-    # If the fit succeeded, verify the artefact is well-formed.
-    assert math.isfinite(artefact.sigma_estimate), (
-        f"sigma_estimate is {artefact.sigma_estimate}, not finite"
-    )
+    # If the fit succeeded, verify the artefact is well-formed. Narrowed to
+    # the concrete type here: the protocol deliberately does not expose the
+    # chart-specific boundaries, which is precisely where BIN-142 hid.
+    concrete = cast(BaseModel, artefact)
+    for name, field in type(concrete).model_fields.items():
+        if field.annotation is not float:
+            continue
+        value = getattr(concrete, name)
+        assert math.isfinite(value), (
+            f"{type(concrete).__name__}.{name} is {value}, not finite -- "
+            f"a non-finite control limit can never be exceeded, so the "
+            f"chart would report its requested ARL0 and never signal"
+        )
+
     assert artefact.sigma_estimate > 0, (
         f"sigma_estimate is {artefact.sigma_estimate}, not positive"
     )
-    assert math.isfinite(artefact.achieved_arl), (
-        f"achieved_arl is {artefact.achieved_arl}, not finite"
-    )
     assert artefact.achieved_arl > 0, (
         f"achieved_arl is {artefact.achieved_arl}, not positive"
-    )
-    assert math.isfinite(artefact.baseline_mean), (
-        f"baseline_mean is {artefact.baseline_mean}, not finite"
     )
 
 
@@ -290,6 +348,33 @@ def test_fit_cusum_handles_overflow_prone_scores(scores: list[float]) -> None:
     """CUSUM: overflow-prone baseline → fit or CaliperError, never a raw exception."""
     _assert_fit_or_caliper_error(
         lambda b: fit_cusum(b, target_arl=_SHAPE_TEST_TARGET_ARL), scores
+    )
+
+
+@given(scores=structured_large_magnitude_scores())
+@settings(max_examples=50, deadline=None, derandomize=True)
+def test_fit_ewma_handles_structured_large_magnitudes(scores: list[float]) -> None:
+    """EWMA: sigma estimable, limits large -- fit with finite fields, or refuse."""
+    _assert_fit_or_caliper_error(
+        lambda b: fit_ewma(b, target_arl=_SHAPE_TEST_TARGET_ARL), scores
+    )
+
+
+@given(scores=structured_large_magnitude_scores())
+@settings(max_examples=50, deadline=None, derandomize=True)
+def test_fit_cusum_handles_structured_large_magnitudes(scores: list[float]) -> None:
+    """CUSUM: same inputs. Structurally immune, but asserted rather than argued."""
+    _assert_fit_or_caliper_error(
+        lambda b: fit_cusum(b, target_arl=_SHAPE_TEST_TARGET_ARL), scores
+    )
+
+
+@given(scores=structured_large_magnitude_scores())
+@settings(max_examples=50, deadline=None, derandomize=True)
+def test_fit_shewhart_handles_structured_large_magnitudes(scores: list[float]) -> None:
+    """Shewhart: ``3 * sigma`` overflows across much of this range -- must refuse."""
+    _assert_fit_or_caliper_error(
+        lambda b: fit_shewhart(b, target_arl=_SHAPE_TEST_TARGET_ARL), scores
     )
 
 

@@ -59,7 +59,7 @@ except CaliperError as e:
 | `ProvenanceMismatchError` | `provenance_mismatch` | A result came from a different judge or rubric than the artefact |
 | `InvalidObservationError` | `invalid_observation` | An observation cannot be recorded — not finite, wrong type |
 | `InsufficientBaselineError` | `insufficient_baseline` | Fewer than 100 observations in the baseline |
-| `DegenerateBaselineError` | `degenerate_baseline` | The baseline has no variation to estimate spread from |
+| `DegenerateBaselineError` | `degenerate_baseline` | The baseline is the right size but cannot be fitted — see `context["reason"]` |
 
 The list is **semi-open**: a future version may add a category. Code that
 branches on the ones it knows and lets the rest propagate stays correct.
@@ -154,14 +154,34 @@ try:
     fitted = fit_ewma(baseline, target_arl=370.0)
 except InsufficientBaselineError as e:
     print(e.context)    # {"have": 50, "need": 100} -- collect more
-except DegenerateBaselineError:
-    ...                 # every observation identical: no spread to estimate
+except DegenerateBaselineError as e:
+    print(e.context["reason"])
 ```
 
-`DegenerateBaselineError` usually means a stub judge that has been left wired in,
-or a rubric so coarse that every output receives the same score. A chart cannot
-be fitted from data with no variation — there is nothing to measure "unusual"
-against.
+The baseline is the right *size* — it is the *values* that cannot be fitted.
+`context["reason"]` says which of four ways:
+
+| `reason` | What happened | Usual cause |
+|---|---|---|
+| `zero_variance` | Every observation is identical | A stub judge left wired in, or a rubric so coarse every output scores the same |
+| `sigma_estimate_underflow` | Consecutive differences are so small their mean underflows to `0.0` | Scores that vary only far below float64's precision |
+| `non_finite_sigma_estimate` | Consecutive differences overflow float64 | Implausibly large-magnitude scores reached the baseline |
+| `non_representable_control_limits` | Centre and spread are each finite, but the limits computed from them are not | As above, at a magnitude where the chart's own arithmetic runs out of range |
+
+A chart cannot be fitted from data with no variation — there is nothing to
+measure "unusual" against. The other three are the same problem at the
+arithmetic's edges rather than the data's.
+
+!!! note "Why the last one refuses rather than returning the limits it can"
+
+    A control limit of infinity can never be exceeded. The chart would report
+    the false alarm rate you asked for and **never signal** — which is worse
+    than failing, because it looks like it is working.
+
+    ⚠️ It refuses only when the limits are *genuinely* unrepresentable.
+    Caliper orders its own arithmetic to avoid throwing away an answer it
+    could have computed, so EWMA in particular fits baselines here that a
+    naive implementation would reject.
 
 ## Signals are not errors
 

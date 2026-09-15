@@ -18,17 +18,18 @@ the convention
 
 from __future__ import annotations
 
-import math
 from typing import NoReturn
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import ConfigDict
 
 from drift_caliper.baseline.domain.audit_summary import render_audit_summary
+from drift_caliper.baseline.domain.fitted_artefact_base import (
+    FittedArtefactBase,
+)
 from drift_caliper.baseline.domain.fitting_advisory import FittingAdvisory
-from drift_caliper.errors import InvalidParameterError
 
 
-class FittedEWMA(BaseModel):
+class FittedEWMA(FittedArtefactBase):
     """Immutable fitted EWMA control limits, with baseline statistics and provenance.
 
     Satisfies the ``FittedControlLimits`` protocol structurally -- the first
@@ -73,50 +74,6 @@ class FittedEWMA(BaseModel):
     # (tests/unit/baseline/test_fitted_artefact_sigma_invariant.py included)
     # keeps working unchanged; `fit_ewma` always passes it explicitly.
     advisories: tuple[FittingAdvisory, ...] = ()
-
-    @field_validator("sigma_estimate")
-    @classmethod
-    def must_be_finite_and_positive(cls, v: float) -> float:
-        """Reject a non-finite or non-positive ``sigma_estimate`` (BIN-119).
-
-        Raises ``InvalidParameterError`` (``context["parameter"] ==
-        "sigma_estimate"``, ``context["kind"] == "invalid"``) for ``NaN``,
-        ``+/-inf``, ``0.0``, or a negative value. Mirrors
-        ``ScoringResult.must_be_finite`` -- an invariant of this type
-        itself, enforced no matter how an instance is constructed, not
-        only through ``fit_ewma``.
-
-        Distinct from -- and does not replace -- the
-        ``DegenerateBaselineError`` guard
-        ``drift_caliper.baseline.domain.spc_numerics._moving_range_sigma``
-        already raises before this constructor is ever reached in the
-        normal fitting path: that guard diagnoses *the baseline* ("this
-        data cannot be fitted"). This validator protects *the type*
-        ("no ``FittedEWMA`` may exist with an unusable sigma"), which
-        matters even for a value that reaches this constructor by some
-        other route than ``fit_ewma`` -- there is no baseline in scope
-        here to raise a baseline-shaped error about.
-        """
-        if not math.isfinite(v) or v <= 0.0:
-            raise InvalidParameterError(
-                "sigma_estimate must be a finite, strictly positive number",
-                context={
-                    "parameter": "sigma_estimate",
-                    "constraint": "must be a finite float greater than 0.0",
-                    "kind": "invalid",
-                    "provided": v,
-                    "min_value": 0.0,
-                    "min_inclusive": False,
-                },
-                recovery_hint=(
-                    "A FittedEWMA cannot hold a sigma_estimate that is "
-                    "NaN, infinite, zero, or negative -- control limits "
-                    "computed from it would be meaningless. Construct "
-                    "FittedEWMA via fit_ewma(), which already rejects an "
-                    "unusable baseline before reaching this point."
-                ),
-            )
-        return v
 
     def __bool__(self) -> NoReturn:
         """Forbid truthiness -- see the class docstring's BIN-110 note."""

@@ -70,6 +70,7 @@ from drift_caliper.baseline.domain.spc_numerics import (
     _has_zero_variance,
     _moving_range_sigma,
     _overflow_safe_mean,
+    require_representable_limits,
 )
 from drift_caliper.errors import (
     DegenerateBaselineError,
@@ -214,6 +215,10 @@ def fit_shewhart(
     sigma_multiplier = _shewhart_sigma_multiplier(validated_target_arl)
     achieved_arl = _shewhart_arl0(sigma_multiplier)
     half_width = sigma_multiplier * sigma_estimate
+
+    require_representable_limits(
+        baseline_mean=baseline_mean, half_width=half_width, chart_type=_CHART_TYPE
+    )
 
     provenance = baseline.provenance_signature
     if provenance is None:  # pragma: no cover

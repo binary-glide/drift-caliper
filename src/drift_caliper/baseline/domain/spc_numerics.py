@@ -102,6 +102,7 @@ _MOVING_RANGE_METHOD = "moving_range"
 # first): these are two *additional* guards, not a replacement.
 _NON_FINITE_SIGMA_REASON = "non_finite_sigma_estimate"
 _SIGMA_UNDERFLOW_REASON = "sigma_estimate_underflow"
+_NON_FINITE_LIMITS_REASON = "non_representable_control_limits"
 
 
 def _has_zero_variance(scores: Sequence[float]) -> bool:
@@ -242,3 +243,68 @@ def _moving_range_sigma(scores: Sequence[float]) -> float:
             ),
         )
     return sigma
+
+
+def require_representable_limits(
+    *, baseline_mean: float, half_width: float, chart_type: str
+) -> None:
+    """Refuse a baseline whose observation-scale control limits overflow (BIN-142).
+
+    ``_moving_range_sigma`` already guarantees ``sigma_estimate`` is finite
+    and strictly positive. That is not sufficient: the limits are
+    ``baseline_mean +/- L * sigma``, and both the multiplication and the
+    addition can overflow float64 while every input to them is finite.
+
+    🚨 **The resulting chart is inert and says the opposite.** A baseline of
+    scores alternating around +/-4e307 fits with ``achieved_arl == 370.0``,
+    exactly as requested, and ``ucl == inf``. Nothing exceeds infinity, so
+    ``Monitor.record()`` reports ``is_in_control`` for every observation
+    including ``1e308``. **Confident silence is the failure this library
+    exists to prevent**, and here the library produced it.
+
+    ⚠️ **Called by** ``fit_ewma`` **and** ``fit_shewhart`` **only, and that is
+    correct rather than an omission.** ``fit_cusum`` reports a
+    ``decision_interval`` in sigma units (h is around 4.77) and a
+    ``target_value`` equal to the baseline mean -- it computes no
+    observation-scale limit, so it has nothing that can overflow this way.
+    Verified against the same reproduction, which ``fit_cusum`` survives with
+    every float field finite.
+
+    This raises rather than letting ``FittedArtefactBase``'s type-level check
+    fire, because the two errors answer different questions. The caller passed
+    a ``baseline`` and a ``target_arl``; an ``InvalidParameterError`` naming
+    ``ucl`` would describe a parameter they never supplied. The baseline is
+    what is unusable, so ``DegenerateBaselineError`` is what they get -- the
+    same split ``_moving_range_sigma`` already draws.
+
+    Raises
+    ------
+    DegenerateBaselineError
+        ``half_width`` or either limit is not finite
+        (``context["reason"] == "non_representable_control_limits"``).
+    """
+    limits = (half_width, baseline_mean + half_width, baseline_mean - half_width)
+    if all(math.isfinite(value) for value in limits):
+        return
+
+    raise DegenerateBaselineError(
+        "the control limits derived from this baseline are not "
+        "representable as finite numbers -- the chart could never signal",
+        context={
+            "reason": _NON_FINITE_LIMITS_REASON,
+            "chart_type": chart_type,
+            "baseline_mean": baseline_mean,
+            "half_width": half_width,
+        },
+        recovery_hint=(
+            "The baseline's centre and spread are individually finite, but "
+            "the control limits computed from them (baseline_mean +/- a "
+            "multiple of the sigma estimate) overflow float64's finite "
+            "range. A chart with an infinite control limit can never be "
+            "exceeded, so it would report the false alarm rate you asked "
+            "for while never signalling. This usually means "
+            "implausibly large-magnitude scores reached the baseline -- "
+            "review the judge's score scale, or rescale the scores, before "
+            "fitting again."
+        ),
+    )

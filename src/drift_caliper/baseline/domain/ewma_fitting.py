@@ -40,6 +40,7 @@ from drift_caliper.baseline.domain.spc_numerics import (
     _has_zero_variance,
     _moving_range_sigma,
     _overflow_safe_mean,
+    require_representable_limits,
 )
 from drift_caliper.errors import (
     DegenerateBaselineError,
@@ -346,10 +347,29 @@ def fit_ewma(
     limit_multiplier, achieved_arl = _calibrate_limit_multiplier(
         float(effective_smoothing_param), float(validated_target_arl)
     )
-    half_width = (
-        limit_multiplier
-        * sigma_estimate
-        * _ewma_asymptotic_std_ratio(float(effective_smoothing_param))
+    # 🚨 The grouping is load-bearing, not style (BIN-142).
+    #
+    # `limit_multiplier * sigma_estimate * ratio` associates left-to-right, so
+    # it computes `L * sigma` FIRST -- and that intermediate overflows to `inf`
+    # for a large-but-legal sigma even when the final product is perfectly
+    # representable. At sigma = 7.09e307: `L * sigma` is `inf`, while
+    # `(L * ratio) * sigma` is 6.998e307, comfortably inside float64.
+    #
+    # `ratio` is `sqrt(lambda / (2 - lambda))`, which is strictly less than 1
+    # for every legal lambda, so folding it into the multiplier first can only
+    # shrink the operand. Multiplying by sigma once, at the end, is the only
+    # ordering with no avoidable intermediate.
+    #
+    # ⚠️ Do not "simplify" this back to a flat product. It reads identically
+    # and silently reintroduces a chart that reports its requested ARL0 while
+    # being unable to signal.
+    limit_multiplier_scaled = limit_multiplier * _ewma_asymptotic_std_ratio(
+        float(effective_smoothing_param)
+    )
+    half_width = limit_multiplier_scaled * sigma_estimate
+
+    require_representable_limits(
+        baseline_mean=baseline_mean, half_width=half_width, chart_type=_CHART_TYPE
     )
 
     provenance = baseline.provenance_signature
