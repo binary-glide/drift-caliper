@@ -62,4 +62,18 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
       - run: uv sync --frozen
-      - run: uv run pytest
+      # `--cov-report=xml` is added here rather than in pyproject's addopts:
+      # locally the terminal report is what anyone reads, and writing a
+      # coverage.xml into the working tree on every `uv run pytest` is noise.
+      - run: uv run pytest --cov-report=xml
+      # Uploaded from one matrix leg only. All three run the same suite over
+      # the same source, so three uploads would be three identical reports
+      # racing to be the one Codecov reports on.
+      #
+      # Action version verified live 2026-09-15: codecov/codecov-action v7.1.0.
+      - if: matrix.python-version == '3.13'
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}

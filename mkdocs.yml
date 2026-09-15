@@ -1,0 +1,144 @@
+# Documentation site (BIN-86).
+#
+# Stack chosen deliberately -- see the `docs` dependency group in pyproject.toml
+# for why MkDocs Material + mkdocstrings rather than Sphinx, and note that an
+# earlier brand.md draft asserted this stack as though it were already decided.
+# It was not. It is now.
+#
+# Versions verified live against PyPI on 2026-09-15.
+site_name: Caliper
+site_description: Statistical Process Control for LLM-as-a-judge agent quality scores
+site_url: https://binary-glide.github.io/drift-caliper/
+repo_url: https://github.com/binary-glide/drift-caliper
+repo_name: binary-glide/drift-caliper
+copyright: Apache-2.0
+
+# Fail the build on a broken internal link or an undocumented page. The site is
+# generated from docstrings that cite each other; a silent broken link is a
+# citation that stopped resolving.
+strict: true
+
+theme:
+  name: material
+  language: en
+  font:
+    # Material exposes two font slots. IBM Plex Sans takes `text` because the
+    # site is mostly prose; Instrument Sans is applied to headings in
+    # stylesheets/brand.css, which is the only way to get the brand's third
+    # typeface in. Do not "simplify" by dropping to two faces -- in a
+    # monochrome identity the family switch is doing the work hue normally
+    # would.
+    text: IBM Plex Sans
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.highlight
+    - search.suggest
+
+extra_css:
+  - stylesheets/brand.css
+
+# KaTeX rather than MathJax: it renders synchronously and is markedly smaller,
+# and the site's mathematics is short display expressions rather than long
+# derivations. Loaded from jsDelivr with SRI pinning.
+extra_javascript:
+  - javascripts/katex.js
+  - https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js
+  - https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            # Caliper's docstrings are NumPy-style and are the reference
+            # documentation rather than a summary of it -- they carry
+            # derivations, primary-source citations and ratified decisions.
+            docstring_style: numpy
+            docstring_section_style: table
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_if_no_docstring: false
+            inherited_members: false
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            filters: ["!^_"]
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
+      - What the numbers mean: concepts.md
+      - Choosing a chart: charts.md
+      - Errors: errors.md
+  - Reference:
+      - Measurement: reference/measurement.md
+      - Baseline and fitting: reference/baseline.md
+      - Monitoring: reference/monitoring.md
+      - Exceptions: reference/errors.md
+  - Decisions:
+      - Why these decisions exist: architecture/index.md
+      - 001 SPC engine in-house: architecture/adr/001-spc-engine-in-house-with-scipy.md
+      - 002 Error contract: architecture/adr/002-error-contract-exception-taxonomy.md
+      - 003 Rejecting bootstrapped MEWMA: architecture/adr/003-reject-bootstrapped-mewma-for-calibration.md
+      - 004 Fitted artefact protocol: architecture/adr/004-fitted-artefact-protocol-and-fitting-api-surface.md
+      - 005 Minimum baseline size: architecture/adr/005-minimum-phase-i-baseline-size.md
+      - 006 Scoring API surface: architecture/adr/006-scoring-api-surface-and-judge-provider-port.md
+      - 007 Two type checkers: architecture/adr/007-two-type-checkers-ty-and-mypy.md
+      - 008 Error assertions: architecture/adr/008-error-assertions-over-message-text.md
+      - 009 Phase II monitor: architecture/adr/009-phase-ii-monitor-and-observation-store.md
+      - 010 Signal delivery: architecture/adr/010-signal-delivery-and-absorb-but-surface.md
+      - 011 Minimum target ARL0: architecture/adr/011-minimum-meaningful-target-arl0.md
+  - Domain model: domain-model.md

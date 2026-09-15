@@ -61,6 +61,31 @@ dev = [
   "ruff>=0.16.7",
 ]
 
+# Documentation stack (BIN-86). Chosen deliberately, not inherited: the ticket
+# named no tooling, and an earlier draft of brand.md asserted MkDocs Material
+# as though it were already decided. Versions verified live against PyPI on
+# 2026-09-15, per the standing rule against pinning from memory.
+#
+# Why this stack and not Sphinx: Caliper's docstrings are NumPy-style and
+# unusually long -- they carry derivations, primary-source citations and
+# ratified decisions, and they ARE the reference documentation rather than a
+# summary of it. mkdocstrings renders long-form Markdown inside a docstring
+# faithfully, including tables; Sphinx would mean either reST docstrings or a
+# MyST layer to get the same result.
+#
+# The brand constraint decided it as much as the technical one. The docs site
+# is the only surface where this brand fully exists (GitHub and PyPI give no
+# colour or typography control at all), so the theme must express an 11-step
+# neutral scale, three typefaces, and -- critically -- let admonition colours
+# be overridden. Material exposes all of that as CSS custom properties.
+docs = [
+  "mkdocs>=1.6.1",
+  "mkdocs-material>=9.7.7",
+  # mkdocstrings 1.x moved the Python handler into its own distribution.
+  "mkdocstrings>=1.0.6",
+  "mkdocstrings-python>=2.0.8",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

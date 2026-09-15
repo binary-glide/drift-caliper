@@ -1,0 +1,50 @@
+# OpenSSF Scorecard (BIN-86).
+#
+# Publishes a supply-chain security score to the public Scorecard API, which
+# is what the README badge reads. The checks it runs -- pinned dependencies,
+# branch protection, token permissions, signed releases, dangerous workflow
+# patterns -- are the ones a reader evaluating whether to depend on a new
+# package actually cares about.
+#
+# ⚠️ Scorecard's publishing step requires a PUBLIC repository: the API it
+# writes to only serves public projects. The guard makes this a no-op while
+# the repository is private rather than a failing job.
+#
+# ⚠️ `publish_results: true` is not incidental -- without it the badge has
+# nothing to read. It publishes the score, not the source.
+#
+# Action version verified live against the GitHub releases API on 2026-09-15:
+# ossf/scorecard-action v2.4.4 (2026-07-23).
+name: Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "41 4 * * 1"
+  push:
+    branches: [trunk]
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: analysis
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif

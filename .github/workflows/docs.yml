@@ -1,0 +1,62 @@
+# Documentation site (BIN-86).
+#
+# Two jobs, deliberately split. `build` runs on every pull request so a broken
+# link or an unresolvable docstring reference fails review rather than
+# production -- mkdocs.yml sets `strict: true`, so both are build errors. The
+# site is generated FROM the docstrings, which means a citation that stops
+# resolving is a real defect, not a formatting nit.
+#
+# `deploy` runs only on trunk.
+#
+# ⚠️ GitHub Pages on a PRIVATE repository requires a paid plan. The deploy job
+# is guarded on visibility for the same reason the CodeQL job is: while the
+# repository is private it should be a no-op, not a red X. It starts working
+# when the repository goes public, with no edit here.
+#
+# Action versions verified live against the GitHub releases API on 2026-09-15:
+# actions/configure-pages v6.0.0, actions/upload-pages-artifact v5.0.0,
+# actions/deploy-pages v5.0.1.
+name: Docs
+
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --group docs
+      - run: uv run --group docs mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: deploy
+    needs: build
+    if: github.ref == 'refs/heads/trunk' && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/configure-pages@v6
+      - id: deployment
+        uses: actions/deploy-pages@v5

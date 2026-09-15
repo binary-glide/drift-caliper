@@ -1,0 +1,628 @@
+/* Caliper brand, applied to MkDocs Material (BIN-86).
+ *
+ * The documentation site is the only surface where this brand fully exists.
+ * GitHub and PyPI give no colour or typography control at all -- there, Caliper
+ * is a wordmark and a voice. Here it is the whole identity, so this file is not
+ * decoration: it is the brand's only complete expression.
+ *
+ * THE CENTRAL RULE, and everything below follows from it:
+ *
+ *   Chromatic colour appears ONLY where it carries SPC measurement meaning.
+ *   Green means in control. Amber means advisory. Red means out of control.
+ *   Nothing else in this document is allowed to be green, amber or red.
+ *
+ * That is why so much of this file is spent *removing* colour Material ships
+ * with. Material's defaults are a well-designed general-purpose palette; they
+ * are simply incompatible with a brand that has assigned those hues a meaning.
+ */
+
+/* ------------------------------------------------------------------ *
+ * Tokens -- the cool-slate neutral scale, verbatim from brand.md
+ * ------------------------------------------------------------------ */
+
+:root {
+  --caliper-neutral-950: #020617;
+  --caliper-neutral-900: #0f172a;
+  --caliper-neutral-800: #1e293b;
+  --caliper-neutral-700: #334155;
+  --caliper-neutral-600: #475569;
+  --caliper-neutral-500: #64748b;
+  --caliper-neutral-400: #94a3b8;
+  --caliper-neutral-300: #cbd5e1;
+  --caliper-neutral-200: #e2e8f0;
+  --caliper-neutral-100: #f1f5f9;
+  --caliper-neutral-50: #f8fafc;
+  --caliper-surface-light: #ffffff;
+
+  /* Signal colours. These are the only chromatic values in the system. They
+   * must not be altered to match a decorative palette and must not be reused
+   * for anything without measurement meaning. */
+  --caliper-in-control: #16a34a;
+  --caliper-in-control-text: #15803d;
+  --caliper-in-control-surface: #f0fdf4;
+  --caliper-advisory: #d97706;
+  --caliper-advisory-text: #b45309;
+  --caliper-advisory-surface: #fffbeb;
+  --caliper-out-of-control: #dc2626;
+  --caliper-out-of-control-text: #b91c1c;
+  --caliper-out-of-control-surface: #fef2f2;
+
+  /* Dark-mode signal variants, chosen for contrast on neutral-900. */
+  --caliper-in-control-dark: #4ade80;
+  --caliper-advisory-dark: #fbbf24;
+  --caliper-out-of-control-dark: #f87171;
+
+  --caliper-display: "Instrument Sans", "IBM Plex Sans", system-ui, sans-serif;
+}
+
+/* Instrument Sans is the brand's display face and Material has no slot for a
+ * third family, so it is loaded here. IBM Plex Sans and JetBrains Mono come
+ * from the theme's own `font:` configuration. */
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&display=swap");
+
+/* ------------------------------------------------------------------ *
+ * Light scheme
+ * ------------------------------------------------------------------ */
+
+[data-md-color-scheme="default"] {
+  /* Material derives links, accents and the header from the primary colour.
+   * Pointing all of it at the neutral scale is what stops a stray indigo
+   * appearing in a brand that has none. */
+  --md-primary-fg-color: var(--caliper-neutral-900);
+  --md-primary-fg-color--light: var(--caliper-neutral-700);
+  --md-primary-fg-color--dark: var(--caliper-neutral-950);
+  --md-primary-bg-color: var(--caliper-neutral-50);
+  --md-primary-bg-color--light: var(--caliper-neutral-100);
+  --md-accent-fg-color: var(--caliper-neutral-700);
+  --md-accent-fg-color--transparent: rgba(51, 65, 85, 0.1);
+
+  --md-default-bg-color: var(--caliper-neutral-50);
+  --md-default-fg-color: var(--caliper-neutral-900);
+  --md-default-fg-color--light: var(--caliper-neutral-600);
+  --md-default-fg-color--lighter: var(--caliper-neutral-500);
+  --md-default-fg-color--lightest: var(--caliper-neutral-400);
+
+  --md-typeset-color: var(--caliper-neutral-700);
+  --md-typeset-a-color: var(--caliper-neutral-900);
+
+  --md-code-bg-color: var(--caliper-neutral-200);
+  --md-code-fg-color: var(--caliper-neutral-700);
+
+  /* Shadows are slate-tinted, never neutral black. */
+  --md-shadow-z1: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --md-shadow-z2: 0 2px 6px rgba(15, 23, 42, 0.12);
+}
+
+/* ------------------------------------------------------------------ *
+ * Dark scheme
+ * ------------------------------------------------------------------ */
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--caliper-neutral-900);
+  --md-primary-fg-color--light: var(--caliper-neutral-800);
+  --md-primary-fg-color--dark: var(--caliper-neutral-950);
+  --md-primary-bg-color: var(--caliper-neutral-100);
+  --md-accent-fg-color: var(--caliper-neutral-300);
+  --md-accent-fg-color--transparent: rgba(203, 213, 225, 0.1);
+
+  --md-default-bg-color: var(--caliper-neutral-900);
+  --md-default-fg-color: var(--caliper-neutral-100);
+  --md-default-fg-color--light: var(--caliper-neutral-400);
+  --md-default-fg-color--lighter: var(--caliper-neutral-500);
+  --md-default-fg-color--lightest: var(--caliper-neutral-600);
+
+  --md-typeset-color: var(--caliper-neutral-300);
+  --md-typeset-a-color: var(--caliper-neutral-100);
+
+  --md-code-bg-color: var(--caliper-neutral-800);
+  --md-code-fg-color: var(--caliper-neutral-300);
+
+  --md-footer-bg-color: var(--caliper-neutral-950);
+}
+
+/* ------------------------------------------------------------------ *
+ * Typography
+ * ------------------------------------------------------------------ */
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-header__topic {
+  font-family: var(--caliper-display);
+  /* Sentence case, never all-caps. All-caps is Binary Glide's convention and
+   * this product deliberately does not inherit it. */
+  text-transform: none;
+  letter-spacing: -0.01em;
+  color: var(--md-default-fg-color);
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  font-size: 2.05rem;
+  line-height: 1.15;
+}
+.md-typeset h2 {
+  font-weight: 600;
+  font-size: 1.5rem;
+  line-height: 1.3;
+}
+.md-typeset h3 {
+  font-weight: 500;
+  font-size: 1.2rem;
+  line-height: 1.4;
+}
+
+.md-typeset {
+  font-size: 0.82rem;
+  line-height: 1.65;
+}
+
+/* Links carry an underline rather than a hue. This is a direct consequence of
+ * reserving colour for signal: an interactive element is structure, not
+ * measurement, so it differentiates by decoration and weight instead. */
+.md-typeset a {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--caliper-neutral-400);
+}
+
+.md-typeset a:hover,
+.md-typeset a:focus {
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--md-typeset-a-color);
+}
+
+/* ------------------------------------------------------------------ *
+ * Code
+ * ------------------------------------------------------------------ */
+
+.md-typeset code,
+.md-typeset pre > code {
+  font-feature-settings: "liga" 0;
+}
+
+/* Near-monochrome syntax highlighting.
+ *
+ * BIN-86 asked for this to be revisited rather than inherited, so: a
+ * conventional multi-hue syntax theme would put green, amber and red on the
+ * most visually prominent element of every page, in a document where those
+ * three hues mean "in control", "advisory" and "out of control". It would
+ * spend the brand's one chromatic commitment on punctuation.
+ *
+ * The resolution is differentiation by VALUE and WEIGHT rather than hue --
+ * keywords dark and bold, strings mid-grey, comments light and italic. It
+ * remains legible (the steps are far apart on the neutral scale) and it keeps
+ * the rule intact: if colour draws the eye on this site, something is in or
+ * out of statistical control.
+ */
+[data-md-color-scheme="default"] .highlight .k,
+[data-md-color-scheme="default"] .highlight .kn,
+[data-md-color-scheme="default"] .highlight .kd,
+[data-md-color-scheme="default"] .highlight .ow,
+[data-md-color-scheme="default"] .highlight .nb {
+  color: var(--caliper-neutral-900);
+  font-weight: 600;
+}
+[data-md-color-scheme="default"] .highlight .s,
+[data-md-color-scheme="default"] .highlight .s1,
+[data-md-color-scheme="default"] .highlight .s2,
+[data-md-color-scheme="default"] .highlight .sb,
+[data-md-color-scheme="default"] .highlight .mi,
+[data-md-color-scheme="default"] .highlight .mf {
+  color: var(--caliper-neutral-600);
+}
+[data-md-color-scheme="default"] .highlight .c,
+[data-md-color-scheme="default"] .highlight .c1,
+[data-md-color-scheme="default"] .highlight .cm {
+  color: var(--caliper-neutral-500);
+  font-style: italic;
+}
+[data-md-color-scheme="default"] .highlight .nf,
+[data-md-color-scheme="default"] .highlight .nc {
+  color: var(--caliper-neutral-800);
+  font-weight: 600;
+}
+
+[data-md-color-scheme="slate"] .highlight .k,
+[data-md-color-scheme="slate"] .highlight .kn,
+[data-md-color-scheme="slate"] .highlight .kd,
+[data-md-color-scheme="slate"] .highlight .ow,
+[data-md-color-scheme="slate"] .highlight .nb {
+  color: var(--caliper-neutral-50);
+  font-weight: 600;
+}
+[data-md-color-scheme="slate"] .highlight .s,
+[data-md-color-scheme="slate"] .highlight .s1,
+[data-md-color-scheme="slate"] .highlight .s2,
+[data-md-color-scheme="slate"] .highlight .sb,
+[data-md-color-scheme="slate"] .highlight .mi,
+[data-md-color-scheme="slate"] .highlight .mf {
+  color: var(--caliper-neutral-400);
+}
+[data-md-color-scheme="slate"] .highlight .c,
+[data-md-color-scheme="slate"] .highlight .c1,
+[data-md-color-scheme="slate"] .highlight .cm {
+  color: var(--caliper-neutral-500);
+  font-style: italic;
+}
+[data-md-color-scheme="slate"] .highlight .nf,
+[data-md-color-scheme="slate"] .highlight .nc {
+  color: var(--caliper-neutral-200);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ *
+ * Admonitions -- the collision BIN-86 flagged, resolved
+ * ------------------------------------------------------------------ */
+
+/* Material ships note=blue, tip=green, warning=orange, danger=red. Three of
+ * those are this brand's signal colours, which would mean a passing aside
+ * rendering green on a page where green states that a process is in control.
+ *
+ * So every general-purpose admonition is reset to the structural treatment
+ * brand.md specifies for info: neutral text on a tinted ground, distinguished
+ * by a left border rather than a hue. Info is not an SPC signal and does not
+ * get to claim one. */
+.md-typeset .admonition,
+.md-typeset details {
+  border: none;
+  border-left: 3px solid var(--caliper-neutral-400);
+  border-radius: 2px;
+  background-color: var(--caliper-neutral-100);
+  box-shadow: none;
+  font-size: 0.78rem;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition,
+[data-md-color-scheme="slate"] .md-typeset details {
+  background-color: var(--caliper-neutral-800);
+  border-left-color: var(--caliper-neutral-600);
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  font-family: var(--caliper-display);
+  font-weight: 600;
+  background-color: transparent;
+  color: var(--md-default-fg-color);
+}
+
+/* Material tints the title bar and icon per type. Neutralise both, then
+ * re-grant colour below only to the three that have earned it. */
+.md-typeset .admonition-title::before,
+.md-typeset summary::before {
+  background-color: var(--caliper-neutral-600);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition-title::before,
+[data-md-color-scheme="slate"] .md-typeset summary::before {
+  background-color: var(--caliper-neutral-400);
+}
+
+/* ⚠️ Material's per-type rules are `.md-typeset .admonition.note` -- three
+ * classes -- so the two-class reset above does NOT beat them, and `note`
+ * renders Material's blue regardless of load order. Every type has to be named
+ * explicitly at matching specificity.
+ *
+ * This was caught by looking at the rendered page rather than by reading the
+ * CSS, which is the only way it could have been caught. */
+.md-typeset .admonition.note,
+.md-typeset .admonition.abstract,
+.md-typeset .admonition.summary,
+.md-typeset .admonition.tldr,
+.md-typeset .admonition.info,
+.md-typeset .admonition.todo,
+.md-typeset .admonition.tip,
+.md-typeset .admonition.hint,
+.md-typeset .admonition.important,
+.md-typeset .admonition.success,
+.md-typeset .admonition.check,
+.md-typeset .admonition.done,
+.md-typeset .admonition.question,
+.md-typeset .admonition.help,
+.md-typeset .admonition.faq,
+.md-typeset .admonition.example,
+.md-typeset .admonition.quote,
+.md-typeset .admonition.cite,
+.md-typeset .admonition.bug,
+.md-typeset details.note,
+.md-typeset details.abstract,
+.md-typeset details.info,
+.md-typeset details.tip,
+.md-typeset details.success,
+.md-typeset details.question,
+.md-typeset details.example,
+.md-typeset details.quote,
+.md-typeset details.bug {
+  border-left-color: var(--caliper-neutral-400);
+  background-color: var(--caliper-neutral-100);
+}
+
+/* Material tints the title strip per type with an rgba of the same hue. */
+.md-typeset .note > .admonition-title,
+.md-typeset .abstract > .admonition-title,
+.md-typeset .summary > .admonition-title,
+.md-typeset .tldr > .admonition-title,
+.md-typeset .info > .admonition-title,
+.md-typeset .todo > .admonition-title,
+.md-typeset .tip > .admonition-title,
+.md-typeset .hint > .admonition-title,
+.md-typeset .important > .admonition-title,
+.md-typeset .success > .admonition-title,
+.md-typeset .check > .admonition-title,
+.md-typeset .done > .admonition-title,
+.md-typeset .question > .admonition-title,
+.md-typeset .help > .admonition-title,
+.md-typeset .faq > .admonition-title,
+.md-typeset .example > .admonition-title,
+.md-typeset .quote > .admonition-title,
+.md-typeset .cite > .admonition-title,
+.md-typeset .bug > .admonition-title,
+.md-typeset .note > summary,
+.md-typeset .abstract > summary,
+.md-typeset .info > summary,
+.md-typeset .tip > summary,
+.md-typeset .success > summary,
+.md-typeset .question > summary,
+.md-typeset .example > summary,
+.md-typeset .quote > summary,
+.md-typeset .bug > summary {
+  background-color: transparent;
+}
+
+.md-typeset .note > .admonition-title::before,
+.md-typeset .abstract > .admonition-title::before,
+.md-typeset .summary > .admonition-title::before,
+.md-typeset .tldr > .admonition-title::before,
+.md-typeset .info > .admonition-title::before,
+.md-typeset .todo > .admonition-title::before,
+.md-typeset .tip > .admonition-title::before,
+.md-typeset .hint > .admonition-title::before,
+.md-typeset .important > .admonition-title::before,
+.md-typeset .success > .admonition-title::before,
+.md-typeset .check > .admonition-title::before,
+.md-typeset .done > .admonition-title::before,
+.md-typeset .question > .admonition-title::before,
+.md-typeset .help > .admonition-title::before,
+.md-typeset .faq > .admonition-title::before,
+.md-typeset .example > .admonition-title::before,
+.md-typeset .quote > .admonition-title::before,
+.md-typeset .cite > .admonition-title::before,
+.md-typeset .bug > .admonition-title::before,
+.md-typeset .note > summary::before,
+.md-typeset .abstract > summary::before,
+.md-typeset .info > summary::before,
+.md-typeset .tip > summary::before,
+.md-typeset .success > summary::before,
+.md-typeset .question > summary::before,
+.md-typeset .example > summary::before,
+.md-typeset .quote > summary::before,
+.md-typeset .bug > summary::before {
+  background-color: var(--caliper-neutral-600);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition.note,
+[data-md-color-scheme="slate"] .md-typeset .admonition.abstract,
+[data-md-color-scheme="slate"] .md-typeset .admonition.info,
+[data-md-color-scheme="slate"] .md-typeset .admonition.tip,
+[data-md-color-scheme="slate"] .md-typeset .admonition.success,
+[data-md-color-scheme="slate"] .md-typeset .admonition.question,
+[data-md-color-scheme="slate"] .md-typeset .admonition.example,
+[data-md-color-scheme="slate"] .md-typeset .admonition.quote,
+[data-md-color-scheme="slate"] .md-typeset .admonition.bug,
+[data-md-color-scheme="slate"] .md-typeset details.note,
+[data-md-color-scheme="slate"] .md-typeset details.info,
+[data-md-color-scheme="slate"] .md-typeset details.tip,
+[data-md-color-scheme="slate"] .md-typeset details.example,
+[data-md-color-scheme="slate"] .md-typeset details.quote {
+  border-left-color: var(--caliper-neutral-600);
+  background-color: var(--caliper-neutral-800);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .note > .admonition-title::before,
+[data-md-color-scheme="slate"] .md-typeset .info > .admonition-title::before,
+[data-md-color-scheme="slate"] .md-typeset .tip > .admonition-title::before,
+[data-md-color-scheme="slate"] .md-typeset .example > .admonition-title::before,
+[data-md-color-scheme="slate"] .md-typeset .quote > .admonition-title::before,
+[data-md-color-scheme="slate"] .md-typeset .note > summary::before,
+[data-md-color-scheme="slate"] .md-typeset .info > summary::before,
+[data-md-color-scheme="slate"] .md-typeset .tip > summary::before,
+[data-md-color-scheme="slate"] .md-typeset .example > summary::before,
+[data-md-color-scheme="slate"] .md-typeset .quote > summary::before {
+  background-color: var(--caliper-neutral-400);
+}
+
+/* `warning` and `danger` keep chromatic treatment, because amber and red
+ * already mean advisory and out-of-control and a genuine correctness hazard
+ * is the one aside where that reading is correct rather than accidental. */
+.md-typeset .admonition.warning,
+.md-typeset details.warning {
+  border-left-color: var(--caliper-advisory);
+  background-color: var(--caliper-advisory-surface);
+}
+.md-typeset .warning > .admonition-title::before,
+.md-typeset .warning > summary::before {
+  background-color: var(--caliper-advisory-text);
+}
+
+.md-typeset .admonition.danger,
+.md-typeset details.danger {
+  border-left-color: var(--caliper-out-of-control);
+  background-color: var(--caliper-out-of-control-surface);
+}
+.md-typeset .danger > .admonition-title::before,
+.md-typeset .danger > summary::before {
+  background-color: var(--caliper-out-of-control-text);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .admonition.warning,
+[data-md-color-scheme="slate"] .md-typeset details.warning,
+[data-md-color-scheme="slate"] .md-typeset .admonition.danger,
+[data-md-color-scheme="slate"] .md-typeset details.danger {
+  background-color: var(--caliper-neutral-800);
+}
+[data-md-color-scheme="slate"] .md-typeset .admonition.warning {
+  border-left-color: var(--caliper-advisory-dark);
+}
+[data-md-color-scheme="slate"] .md-typeset .admonition.danger {
+  border-left-color: var(--caliper-out-of-control-dark);
+}
+
+/* ------------------------------------------------------------------ *
+ * Signal states -- the only place green is allowed
+ * ------------------------------------------------------------------ */
+
+/* Used as `<span class="signal-in-control">in control</span>` and friends.
+ * Every one pairs its colour with a word, because the brand forbids relying on
+ * colour alone to carry meaning -- a reader with deuteranopia, or one reading a
+ * printed page, must get the same information. */
+.signal-in-control,
+.signal-advisory,
+.signal-out-of-control {
+  font-family: var(--caliper-display);
+  font-weight: 600;
+  font-size: 0.9em;
+  padding: 0.1em 0.45em;
+  border-radius: 2px;
+  border: 1px solid currentcolor;
+}
+
+.signal-in-control {
+  color: var(--caliper-in-control-text);
+  background-color: var(--caliper-in-control-surface);
+}
+.signal-advisory {
+  color: var(--caliper-advisory-text);
+  background-color: var(--caliper-advisory-surface);
+}
+.signal-out-of-control {
+  color: var(--caliper-out-of-control-text);
+  background-color: var(--caliper-out-of-control-surface);
+}
+
+[data-md-color-scheme="slate"] .signal-in-control {
+  color: var(--caliper-in-control-dark);
+  background-color: transparent;
+}
+[data-md-color-scheme="slate"] .signal-advisory {
+  color: var(--caliper-advisory-dark);
+  background-color: transparent;
+}
+[data-md-color-scheme="slate"] .signal-out-of-control {
+  color: var(--caliper-out-of-control-dark);
+  background-color: transparent;
+}
+
+/* ------------------------------------------------------------------ *
+ * Tables and API reference
+ * ------------------------------------------------------------------ */
+
+.md-typeset table:not([class]) {
+  border: 1px solid var(--caliper-neutral-300);
+  border-radius: 2px;
+  font-size: 0.75rem;
+}
+
+.md-typeset table:not([class]) th {
+  font-family: var(--caliper-display);
+  font-weight: 600;
+  background-color: var(--caliper-neutral-100);
+  color: var(--md-default-fg-color);
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) {
+  border-color: var(--caliper-neutral-700);
+}
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background-color: var(--caliper-neutral-800);
+}
+
+/* mkdocstrings renders each symbol as a heading followed by a signature. The
+ * left rule groups a symbol's documentation visually without adding a box. */
+.doc-contents {
+  border-left: 1px solid var(--caliper-neutral-300);
+  padding-left: 1rem;
+  margin-left: 0.15rem;
+}
+
+[data-md-color-scheme="slate"] .doc-contents {
+  border-left-color: var(--caliper-neutral-700);
+}
+
+.doc-symbol-heading,
+.doc-object-name {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Blockquotes carry citations throughout this documentation -- primary sources,
+ * quoted verbatim. They are given the same structural left rule rather than a
+ * decorative one. */
+.md-typeset blockquote {
+  border-left: 2px solid var(--caliper-neutral-400);
+  color: var(--md-default-fg-color--light);
+}
+
+/* ------------------------------------------------------------------ *
+ * Chrome
+ * ------------------------------------------------------------------ */
+
+.md-header,
+.md-tabs {
+  box-shadow: none;
+  border-bottom: 1px solid var(--caliper-neutral-700);
+}
+
+/* The wordmark is lowercase monospace, matching `import drift_caliper` -- the
+ * mark is the line the engineer types. */
+.md-header__topic:first-child .md-ellipsis {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+/* ------------------------------------------------------------------ *
+ * mkdocstrings symbol badges
+ * ------------------------------------------------------------------ */
+
+/* mkdocstrings ships violet/amber/green badges for class / function / attribute
+ * kinds. Amber and green are two of this brand's three signal colours, so a
+ * reference page would be showing "advisory" and "in control" against Python
+ * symbols that have no measurement meaning at all.
+ *
+ * The kinds still need to be distinguishable, so they differentiate by value:
+ * class darkest, function and method mid, attribute lightest. Each badge also
+ * carries its name as text, so the distinction never rests on tone alone. */
+:root,
+[data-md-color-scheme="default"] {
+  --doc-symbol-class-fg-color: var(--caliper-neutral-900);
+  --doc-symbol-class-bg-color: var(--caliper-neutral-200);
+  --doc-symbol-function-fg-color: var(--caliper-neutral-700);
+  --doc-symbol-function-bg-color: var(--caliper-neutral-200);
+  --doc-symbol-method-fg-color: var(--caliper-neutral-700);
+  --doc-symbol-method-bg-color: var(--caliper-neutral-200);
+  --doc-symbol-attribute-fg-color: var(--caliper-neutral-500);
+  --doc-symbol-attribute-bg-color: var(--caliper-neutral-100);
+  --doc-symbol-module-fg-color: var(--caliper-neutral-900);
+  --doc-symbol-module-bg-color: var(--caliper-neutral-200);
+}
+
+[data-md-color-scheme="slate"] {
+  --doc-symbol-class-fg-color: var(--caliper-neutral-100);
+  --doc-symbol-class-bg-color: var(--caliper-neutral-700);
+  --doc-symbol-function-fg-color: var(--caliper-neutral-300);
+  --doc-symbol-function-bg-color: var(--caliper-neutral-700);
+  --doc-symbol-method-fg-color: var(--caliper-neutral-300);
+  --doc-symbol-method-bg-color: var(--caliper-neutral-700);
+  --doc-symbol-attribute-fg-color: var(--caliper-neutral-400);
+  --doc-symbol-attribute-bg-color: var(--caliper-neutral-800);
+  --doc-symbol-module-fg-color: var(--caliper-neutral-100);
+  --doc-symbol-module-bg-color: var(--caliper-neutral-700);
+}
+
+/* A symbol name broken across lines reads as two names. Table cells are the
+ * one place narrow enough for it to happen. */
+.md-typeset table:not([class]) code {
+  white-space: nowrap;
+}

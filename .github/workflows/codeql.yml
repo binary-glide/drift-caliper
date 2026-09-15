@@ -1,0 +1,58 @@
+# CodeQL (BIN-129).
+#
+# Advanced setup -- a workflow file -- rather than GitHub's "default setup",
+# which BIN-129 originally planned for. Default setup runs CodeQL without a
+# workflow file, which is less to maintain but publishes no
+# `actions/workflows/codeql.yml/badge.svg`. The README carries a CodeQL badge,
+# and a badge pointing at a workflow that does not exist renders broken.
+#
+# ⚠️ CodeQL is free on public repositories and requires a paid GitHub Code
+# Security licence on private ones. This repository is private until the soft
+# launch, so the guard below makes the job a no-op rather than a red X: without
+# it, every run fails with "Advanced Security must be enabled for this
+# repository to use code scanning" and the badge is red for reasons that have
+# nothing to do with the code.
+#
+# Expect it to find nothing, and do not read that as failure. Caliper has zero
+# occurrences of every security-relevant sink CodeQL's Python queries target --
+# no subprocess, pickle, eval, exec, os.system, open, yaml, requests, urllib,
+# socket, or tempfile anywhere in src/. The value here is credibility on a
+# thread where someone is deciding whether to trust a correctness library, not
+# findings. If it DOES report something, that is a genuine surprise worth
+# stopping for.
+#
+# Action version verified live against the GitHub releases API on 2026-09-15:
+# github/codeql-action codeql-bundle-v2.27.0 (2026-09-09).
+name: CodeQL
+
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+    branches: [trunk]
+  schedule:
+    # Weekly, so a newly published query reaches the codebase without waiting
+    # for the next commit.
+    - cron: "27 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyse:
+    name: analyse
+    # The guard described above. Remove nothing here when the repository goes
+    # public -- the condition simply starts evaluating true.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@v4
