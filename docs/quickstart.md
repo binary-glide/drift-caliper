@@ -8,6 +8,15 @@ thing](#the-whole-thing) at the bottom substitutes a stub provider and **runs
 unattended, exactly as printed**, including the output shown beneath it.
 
 ```bash
+uv add drift-caliper
+```
+
+<!-- uv leads because it is what this project builds with and what most new
+     Python projects reach for. pip stays because this page's sibling, the
+     README, is also the PyPI long description -- read by people on poetry,
+     pdm, conda and plain pip, none of whom should have to translate. -->
+
+```bash
 pip install drift-caliper
 ```
 
