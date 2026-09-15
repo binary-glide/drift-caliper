@@ -368,10 +368,77 @@ def require_type(
     return value
 
 
+def require_exact_str(value: object, *, parameter: str, constraint: str) -> str:
+    """Reject a non-``str``, and return an accepted value as an **exact** ``str``.
+
+    For a parameter whose validity is a membership test against a fixed set of
+    allowed values. 🚨 **Membership calls ``__hash__``**, so testing
+    ``value in some_frozenset`` before knowing what ``value`` is hands control
+    to the caller: an unhashable object raises ``TypeError``, and a ``str``
+    subclass with a raising ``__hash__`` raises whatever it likes. Both escape
+    a public entry point as a non-``CaliperError`` (BIN-143).
+
+    ⚠️ **``isinstance(value, str)`` alone is not enough, and that is BIN-139's
+    lesson at a second site.** The check admits a ``str`` **subclass**, which
+    can still override ``__hash__``. What reaches the membership test has to
+    *be* an exact ``str``, so this returns a normalised value rather than only
+    validating one.
+
+    ⚠️ **``str.__str__(value)``, not ``str(value)``.** The latter dispatches to
+    the subclass's ``__str__``, which is hijackable exactly like ``__hash__``
+    and merely relocates the defect; the unbound base-class call cannot be
+    overridden.
+
+    ⚠️ **This deliberately does NOT reject ``str`` subclasses.** Tightening to
+    ``type(value) is str`` would close the leak and refuse every legitimate
+    subclass with it -- trading a leak for a false rejection, which is the
+    BIN-123 class.
+
+    🚨 **``context`` names the offending *type*, not the value** -- unlike
+    ``require_type`` beside it. This guard exists specifically because the
+    value misbehaves under ordinary operations, and ``repr()`` is an ordinary
+    operation: describing it could raise inside the error path and defeat the
+    error (BIN-118, and again at a second site on BIN-120). The type name reads
+    a class attribute and cannot execute caller code.
+
+    Parameters
+    ----------
+    value
+        The caller-supplied value to validate.
+    parameter
+        The name of the parameter being validated, for ``context``.
+    constraint
+        Human-readable statement of what would have been acceptable.
+
+    Returns
+    -------
+    str
+        ``value`` as an exact ``str``, safe to hash and compare.
+
+    Raises
+    ------
+    InvalidParameterError
+        ``value`` is not a ``str`` (``context["kind"] == "invalid"``).
+    """
+    if not isinstance(value, str):
+        raise InvalidParameterError(
+            f"{parameter} must be a string",
+            context={
+                "parameter": parameter,
+                "constraint": constraint,
+                "kind": "invalid",
+                "provided_type": type(value).__name__,
+            },
+            recovery_hint=(f"Pass a string for {parameter}. {constraint}"),
+        )
+    return str.__str__(value)
+
+
 __all__ = [
     "MIN_TARGET_ARL",
     "VERIFIED_ARL_FLOOR",
     "classify_target_arl",
+    "require_exact_str",
     "require_real_number",
     "require_type",
 ]

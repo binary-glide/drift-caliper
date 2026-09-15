@@ -68,6 +68,7 @@ from enum import Enum
 from typing import Any
 
 from drift_caliper.baseline import (
+    DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittingAdvisory,
     compare_provenance,
@@ -122,6 +123,34 @@ _SIGMA_UNDERFLOW_SCORES = [0.0] * 99 + [5e-324]
 _SHARED_PROVENANCE = _BASELINE.provenance_signature
 assert _SHARED_PROVENANCE is not None  # a sufficient baseline always has one
 _FITTED_EWMA = fit_ewma(_BASELINE, target_arl=370.0)
+# BIN-143: the only artefact carrying a `direction`, and therefore the only
+# one whose Phase II check membership-tests a caller-supplied value.
+_FITTED_CUSUM = fit_cusum(_BASELINE, target_arl=370.0)
+
+
+def _hash_hostile_baseline() -> Baseline:
+    """A sufficient baseline holding one score whose ``__hash__`` raises.
+
+    Built lazily, not at import: the point of these cases is that the object
+    survives ``Baseline.record()`` and detonates later, so constructing it
+    must not fail here.
+
+    ⚠️ ``model_construct`` is what makes it reachable. ``ScoringResult``'s
+    validator would coerce the subclass to an exact ``float``; that method
+    skips validation by design, and ``record()``'s
+    ``isinstance(result, ScoringResult)`` check passes the result anyway.
+    """
+    baseline = Baseline()
+    baseline.record(
+        ScoringResult.model_construct(
+            score=_HashRaisingFloat(8.0),
+            reasoning="hostile",
+            provenance=_SHARED_PROVENANCE,
+        )
+    )
+    for _ in range(DEFAULT_SUFFICIENCY_THRESHOLD):
+        baseline.record(ScoringResultFactory(provenance=_SHARED_PROVENANCE))
+    return baseline
 
 
 def _matching_scoring_result(score: float = 0.5) -> ScoringResult:
@@ -245,6 +274,39 @@ class _NonStrProvenanceArtefact:
 
     provenance_model_version = 123
     provenance_criteria = "rubric"
+
+
+class _HashRaisingStr(str):
+    """A ``str`` subclass whose ``__hash__`` raises -- BIN-143's input.
+
+    🚨 **Distinct from ``_HostileStr`` below, and the distinction is the
+    finding.** That one hijacks ``__eq__``/``__ne__`` and keeps a working
+    ``__hash__``, so it exercises ``COMPARISON_RAISES``. This one is the
+    mirror image: comparison is fine, **hashing** explodes. A membership
+    test against a frozenset of literals touches no caller ``__eq__`` at all
+    -- which is exactly the reasoning that excused ``fit_cusum``'s
+    ``direction`` from the grid -- and still hashes the caller's object
+    first.
+    """
+
+    def __hash__(self) -> int:
+        raise RuntimeError("hash exploded")
+
+
+class _HashRaisingFloat(float):
+    """A ``float`` subclass whose ``__hash__`` raises -- BIN-149's input.
+
+    ⚠️ **Reaches the numeric pipeline only via a validation bypass.**
+    ``ScoringResult``'s validator coerces a ``float`` subclass to an exact
+    ``float``, but ``model_construct()`` and ``model_copy(update=...)`` skip
+    validation **by design**, and ``Baseline.record()``'s
+    ``isinstance(result, ScoringResult)`` check passes such an instance.
+    A Pydantic annotation is a validation-time guarantee, not a
+    storage-time one.
+    """
+
+    def __hash__(self) -> int:
+        raise RuntimeError("float hash exploded")
 
 
 class _HostileStr(str):
@@ -389,6 +451,29 @@ class InputKind(Enum):
     conflating them would let an entry point look covered for one while
     missing the other entirely."""
 
+    HASH_RAISES = "hash_raises"
+    """An object whose ``__hash__`` raises, or that has none at all, when
+    Caliper uses it in a set/frozenset membership test or as a dict key.
+
+    🚨 **The kind that escaped BIN-136's own grid, and the reason it did is
+    the point.** ``fit_cusum``'s ``direction`` was excused from
+    ``COMPARISON_RAISES`` on the grounds that it is *"compared against a
+    frozenset of string literals"* -- true, and irrelevant: ``x in
+    frozenset(...)`` hashes **x**, the caller's object, before it compares
+    anything. A list leaked ``TypeError: unhashable type``; a ``str``
+    subclass with a raising ``__hash__`` leaked whatever it chose (BIN-143).
+
+    ⚠️ **Do not merge this into ``COMPARISON_RAISES``.** They are different
+    dunders reached by different operations, and the *reasoning* that excuses
+    one does not excuse the other -- which is exactly how this was missed. A
+    membership test can be entirely free of ``__eq__`` on caller data and
+    still hand the caller control via ``__hash__``.
+
+    ⚠️ The audit that found this also found a **second** site
+    (``Monitor._check_cusum``), reachable because Pydantic coerces a ``str``
+    subclass only during *validation*, which ``model_copy(update=...)`` and
+    ``model_construct()`` skip by design."""
+
     REGRESSION_ANCHOR = "regression_anchor"
     """Not a hostile input at all -- a legitimate call kept here to pin a
     previously-broken path, or to confirm an already-correct
@@ -501,6 +586,16 @@ class ExcludedEntryPoint:
 # ---------------------------------------------------------------------------
 
 _BASELINE_CASES = (
+    # BIN-149, found by BIN-143's membership audit. check_sufficiency()'s
+    # zero-variance probe builds `{observation.score for ...}`, which hashes
+    # every caller-supplied score. Tracked, not silenced: strict xfail, so the
+    # build fails when it is fixed and this entry is not removed.
+    HostileCase(
+        "hash_raising_score_in_sufficiency",
+        lambda: _hash_hostile_baseline().check_sufficiency(),
+        kind=InputKind.HASH_RAISES,
+        known_leak=KnownLeak(ticket="BIN-149", leaked_type=RuntimeError),
+    ),
     HostileCase(
         "record_none",
         lambda: Baseline().record(None),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
@@ -665,6 +760,13 @@ _JUDGE_CASES = (
 )
 
 _JUDGE_NA: Mapping[InputKind, str] = {
+    InputKind.HASH_RAISES: (
+        "Judge.create()/score() hash nothing caller-supplied. model_version and "
+        "criteria are narrowed by require_str() and stored on value objects; "
+        "agent_output/agent_input are type-guarded strings that are concatenated into "
+        "a prompt, never used as a set member or a dict key. The provider is called, "
+        "not hashed."
+    ),
     InputKind.OUT_OF_RANGE_VALUE: (
         "Neither Judge.create() nor Judge.score() takes a bounded numeric "
         "parameter. model_version and criteria are strings; agent_output is "
@@ -716,6 +818,11 @@ _MODEL_VERSION_CASES = (
 )
 
 _MODEL_VERSION_NA: Mapping[InputKind, str] = {
+    InputKind.HASH_RAISES: (
+        "ModelVersion holds one str field, validated by require_str() and never "
+        "placed in a set or used as a dict key inside the library. Equality between "
+        "two ModelVersions is Pydantic field-wise ==, which does not hash."
+    ),
     InputKind.NON_FINITE_FLOAT: (
         "Has no numeric field. ModelVersion wraps a single str value; "
         "no float reaches its constructor or any validator."
@@ -762,6 +869,10 @@ _SCORING_CRITERIA_CASES = (
 )
 
 _SCORING_CRITERIA_NA: Mapping[InputKind, str] = {
+    InputKind.HASH_RAISES: (
+        "Same as ModelVersion -- one validated str field, never hashed by any code "
+        "path Caliper owns."
+    ),
     InputKind.NON_FINITE_FLOAT: (
         "Has no numeric field. ScoringCriteria wraps a single str value; "
         "no float reaches its constructor or any validator."
@@ -816,6 +927,14 @@ _SCORING_RESULT_CASES = (
 )
 
 _SCORING_RESULT_NA: Mapping[InputKind, str] = {
+    InputKind.HASH_RAISES: (
+        "ScoringResult's own constructor hashes nothing: score is a float checked by "
+        "require_real_number(), reasoning and provenance are stored as given. ⚠️ Its "
+        ".score IS hashed downstream, by set(scores) in spc_numerics and the set "
+        "comprehension in Baseline -- but that is reached through Baseline/fit_*, "
+        "which carry the tracked BIN-149 cases, not through constructing a "
+        "ScoringResult."
+    ),
     InputKind.EMPTY_STRING: (
         "The only string field is reasoning, which has no non-blank "
         "requirement (ADR-006 section 7: 'No constraint is placed on "
@@ -866,6 +985,12 @@ _PROVENANCE_CASES = (
 # specific: `Provenance` is a two-field frozen value object over two other
 # value objects, so most kinds genuinely cannot reach it.
 _PROVENANCE_NA: Mapping[InputKind, str] = {
+    InputKind.HASH_RAISES: (
+        "Provenance holds two value objects, validated by require_instance(). "
+        "Comparison is Pydantic field-wise ==; nothing is hashed. compare_provenance "
+        "keys its mismatches dict by dimension NAME -- a module literal -- never by a "
+        "caller-supplied value."
+    ),
     InputKind.EMPTY_STRING: (
         "Holds ModelVersion and ScoringCriteria, not str -- deliberately, "
         "per ADR-006: `Provenance holds ModelVersion and ScoringCriteria, "
@@ -902,6 +1027,18 @@ _PROVENANCE_NA: Mapping[InputKind, str] = {
 }
 
 _MONITOR_CASES = (
+    # BIN-143, found by the audit rather than the report. `_check_cusum`
+    # membership-tests `artefact.direction`, and the artefact is
+    # caller-supplied. Reachable despite __init__'s isinstance narrowing and
+    # the `str` field annotation, because Pydantic coerces a subclass only
+    # during validation -- which model_copy(update=...) skips by design.
+    HostileCase(
+        "hash_raising_direction_on_artefact",
+        lambda: Monitor(
+            _FITTED_CUSUM.model_copy(update={"direction": _HashRaisingStr("two_sided")})
+        ).record(ScoringResultFactory(provenance=_SHARED_PROVENANCE)),
+        kind=InputKind.HASH_RAISES,
+    ),
     HostileCase(
         "construct_wrong_type",
         lambda: Monitor(
@@ -1037,6 +1174,15 @@ _COMPARE_PROVENANCE_CASES = (
 )
 
 _COMPARE_PROVENANCE_NA: Mapping[InputKind, str] = {
+    InputKind.HASH_RAISES: (
+        "The mismatches dict is keyed by dimension name ('model_version', "
+        "'scoring_criteria'), which are module-level literals. Probed provenance "
+        "values are normalised to exact str and compared with !=, never hashed. ⚠️ "
+        "Stated deliberately rather than by analogy with COMPARISON_RAISES: 'compared "
+        "against literals' was exactly the reasoning that wrongly excused fit_cusum's "
+        "direction (BIN-143), so this entry names the operation -- dict KEYING -- "
+        "rather than the comparison."
+    ),
     InputKind.OUT_OF_RANGE_VALUE: (
         "Takes no bounded value. Comparison is exact string equality on "
         "two dimensions; neither has a range to fall outside."
@@ -1055,6 +1201,17 @@ _COMPARE_PROVENANCE_NA: Mapping[InputKind, str] = {
 }
 
 _FIT_EWMA_CASES = (
+    # BIN-149. `_has_zero_variance` calls `set(scores)`, hashing every
+    # caller-supplied score. Shared by all three charts via spc_numerics, so
+    # fit_cusum reaches it too -- it carries its own HASH_RAISES cases for the
+    # separate `direction` defect, and this one is recorded here and on
+    # fit_ewma rather than three times.
+    HostileCase(
+        "hash_raising_score_in_zero_variance_probe",
+        lambda: fit_ewma(_hash_hostile_baseline(), target_arl=370.0),
+        kind=InputKind.HASH_RAISES,
+        known_leak=KnownLeak(ticket="BIN-149", leaked_type=RuntimeError),
+    ),
     HostileCase(
         "missing_target_arl",
         lambda: fit_ewma(_BASELINE, target_arl=None),
@@ -1135,6 +1292,37 @@ _FIT_EWMA_NA: Mapping[InputKind, str] = {
 }
 
 _FIT_CUSUM_CASES = (
+    # BIN-143. `direction` is the only parameter Caliper membership-tests, and
+    # `x in frozenset(...)` hashes x before comparing anything. All three of
+    # these leaked a non-CaliperError before the guard was reordered.
+    HostileCase(
+        "unhashable_list_direction",
+        lambda: fit_cusum(
+            _BASELINE,
+            target_arl=370.0,
+            direction=["two_sided"],  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        kind=InputKind.HASH_RAISES,
+    ),
+    HostileCase(
+        "unhashable_dict_direction",
+        lambda: fit_cusum(
+            _BASELINE,
+            target_arl=370.0,
+            direction={},  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        kind=InputKind.HASH_RAISES,
+    ),
+    HostileCase(
+        # ⚠️ A `str` SUBCLASS, for the reason _HostileStr documents: a plain
+        # hostile object is rejected by the type guard before it is hashed,
+        # so it would fill this cell without reaching the behaviour.
+        "hash_raising_str_subclass_direction",
+        lambda: fit_cusum(
+            _BASELINE, target_arl=370.0, direction=_HashRaisingStr("two_sided")
+        ),
+        kind=InputKind.HASH_RAISES,
+    ),
     HostileCase(
         "missing_target_arl",
         lambda: fit_cusum(_BASELINE, target_arl=None),
@@ -1202,11 +1390,31 @@ _FIT_CUSUM_NA: Mapping[InputKind, str] = {
         "constants (MIN_TARGET_ARL, reference_value bounds); "
         "direction is compared against a frozenset of string "
         "literals. No __eq__/__ne__ on caller-supplied objects is "
-        "invoked."
+        "invoked. "
+        "\n\n"
+        "CORRECTED 2026-09-15 (BIN-143). The sentences above remain true "
+        "and were never the whole story: this entry used to be the reason "
+        "`direction` was excused from the grid entirely, on the strength "
+        "of 'compared against a frozenset of string literals'. That is "
+        "true of __eq__ and says nothing about __hash__, which `in` calls "
+        "on the CALLER's object before any comparison happens. The "
+        "membership hazard now lives under HASH_RAISES, which is a "
+        "separate kind for exactly this reason."
     ),
 }
 
 _FIT_SHEWHART_CASES = (
+    # BIN-149. `_has_zero_variance` calls `set(scores)`, hashing every
+    # caller-supplied score. Shared by all three charts via spc_numerics, so
+    # fit_cusum reaches it too -- it carries its own HASH_RAISES cases for the
+    # separate `direction` defect, and this one is recorded here and on
+    # fit_ewma rather than three times.
+    HostileCase(
+        "hash_raising_score_in_zero_variance_probe",
+        lambda: fit_shewhart(_hash_hostile_baseline(), target_arl=370.0),
+        kind=InputKind.HASH_RAISES,
+        known_leak=KnownLeak(ticket="BIN-149", leaked_type=RuntimeError),
+    ),
     HostileCase(
         "missing_target_arl",
         lambda: fit_shewhart(_BASELINE, target_arl=None),

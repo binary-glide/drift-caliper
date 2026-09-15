@@ -30,6 +30,7 @@ from drift_caliper.baseline.domain.fitted_control_limits import FittedControlLim
 from drift_caliper.baseline.domain.fitted_cusum import FittedCUSUM
 from drift_caliper.baseline.domain.fitted_ewma import FittedEWMA
 from drift_caliper.baseline.domain.fitted_shewhart import FittedShewhart
+from drift_caliper.baseline.domain.parameter_guards import require_exact_str
 from drift_caliper.errors import InvalidParameterError
 from drift_caliper.measurement import ScoringResult
 from drift_caliper.monitoring.domain.delivery_failure import DeliveryFailure
@@ -41,6 +42,9 @@ from drift_caliper.monitoring.domain.signal_receiver import SignalReceiver
 # arm detects a decreasing shift (degradation). "two_sided" checks both.
 _DIRECTIONS_WITH_UPPER_ARM = frozenset({"two_sided", "upper"})
 _DIRECTIONS_WITH_LOWER_ARM = frozenset({"two_sided", "lower"})
+# The union, for the error message only -- the two sets above are what the
+# check actually consults.
+_VALID_ARTEFACT_DIRECTIONS = _DIRECTIONS_WITH_UPPER_ARM | _DIRECTIONS_WITH_LOWER_ARM
 
 # BIN-118 fallbacks: used only if an object's own __repr__ (or, in turn,
 # type(obj).__name__) raises. Constants, not derived -- there is nothing
@@ -494,8 +498,30 @@ class Monitor:
         self._cusum_s_hi = max(0.0, self._cusum_s_hi + standardised - k)
         self._cusum_s_lo = max(0.0, self._cusum_s_lo - standardised - k)
 
-        if artefact.direction in _DIRECTIONS_WITH_UPPER_ARM and self._cusum_s_hi > h:
+        # 🚨 Narrow before the membership tests. `in` on a frozenset calls
+        # `__hash__`, and `artefact` is caller-supplied -- so a `direction`
+        # that is not an exact `str` hands control to the caller from inside
+        # `record()` (BIN-143, the same defect `fit_cusum` has at its own
+        # membership site).
+        #
+        # ⚠️ Reachable despite `__init__`'s isinstance narrowing and the
+        # `str` field annotation, because Pydantic's *validation* is what
+        # coerces a subclass to an exact `str` -- and `model_copy(update=...)`
+        # and `model_construct()` both skip validation by design. Verified:
+        # both routes put a raising-`__hash__` subclass on the field and
+        # leaked a `RuntimeError` out of `record()`.
+        #
+        # Guarding here rather than at construction is deliberate: it protects
+        # the behaviour regardless of how the artefact was built, which is the
+        # only version of this check that cannot be walked around.
+        direction = require_exact_str(
+            artefact.direction,
+            parameter="direction",
+            constraint=f"must be one of {sorted(_VALID_ARTEFACT_DIRECTIONS)}",
+        )
+
+        if direction in _DIRECTIONS_WITH_UPPER_ARM and self._cusum_s_hi > h:
             return False, "upper"
-        if artefact.direction in _DIRECTIONS_WITH_LOWER_ARM and self._cusum_s_lo > h:
+        if direction in _DIRECTIONS_WITH_LOWER_ARM and self._cusum_s_lo > h:
             return False, "lower"
         return True, None

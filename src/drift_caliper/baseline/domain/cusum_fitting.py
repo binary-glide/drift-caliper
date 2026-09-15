@@ -95,6 +95,7 @@ from drift_caliper.baseline.domain.fitted_cusum import FittedCUSUM
 from drift_caliper.baseline.domain.parameter_guards import (
     MIN_TARGET_ARL,
     _require_target_arl,
+    require_exact_str,
     require_real_number,
     require_type,
 )
@@ -266,8 +267,16 @@ def _validate_direction(direction: str | None) -> str:
     """
     if direction is None:
         return DEFAULT_DIRECTION
+    constraint = f"must be one of {sorted(_VALID_DIRECTIONS)}"
+    # 🚨 Narrow to an exact `str` BEFORE the membership test. `in` on a
+    # frozenset calls `__hash__`, so testing first hands control to the
+    # caller: a list or dict raises `TypeError: unhashable type`, and a `str`
+    # subclass with a raising `__hash__` raises whatever it likes -- all of
+    # them escaping as non-`CaliperError` (BIN-143). Do not reorder these.
+    direction = require_exact_str(
+        direction, parameter="direction", constraint=constraint
+    )
     if direction not in _VALID_DIRECTIONS:
-        constraint = f"must be one of {sorted(_VALID_DIRECTIONS)}"
         raise InvalidParameterError(
             "direction is not a recognised value",
             context={
