@@ -8,7 +8,9 @@
 # Versions verified live against PyPI on 2026-09-15.
 site_name: Caliper
 site_description: Statistical Process Control for LLM-as-a-judge agent quality scores
-site_url: https://binary-glide.github.io/drift-caliper/
+# Canonical URL. Read the Docs serves per-version paths (/en/latest/,
+# /en/stable/, /en/0.1.0/); this names the one search engines should index.
+site_url: https://drift-caliper.readthedocs.io/en/latest/
 repo_url: https://github.com/binary-glide/drift-caliper
 repo_name: binary-glide/drift-caliper
 copyright: Apache-2.0

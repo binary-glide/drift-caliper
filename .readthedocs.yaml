@@ -1,0 +1,46 @@
+# Read the Docs build configuration (BIN-86).
+#
+# Chosen over GitHub Pages on 2026-09-15, after the first pass had defaulted to
+# Pages without arguing for it. The deciding reason is versioning: this library
+# has already made one breaking change to a documented range (ADR-011 narrowed
+# the legal target_arl), and a reader on 0.1.0a1 seeing a later version's
+# refusal behaviour gets an authoritative-looking answer that is wrong for their
+# install -- the exact failure class Caliper exists to prevent. Read the Docs
+# builds and serves per-version docs without a plugin; Pages needs `mike`.
+#
+# Pull request previews come with it, which the Pages setup had no equivalent
+# for.
+#
+# ⚠️ The project slug must be `drift-caliper`. `caliper.readthedocs.io` is
+# TAKEN by an unrelated project -- checked, not assumed, after `caliper` and
+# `caliper-ai` both turned out to be taken on PyPI.
+#
+# Schema and the uv pattern verified live against
+# docs.readthedocs.com/platform/stable on 2026-09-15.
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    # Matches the top of the support matrix in pyproject's classifiers. The
+    # docs build imports the package for mkdocstrings, so this is the
+    # interpreter the published API reference is generated under.
+    python: "3.13"
+
+python:
+  install:
+    # Read the Docs supports uv natively here, and respects uv.lock -- so the
+    # docs build resolves to the same pins CI does rather than a fresh,
+    # unpinned solve. Using build.jobs instead would bypass that.
+    - method: uv
+      command: sync
+      groups:
+        - docs
+
+mkdocs:
+  configuration: mkdocs.yml
+  # The equivalent of `mkdocs build --strict`, which CI already enforces. The
+  # site is generated FROM the docstrings, so a reference that stops resolving
+  # is a defect, not a formatting nit -- and it should fail the published build
+  # too, not only the pre-merge one.
+  fail_on_warning: true

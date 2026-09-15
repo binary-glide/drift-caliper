@@ -1,21 +1,21 @@
-# Documentation site (BIN-86).
+# Documentation build (BIN-86).
 #
-# Two jobs, deliberately split. `build` runs on every pull request so a broken
-# link or an unresolvable docstring reference fails review rather than
-# production -- mkdocs.yml sets `strict: true`, so both are build errors. The
-# site is generated FROM the docstrings, which means a citation that stops
-# resolving is a real defect, not a formatting nit.
+# ⚠️ **This workflow does not publish anything.** Read the Docs builds and
+# hosts the site from `.readthedocs.yaml`, including a preview for every pull
+# request, so the published docs do not depend on this job at all.
 #
-# `deploy` runs only on trunk.
+# It exists anyway, for two reasons worth stating so nobody deletes it as
+# redundant:
 #
-# ⚠️ GitHub Pages on a PRIVATE repository requires a paid plan. The deploy job
-# is guarded on visibility for the same reason the CodeQL job is: while the
-# repository is private it should be a no-op, not a red X. It starts working
-# when the repository goes public, with no edit here.
+#   * it is faster feedback, in the same check run as the other gates, rather
+#     than on a separate service the reviewer has to go and look at;
+#   * `mkdocs.yml` sets `strict: true`, so a broken link or an unresolvable
+#     docstring reference is a build ERROR -- and the site is generated FROM
+#     the docstrings, which makes a citation that stopped resolving a real
+#     defect rather than a formatting nit.
 #
-# Action versions verified live against the GitHub releases API on 2026-09-15:
-# actions/configure-pages v6.0.0, actions/upload-pages-artifact v5.0.0,
-# actions/deploy-pages v5.0.1.
+# Read the Docs enforces the same thing via `mkdocs.fail_on_warning`, so the
+# two agree by construction; this one just fails sooner.
 name: Docs
 
 on:
@@ -41,22 +41,4 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --group docs
       - run: uv run --group docs mkdocs build --strict
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
 
-  deploy:
-    name: deploy
-    needs: build
-    if: github.ref == 'refs/heads/trunk' && github.event.repository.visibility == 'public'
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    permissions:
-      pages: write
-      id-token: write
-    steps:
-      - uses: actions/configure-pages@v6
-      - id: deployment
-        uses: actions/deploy-pages@v5

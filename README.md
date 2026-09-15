@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/drift-caliper.svg)](https://pypi.org/project/drift-caliper/)
 [![Python](https://img.shields.io/pypi/pyversions/drift-caliper.svg)](https://pypi.org/project/drift-caliper/)
 [![Licence](https://img.shields.io/badge/licence-Apache--2.0-475569.svg)](https://github.com/binary-glide/drift-caliper/blob/trunk/LICENSE)
-[![Docs](https://github.com/binary-glide/drift-caliper/actions/workflows/docs.yml/badge.svg?branch=trunk)](https://binary-glide.github.io/drift-caliper/)
+[![Documentation](https://readthedocs.org/projects/drift-caliper/badge/?version=latest)](https://drift-caliper.readthedocs.io/en/latest/)
 [![CodeQL](https://github.com/binary-glide/drift-caliper/actions/workflows/codeql.yml/badge.svg?branch=trunk)](https://github.com/binary-glide/drift-caliper/security/code-scanning)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/binary-glide/drift-caliper/badge)](https://securityscorecards.dev/viewer/?uri=github.com/binary-glide/drift-caliper)
 
@@ -186,12 +186,12 @@ checked.
 
 ## Documentation
 
-**<https://binary-glide.github.io/drift-caliper/>**
+**<https://drift-caliper.readthedocs.io/en/latest/>**
 
-- [Quickstart](https://binary-glide.github.io/drift-caliper/quickstart/) — judge to signal, complete and runnable
-- [What the numbers mean](https://binary-glide.github.io/drift-caliper/concepts/) — ARL₀, Phase I and Phase II, assuming no SPC background
-- [Choosing a chart](https://binary-glide.github.io/drift-caliper/charts/) — EWMA, CUSUM or Shewhart
-- [Decisions](https://binary-glide.github.io/drift-caliper/architecture/) — every architectural decision, including the rejected ones
+- [Quickstart](https://drift-caliper.readthedocs.io/en/latest/quickstart/) — judge to signal, complete and runnable
+- [What the numbers mean](https://drift-caliper.readthedocs.io/en/latest/concepts/) — ARL₀, Phase I and Phase II, assuming no SPC background
+- [Choosing a chart](https://drift-caliper.readthedocs.io/en/latest/charts/) — EWMA, CUSUM or Shewhart
+- [Decisions](https://drift-caliper.readthedocs.io/en/latest/architecture/) — every architectural decision, including the rejected ones
 
 ## Why the decisions are published
 
