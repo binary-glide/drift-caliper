@@ -1,4 +1,13 @@
-# Caliper
+<!-- The wordmark is lowercase monospace: it is the line the engineer types.
+     brand.md specifies an SVG via <picture> with light/dark variants, which is
+     the "primary vehicle" for brand on GitHub. That is not used here yet for a
+     verified reason: PyPI's readme_renderer STRIPS <source>, so the dark
+     variant is dropped, and a relative src does not resolve on PyPI at all --
+     it needs an absolute URL, which only works once this repository is public.
+     A code span is lowercase and monospace on both surfaces today, and keeps a
+     real text <h1> for screen readers and scrapers. Swap at soft launch. -->
+
+# `caliper`
 
 [![CI](https://github.com/binary-glide/drift-caliper/actions/workflows/ci.yml/badge.svg?branch=trunk)](https://github.com/binary-glide/drift-caliper/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/binary-glide/drift-caliper/branch/trunk/graph/badge.svg)](https://codecov.io/gh/binary-glide/drift-caliper)
