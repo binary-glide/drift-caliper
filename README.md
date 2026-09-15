@@ -150,9 +150,12 @@ Three charts, all calibrated against published ARL tables:
 | **CUSUM** | sustained shifts of a known size | `fit_cusum` |
 | **Shewhart I** | large, abrupt single-point failures | `fit_shewhart` |
 
-Binary pass/fail rubrics are **not supported**. A p-chart was evaluated and
-rejected — see [ADR-001's 2026-09-13 amendment](docs/architecture/adr/001-spc-engine-in-house-with-scipy.md)
-for why, and what would replace it.
+Binary pass/fail rubrics are **not supported yet**. A p-chart was evaluated and
+**rejected** — its control limits are integer counts, so the achievable false
+alarm rates are discrete and it cannot be calibrated to a target you choose.
+**Bernoulli EWMA and Bernoulli CUSUM are the decided replacement**, and neither
+is built. See [ADR-001's 2026-09-13 amendment](docs/architecture/adr/001-spc-engine-in-house-with-scipy.md)
+for the full evaluation.
 
 **The judge model version is a required parameter.** A missing or blank one
 raises `InvalidParameterError`; it does not warn and it does not default. Every

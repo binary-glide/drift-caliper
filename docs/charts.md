@@ -163,14 +163,54 @@ rejected because it makes the chart non-deterministic: the same data could
 signal on one run and not the next, which is unacceptable for a library whose
 claim is auditability.
 
-The honest answer for pass/fail data is to aggregate into **non-overlapping
-batches** and monitor the batch pass rate as a continuous score. Watch the
-independence assumption above, and note that the normal approximation needs both
-`n·p > 5` and `n·(1−p) > 5` — with a batch of 20, the second condition excludes
-pass rates above 0.75, which is to say it excludes the well-behaved agent.
+⚠️ **The failure is intrinsic to the data type, not to this implementation.**
+For binary data a single observation carries almost no information — at a 10%
+failure rate, one failure is unremarkable. Detecting an acute change therefore
+needs a *window*, and that window is the subgrouping that breaks calibration.
+**The Shewhart role simply is not available for binary data.**
+
+### What will replace it
+
+**Two charts, and neither needs batching at all:**
+
+| chart | analogue of | calibrates to a target ARL₀ |
+|---|---|---|
+| **Bernoulli EWMA** | EWMA — and likewise the intended default | within ~0.1% |
+| **Bernoulli CUSUM** | CUSUM | within 0.01–1% |
+
+They calibrate where the p-chart cannot because their levers — λ and *k* — are
+the library's to choose, whereas the p-chart's lever is *n*, which is your data
+rate. Both consume **individual** Bernoulli observations, so the 100-observation
+Phase I minimum means 100 judgements, not 100 batches.
+
+!!! warning "Neither is implemented yet"
+
+    This is a settled decision, not a shipped capability. Nothing in
+    `drift_caliper` fits a Bernoulli chart today, and `Judge.score()` still
+    rejects a `bool` score rather than guessing what to do with it.
+
+    It is stated here because it changes what you should build in the
+    meantime: **a batching pipeline is a workaround you would later unwind**,
+    not a step towards the real answer.
+
+### What to do today
+
+Aggregate into **non-overlapping batches** and monitor the batch pass rate as a
+continuous score on one of the three charts above.
+
+⚠️ **Non-overlapping matters.** A *rolling* pass rate makes consecutive values
+share most of their observations, which violates the independence the
+moving-range sigma estimate assumes — you would leave one silently-wrong chart
+for another.
+
+⚠️ The normal approximation also needs **both** `n·p > 5` and `n·(1−p) > 5`.
+With a batch of 20, the second condition excludes pass rates above 0.75 — which
+is to say it excludes the well-behaved agent, the most likely reader.
 
 See [ADR-001](architecture/adr/001-spc-engine-in-house-with-scipy.md) for the
-full evaluation and what a Bernoulli CUSUM would offer instead.
+full evaluation, the measured ARL figures, and the one question still open:
+where the in-control rate comes from, and whether the baseline-size analysis
+transfers to it.
 
 ## Can I run more than one?
 
