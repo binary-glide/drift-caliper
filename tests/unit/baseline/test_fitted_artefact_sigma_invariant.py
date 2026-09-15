@@ -42,7 +42,7 @@ import math
 
 import pytest
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedCUSUM,
@@ -52,7 +52,7 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import InvalidParameterError
+from drift_caliper.errors import InvalidParameterError
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 _SHAPE_TEST_TARGET_ARL = 370.0

@@ -1,7 +1,7 @@
 """BIN-121 (part 2) -- the exception-contract audit.
 
 **The rule:** any exception escaping a public entry point in
-``caliper.__all__`` must be a ``CaliperError`` (ADR-002/ADR-008), carrying a
+``drift_caliper.__all__`` must be a ``CaliperError`` (ADR-002/ADR-008), carrying a
 non-empty ``category`` and a ``context`` mapping. The rule was already
 written down -- ``CLAUDE.md``'s ``BIN-109`` note states it in as many
 words. Nothing enforced it, and five separate leaks
@@ -12,7 +12,7 @@ on a different ticket, over the space of a few days. This file is what
 turns "we know the rule" into a gate.
 
 See ``tests/support/exception_contract_registry.py`` for the registry this
-file drives: a mapping from every name in ``caliper.__all__`` to either how
+file drives: a mapping from every name in ``drift_caliper.__all__`` to either how
 it is exercised (a tuple of :class:`HostileCase`\\s) or why it is excluded
 (a stated reason, never a silent omission).
 
@@ -34,7 +34,7 @@ so a real regression cannot quietly reappear behind a stale marker either.
 **BIN-104 was originally 7 cases; all 7 are now closed** and it no longer
 appears in the tally above. ``ModelVersion``, ``ScoringCriteria``,
 ``ScoringResult`` and ``Provenance`` each gained a ``mode="before"``
-``@field_validator`` (``caliper.measurement.domain.type_guards``) that
+``@field_validator`` (``drift_caliper.measurement.domain.type_guards``) that
 runs ahead of Pydantic's core type coercion and raises
 ``InvalidParameterError`` for a wrong-typed constructor argument, instead
 of letting Pydantic's own coercion reject it first as a raw
@@ -61,7 +61,7 @@ used to intercept those two calls with its own environment-dependent
 Both used to leak a stable, ordinary ``AttributeError``/``TypeError``
 instead -- identically with or without the beartype hook installed --
 which is what let ``BIN-126`` add the same
-``caliper.baseline.domain.parameter_guards`` guard the other charts
+``drift_caliper.baseline.domain.parameter_guards`` guard the other charts
 already carried, rather than designing a fourth convention.
 
 ## Why three tickets, not one
@@ -76,7 +76,7 @@ the other two:
   never reached Caliper's own validation code at all. ``ModelVersion``,
   ``ScoringCriteria``, ``ScoringResult`` and ``Provenance`` now each carry
   a ``mode="before"`` ``@field_validator``
-  (``caliper.measurement.domain.type_guards``) that runs ahead of that
+  (``drift_caliper.measurement.domain.type_guards``) that runs ahead of that
   core coercion. ⚠️ ``Provenance`` was in scope despite having **no field
   validator by design** (ADR-006: "there is nothing left to validate
   here" -- its invariant is structural, inherited from ``ModelVersion``/
@@ -96,7 +96,7 @@ the other two:
   ``fit_shewhart``, ``Baseline.check_sufficiency``, ``Judge.score`` and --
   closing the last two -- ``fit_ewma`` all now validate with a shared,
   behavioural (not nominal) guard
-  (``caliper.baseline.domain.parameter_guards``) that keeps accepting
+  (``drift_caliper.baseline.domain.parameter_guards``) that keeps accepting
   ``int``/``np.float32``/``np.float64``/``np.int64`` and rejects ``bool``
   explicitly, before falling back to a plain ``isinstance`` check for
   non-numeric parameters like ``baseline``. ``BIN-130`` removed the thing
@@ -111,7 +111,7 @@ the other two:
   (no guard equivalent to ``Monitor``'s ``_safe_repr``) used to read a
   caller-supplied object's attributes directly and let whatever that access
   raised propagate unchanged. All three now go through
-  ``caliper.baseline.domain.attribute_probe`` -- one shared, guarded probe
+  ``drift_caliper.baseline.domain.attribute_probe`` -- one shared, guarded probe
   used by both bounded contexts (``baseline`` and ``monitoring``) rather
   than two independently-guarded copies -- which distinguishes "attribute
   absent" from "attribute access raised" in ``context`` rather than
@@ -209,8 +209,8 @@ from typing import Any
 
 import pytest
 
-import caliper
-from caliper.errors import CaliperError
+import drift_caliper
+from drift_caliper.errors import CaliperError
 from tests.support.exception_contract_registry import (
     EXCLUDED,
     EXERCISABLE,
@@ -231,22 +231,22 @@ _NOT_CONTRACT_VIOLATIONS: tuple[type[BaseException], ...] = (MemoryError,)
 
 
 def test_every_public_name_is_classified() -> None:
-    """Every name in ``caliper.__all__`` is either exercisable or excluded.
+    """Every name in ``drift_caliper.__all__`` is either exercisable or excluded.
 
     This is the meta-test the whole registry exists to make possible
     (mirrors ``BIN-124``'s
     ``test_baseline_scores_strategy_never_draws_a_baseline_the_library_rejects``):
-    adding a new export to ``caliper.__all__`` without adding it to either
+    adding a new export to ``drift_caliper.__all__`` without adding it to either
     registry in ``tests/support/exception_contract_registry.py`` fails
     here immediately, rather than silently shipping unaudited. Also
     guards against the opposite mistake -- a name classified in *both*
     registries, or a registry entry for a name no longer exported at all.
     """
-    public_names = frozenset(caliper.__all__)
+    public_names = frozenset(drift_caliper.__all__)
 
     unclassified = public_names - _EXCLUDED_NAMES - _EXERCISABLE_NAMES
     assert not unclassified, (
-        f"caliper.__all__ names with no classification in "
+        f"drift_caliper.__all__ names with no classification in "
         f"tests/support/exception_contract_registry.py: {sorted(unclassified)}. "
         "Add each to EXERCISABLE (with hostile cases) or EXCLUDED (with a "
         "stated reason)."
@@ -261,7 +261,7 @@ def test_every_public_name_is_classified() -> None:
     stale_registry_entries = (_EXCLUDED_NAMES | _EXERCISABLE_NAMES) - public_names
     assert not stale_registry_entries, (
         f"tests/support/exception_contract_registry.py classifies names no "
-        f"longer in caliper.__all__: {sorted(stale_registry_entries)} -- "
+        f"longer in drift_caliper.__all__: {sorted(stale_registry_entries)} -- "
         "remove the stale entry."
     )
 

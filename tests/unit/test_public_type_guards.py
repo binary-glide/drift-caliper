@@ -43,7 +43,7 @@ enough to prove:
 
 **This section originally documented a live defect, measured by direct
 execution before this ticket's own fix landed.** ``tests/conftest.py`` used
-to hook ``beartype_package("caliper.baseline.domain.ewma_fitting")`` --
+to hook ``beartype_package("drift_caliper.baseline.domain.ewma_fitting")`` --
 covering ``fit_ewma`` itself, a public entry point -- and beartype's
 default ``is_pep484_tower=False`` (verified against the installed
 ``beartype==0.22.9``) meant ``fit_ewma``'s ``float``-annotated parameters
@@ -57,7 +57,7 @@ Only ``np.float64`` (a genuine ``float`` subclass) was unaffected.
 
 **BIN-130 fixed this by moving the calibration internals
 (``_calibrate_limit_multiplier``, ``_ewma_asymptotic_std_ratio``,
-``_in_control_arl``) into ``caliper.baseline.domain.ewma_numerics``, hooked
+``_in_control_arl``) into ``drift_caliper.baseline.domain.ewma_numerics``, hooked
 there instead, and normalising every value crossing that boundary to
 ``float`` inside ``fit_ewma`` before calling into it** -- see that
 module's docstring and ``ewma_fitting.fit_ewma``'s own comment at the call
@@ -70,14 +70,14 @@ The ``float(...)`` cast is a boundary normalisation, not a validation
 step -- it rejects nothing ``fit_ewma`` did not already accept, and it
 makes ``fit_ewma`` consistent with ``fit_cusum``/``fit_shewhart``, whose
 own numeric parameters are already normalised the same way by
-``caliper.baseline.domain.parameter_guards.require_real_number``.
+``drift_caliper.baseline.domain.parameter_guards.require_real_number``.
 
 ``fit_ewma``'s numeric-acceptance tests below are therefore now plain,
 environment-independent regression guards, exactly like ``fit_cusum``'s
 and ``fit_shewhart``'s. What BIN-130 did **not** touch is the *reject*
 direction: BIN-130 alone left ``fit_ewma`` with no guard against a
 wrong-typed or ``bool``-typed argument. **BIN-126 closes that gap**, adding
-the identical ``caliper.baseline.domain.parameter_guards`` guard
+the identical ``drift_caliper.baseline.domain.parameter_guards`` guard
 ``fit_cusum``/``fit_shewhart`` already carried (``require_type`` on
 ``baseline``, ``require_real_number`` on ``target_arl``/
 ``smoothing_param``) -- so the bool-rejection tests for ``fit_ewma``
@@ -112,15 +112,15 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     Baseline,
     fit_cusum,
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import CaliperError, InvalidParameterError
-from caliper.measurement import ScoringResult
-from caliper.monitoring import Monitor
+from drift_caliper.errors import CaliperError, InvalidParameterError
+from drift_caliper.measurement import ScoringResult
+from drift_caliper.monitoring import Monitor
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 from tests.support.baseline_strategies import (
     FITTABLE_PROBE_SCORES,

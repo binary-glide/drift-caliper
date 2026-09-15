@@ -51,7 +51,7 @@ import re
 import tokenize
 
 _REPO = pathlib.Path(__file__).resolve().parents[2]
-_SRC = _REPO / "src" / "caliper"
+_SRC = _REPO / "src" / "drift_caliper"
 
 
 def _source_files() -> list[pathlib.Path]:

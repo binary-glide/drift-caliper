@@ -39,7 +39,7 @@ below exercises it directly at the Phase I boundary, not only through
 BIN-68's Phase II ``compare_provenance()`` path.
 
 ``Baseline.record()`` is a scaffold that raises ``NotImplementedError``
-(see ``src/caliper/baseline/domain/baseline.py``) -- every test below that
+(see ``src/drift_caliper/baseline/domain/baseline.py``) -- every test below that
 calls it is expected to fail for that reason until ``domain-implementer``
 replaces the scaffold. ``uv run pytest`` therefore fails: that is the
 correct state for this ticket (TDD red phase).
@@ -60,13 +60,18 @@ from dataclasses import dataclass
 import pytest
 from pydantic import ValidationError
 
-from caliper.baseline import Baseline
-from caliper.errors import (
+from drift_caliper.baseline import Baseline
+from drift_caliper.errors import (
     CaliperError,
     InvalidObservationError,
     ProvenanceMismatchError,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"
@@ -700,7 +705,7 @@ def test_repr_reports_class_name_and_observation_count() -> None:
     """``repr(baseline)`` must be a useful REPL/log/debugger representation.
 
     Before BIN-110, ``Baseline`` had no ``__repr__`` and printed as
-    ``<caliper.baseline.domain.baseline.Baseline object at 0x...>`` --
+    ``<drift_caliper.baseline.domain.baseline.Baseline object at 0x...>`` --
     useless in a REPL, a log line, or a debugger (``CLAUDE.md``: "Every
     public type reprs usefully"). This does not pin an exact format string
     (an implementation detail) -- it pins the two facts a useful repr must

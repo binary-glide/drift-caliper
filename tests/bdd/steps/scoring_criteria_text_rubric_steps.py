@@ -17,8 +17,8 @@ from dataclasses import dataclass
 
 from pytest_bdd import given, then, when
 
-from caliper.errors import CaliperError, InvalidParameterError
-from caliper.measurement import ScoringCriteria
+from drift_caliper.errors import CaliperError, InvalidParameterError
+from drift_caliper.measurement import ScoringCriteria
 
 
 @dataclass

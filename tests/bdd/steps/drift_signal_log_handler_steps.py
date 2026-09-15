@@ -17,12 +17,12 @@ missing-step error (confirmed with a temporary in-process stub for
 ``log_receiver``, since the real one does not exist until
 ``domain-implementer`` runs).
 
-Every scenario in this file exercises `caliper.monitoring.log_receiver`
+Every scenario in this file exercises `drift_caliper.monitoring.log_receiver`
 specifically -- unlike BIN-75's steps file, ``receivers`` has no "not
 arranged" scenario here, so the base fixture is fixed to ``[log_receiver]``
 rather than defaulting to empty and being overridden per scenario.
 
-``caliper.monitoring.log_receiver`` does not exist yet -- importing it
+``drift_caliper.monitoring.log_receiver`` does not exist yet -- importing it
 fails until ``domain-implementer`` adds it. That ``ImportError`` is the
 correct red state for this ticket.
 """
@@ -38,20 +38,25 @@ from typing import Protocol, cast
 import pytest
 from pytest_bdd import given, then, when
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
     FittedShewhart,
     fit_shewhart,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
-from caliper.monitoring import Monitor, MonitoringResult, log_receiver
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
+from drift_caliper.monitoring import Monitor, MonitoringResult, log_receiver
 from tests.factories import ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"
 _CRITERIA = "Evaluate the response for factual accuracy and helpfulness."
-_LOGGER_NAME = "caliper.monitoring"
+_LOGGER_NAME = "drift_caliper.monitoring"
 
 
 class _CaliperExtra(Protocol):

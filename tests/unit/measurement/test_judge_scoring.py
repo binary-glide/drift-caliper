@@ -18,14 +18,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from caliper.errors import (
+from drift_caliper.errors import (
     InvalidParameterError,
     JudgeRefusalError,
     MalformedResponseError,
     MissingPrerequisiteError,
     ProviderError,
 )
-from caliper.measurement import Judge, JudgeProviderResponse, Provenance
+from drift_caliper.measurement import Judge, JudgeProviderResponse, Provenance
 from tests.support.fakes import FakeJudgeProviderPort
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"

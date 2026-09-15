@@ -9,7 +9,7 @@ Object Inventory -- ``MonitoringResult``, ``DeliveryFailure``).
 ``DeliveryFailure``, ``Monitor(..., receivers=...)``, and
 ``MonitoringResult.direction``/``.fitted_artefact``/``.delivery_failures`` do
 not exist yet -- importing them fails until ``domain-implementer`` extends
-``src/caliper/monitoring/``. That ``ImportError`` is the correct red state
+``src/drift_caliper/monitoring/``. That ``ImportError`` is the correct red state
 for this ticket (TDD red phase), the same shape every other E2/E3/E4 test
 file in this repo starts from.
 
@@ -64,8 +64,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-import caliper
-from caliper.baseline import (
+import drift_caliper
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -76,8 +76,13 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
-from caliper.monitoring import DeliveryFailure, Monitor, MonitoringResult
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
+from drift_caliper.monitoring import DeliveryFailure, Monitor, MonitoringResult
 from tests.factories import ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"
@@ -798,7 +803,7 @@ def test_monitor_is_constructible_with_receivers_from_top_level_namespace() -> N
     received: list[MonitoringResult] = []
 
     # Act
-    monitor = caliper.Monitor(artefact, receivers=[received.append])
+    monitor = drift_caliper.Monitor(artefact, receivers=[received.append])
     breach_score = artefact.ucl + 100.0 * artefact.sigma_estimate
     outcome = monitor.record(_result(score=breach_score))
 
@@ -808,14 +813,14 @@ def test_monitor_is_constructible_with_receivers_from_top_level_namespace() -> N
 
 
 def test_delivery_failure_is_importable_from_caliper_monitoring() -> None:
-    """`DeliveryFailure` is a public value object on `caliper.monitoring`."""
+    """`DeliveryFailure` is a public value object on `drift_caliper.monitoring`."""
     assert issubclass(DeliveryFailure, object)
 
 
 def test_signal_receiver_type_alias_is_importable_from_caliper_monitoring() -> None:
     """`SignalReceiver` -- a plain `TypeAlias`, offered for engineers' own type
     hints (ADR-010 §3), not a `Protocol`."""
-    from caliper.monitoring import SignalReceiver
+    from drift_caliper.monitoring import SignalReceiver
 
     assert SignalReceiver is not None
 

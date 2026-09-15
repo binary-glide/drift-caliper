@@ -33,7 +33,7 @@ Three properties, one test group each below:
 
 **AC6 -- no shared algebra, with one narrow exception (BIN-117).** This
 file's own checks -- the round-trip comparison and the invariance check --
-import no formula helper from ``caliper.baseline.domain.cusum_fitting``:
+import no formula helper from ``drift_caliper.baseline.domain.cusum_fitting``:
 unlike the EWMA file, the invariance check needs no formula even to invert,
 because ``decision_interval``/``reference_value`` are already reported in
 sigma-standardised units with nothing further to invert, and the
@@ -70,9 +70,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_cusum
-from caliper.baseline.domain.cusum_fitting import _min_attainable_arl0
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
+from drift_caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_cusum
+from drift_caliper.baseline.domain.cusum_fitting import _min_attainable_arl0
+from drift_caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
 from tests.factories import ProvenanceFactory
 from tests.support.baseline_strategies import (
     baseline_from_scores,

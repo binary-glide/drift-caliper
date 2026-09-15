@@ -17,13 +17,13 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 from pytest_bdd import given, then, when
 
-from caliper.errors import (
+from drift_caliper.errors import (
     CaliperError,
     MalformedResponseError,
     MissingPrerequisiteError,
     ProviderError,
 )
-from caliper.measurement import Judge, JudgeProviderResponse, ScoringResult
+from drift_caliper.measurement import Judge, JudgeProviderResponse, ScoringResult
 from tests.support.fakes import FakeJudgeProviderPort
 
 _AGENT_OUTPUT = "The capital of France is Paris."

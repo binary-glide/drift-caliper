@@ -62,7 +62,7 @@ including the ones that were rejected and why.
 Not yet published.
 
 ```bash
-pip install caliper-ai   # planned
+pip install drift-caliper   # planned
 ```
 
 ```python

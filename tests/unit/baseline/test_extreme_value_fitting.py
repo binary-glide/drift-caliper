@@ -61,7 +61,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -69,8 +69,8 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import CaliperError
-from caliper.measurement import ScoringResult
+from drift_caliper.errors import CaliperError
+from drift_caliper.measurement import ScoringResult
 from tests.support.baseline_strategies import baseline_from_scores
 
 # ---------------------------------------------------------------------------
@@ -458,7 +458,7 @@ def test_scoring_result_rejects_non_finite_score(bad_score: float) -> None:
     """ADR-006 confirmation: ScoringResult's field validator rejects
     NaN and inf. No fitting function needs to guard against them.
     """
-    from caliper.measurement import ModelVersion, Provenance, ScoringCriteria
+    from drift_caliper.measurement import ModelVersion, Provenance, ScoringCriteria
 
     with pytest.raises(CaliperError) as exc_info:
         ScoringResult(

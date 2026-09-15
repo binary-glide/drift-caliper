@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 from pytest_bdd import given, then, when
 
-from caliper.errors import CaliperError, InvalidParameterError
-from caliper.measurement import Judge, ModelVersion
+from drift_caliper.errors import CaliperError, InvalidParameterError
+from drift_caliper.measurement import Judge, ModelVersion
 
 
 @dataclass

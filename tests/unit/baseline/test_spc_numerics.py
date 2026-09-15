@@ -1,6 +1,6 @@
 """Unit test for the shared moving-range sigma estimator, hoisted for BIN-94.
 
-``caliper.baseline.domain.spc_numerics._moving_range_sigma`` is the same
+``drift_caliper.baseline.domain.spc_numerics._moving_range_sigma`` is the same
 estimator ``tests/unit/baseline/test_ewma_arl_published_values.py``'s
 ``test_moving_range_sigma_matches_a_hand_computed_value`` already pins,
 reached there indirectly through ``fit_ewma``'s public ``sigma_estimate``
@@ -21,7 +21,7 @@ to this one estimator, only a test that calls it directly -- independent of
 either fitting function's own round-trip -- can catch a bug in it.
 
 **Scaffold state (BIN-94 TDD red phase):**
-``caliper.baseline.domain.spc_numerics._moving_range_sigma`` always raises
+``drift_caliper.baseline.domain.spc_numerics._moving_range_sigma`` always raises
 ``NotImplementedError`` until ``domain-implementer`` completes the hoist
 from ``ewma_fitting.py`` (see that scaffold's module docstring). This test
 is expected to fail with that error, not to pass, until then.
@@ -35,9 +35,9 @@ from fractions import Fraction
 
 import pytest
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD
-from caliper.baseline.domain.spc_numerics import _moving_range_sigma
-from caliper.errors import DegenerateBaselineError
+from drift_caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD
+from drift_caliper.baseline.domain.spc_numerics import _moving_range_sigma
+from drift_caliper.errors import DegenerateBaselineError
 
 # The unbiasing constant d_2 for a moving-range span of 2. Same citation
 # chain as ewma_fitting.py's _MOVING_RANGE_D2 (Montgomery Appendix VI,

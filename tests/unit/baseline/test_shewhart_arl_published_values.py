@@ -39,7 +39,7 @@ Both directions are computed below using ``statistics.NormalDist`` (Python's
 standard-library implementation of the normal distribution, not something
 this project needs to independently verify -- it is stdlib, not a
 project-specific approximation), reproduced fresh in this file and never
-imported from ``caliper.baseline.domain.shewhart_fitting`` -- see "Helpers
+imported from ``drift_caliper.baseline.domain.shewhart_fitting`` -- see "Helpers
 whose effect cancels out" below for why that independence matters even
 though the relationship is exact.
 
@@ -57,7 +57,7 @@ directly.
 
 ## d_2 is derived, not cited
 
-``caliper.baseline.domain.spc_numerics``'s ``_MOVING_RANGE_D2`` was
+``drift_caliper.baseline.domain.spc_numerics``'s ``_MOVING_RANGE_D2`` was
 cross-verified only against three secondary sources on BIN-65 -- never derived.
 It turns out to need no source at all. For a moving
 range of span 2, ``d_2`` is the expected value of ``|X1 - X2|`` for
@@ -112,7 +112,7 @@ from statistics import NormalDist
 
 import pytest
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_shewhart
+from drift_caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_shewhart
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Relative tolerance for round trips through fit_shewhart's actual
@@ -146,7 +146,7 @@ def _shewhart_arl0(sigma_multiplier: float) -> float:
     ``ARL0(L) = 1 / (2 * (1 - Phi(L)))``. Written fresh from the
     definition, using the standard library's normal distribution --
     deliberately not imported from
-    ``caliper.baseline.domain.shewhart_fitting``, so a bug shared between
+    ``drift_caliper.baseline.domain.shewhart_fitting``, so a bug shared between
     this file and the implementation cannot cancel out of the comparison.
     """
     return 1.0 / (2.0 * (1.0 - NormalDist().cdf(sigma_multiplier)))

@@ -24,8 +24,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from caliper.errors import InvalidParameterError
-from caliper.measurement import ScoringCriteria
+from drift_caliper.errors import InvalidParameterError
+from drift_caliper.measurement import ScoringCriteria
 
 
 def test_accepts_text_rubric_and_reports_it_when_inspected() -> None:

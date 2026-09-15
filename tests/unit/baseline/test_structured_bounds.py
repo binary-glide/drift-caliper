@@ -62,7 +62,7 @@ import math
 
 import pytest
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     Baseline,
     FittedCUSUM,
     FittedEWMA,
@@ -72,17 +72,20 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.baseline.domain.cusum_fitting import (
+from drift_caliper.baseline.domain.cusum_fitting import (
     MAX_REFERENCE_VALUE,
     MIN_REFERENCE_VALUE,
 )
-from caliper.baseline.domain.ewma_fitting import (
+from drift_caliper.baseline.domain.ewma_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_SMOOTHING_PARAM,
     MIN_SMOOTHING_PARAM,
 )
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL, VERIFIED_ARL_FLOOR
-from caliper.errors import InvalidParameterError
+from drift_caliper.baseline.domain.parameter_guards import (
+    MIN_TARGET_ARL,
+    VERIFIED_ARL_FLOOR,
+)
+from drift_caliper.errors import InvalidParameterError
 from tests.support.baseline_strategies import probe_baseline
 
 # ---------------------------------------------------------------------------

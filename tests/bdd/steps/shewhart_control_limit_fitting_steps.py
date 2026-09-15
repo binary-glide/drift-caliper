@@ -40,7 +40,7 @@ from dataclasses import dataclass
 
 from pytest_bdd import given, parsers, then, when
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedShewhart,
@@ -48,23 +48,23 @@ from caliper.baseline import (
 )
 
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
-# re-exported from caliper.baseline, so steps that need the exact bound
+# re-exported from drift_caliper.baseline, so steps that need the exact bound
 # values import them from the owning submodule directly.
 #
 # MIN_TARGET_ARL (100, ADR-011's hard floor) replaces MIN_MEANINGFUL_ARL (now
 # MIN_COHERENT_ARL, 1.0, no longer a legal target_arl) as the smallest legal
 # value -- see tests/unit/baseline/test_shewhart_fitting.py's identical note.
-from caliper.baseline.domain.shewhart_fitting import (
+from drift_caliper.baseline.domain.shewhart_fitting import (
     MAX_MEANINGFUL_ARL,
     MIN_TARGET_ARL,
 )
-from caliper.errors import (
+from drift_caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
     InsufficientBaselineError,
     InvalidParameterError,
 )
-from caliper.measurement import Provenance
+from drift_caliper.measurement import Provenance
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Arbitrary valid input used whenever a scenario's own Given/When text does

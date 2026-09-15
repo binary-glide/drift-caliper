@@ -15,7 +15,7 @@ solver).** That is BIN-84's central discipline (BR-1, AC6): this project has
 four prior defects where a helper both calibrated a value and checked it,
 so the error divided out and became unfalsifiable, caught only by mutation
 testing at ~98% line coverage (see ``CLAUDE.md``). Nothing in this module
-imports from ``caliper.baseline.domain.{ewma,cusum,shewhart}_fitting`` --
+imports from ``drift_caliper.baseline.domain.{ewma,cusum,shewhart}_fitting`` --
 only the public ``Baseline``/``Monitor``/``ScoringResult``/``Provenance``
 surface an engineer would use.
 
@@ -35,9 +35,9 @@ import math
 
 import numpy as np
 
-from caliper.baseline import Baseline, FittedControlLimits
-from caliper.measurement import Provenance, ScoringResult
-from caliper.monitoring import Monitor
+from drift_caliper.baseline import Baseline, FittedControlLimits
+from drift_caliper.measurement import Provenance, ScoringResult
+from drift_caliper.monitoring import Monitor
 
 # A run that has not signalled after this many multiples of the artefact's
 # own reported achieved_arl is cut off rather than simulated indefinitely.

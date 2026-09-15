@@ -157,18 +157,18 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from caliper.baseline import fit_cusum, fit_ewma, fit_shewhart
-from caliper.baseline.domain.cusum_fitting import (
+from drift_caliper.baseline import fit_cusum, fit_ewma, fit_shewhart
+from drift_caliper.baseline.domain.cusum_fitting import (
     MAX_REFERENCE_VALUE,
     MIN_REFERENCE_VALUE,
 )
-from caliper.baseline.domain.ewma_fitting import (
+from drift_caliper.baseline.domain.ewma_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_SMOOTHING_PARAM,
     MIN_SMOOTHING_PARAM,
 )
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
-from caliper.errors import CaliperError, InvalidParameterError
+from drift_caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
+from drift_caliper.errors import CaliperError, InvalidParameterError
 from tests.support.baseline_strategies import probe_baseline
 
 # See the module docstring's "A fixed, shared probe baseline" section for

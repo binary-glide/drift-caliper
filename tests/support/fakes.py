@@ -1,7 +1,7 @@
 """Test doubles for the Measurement bounded context.
 
 ``FakeJudgeProviderPort`` is an in-memory, no-network implementation of
-``caliper.measurement.JudgeProviderPort`` (ADR-006 section 1). It is the
+``drift_caliper.measurement.JudgeProviderPort`` (ADR-006 section 1). It is the
 seam that makes "the judge's provider returns an error" and "the judge
 produces an uninterpretable response" testable without a real LLM provider
 call: configure it to return a fixed ``JudgeProviderResponse``, or to raise
@@ -15,8 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from caliper.errors import CaliperError
-from caliper.measurement import JudgeProviderResponse
+from drift_caliper.errors import CaliperError
+from drift_caliper.measurement import JudgeProviderResponse
 
 
 @dataclass

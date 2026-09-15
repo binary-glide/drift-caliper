@@ -45,13 +45,18 @@ from __future__ import annotations
 
 import pytest
 
-from caliper.baseline import compare_provenance
-from caliper.errors import (
+from drift_caliper.baseline import compare_provenance
+from drift_caliper.errors import (
     CaliperError,
     InvalidParameterError,
     ProvenanceMismatchError,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"
 _CRITERIA = "Evaluate the response for factual accuracy and helpfulness."
@@ -423,7 +428,7 @@ def test_caliper_error_is_not_value_error_subclass() -> None:
     """``CaliperError`` must not subclass ``ValueError``.
 
     This is load-bearing for the ``mode="before"`` type guards in
-    ``caliper.measurement.domain.type_guards``: Pydantic re-wraps
+    ``drift_caliper.measurement.domain.type_guards``: Pydantic re-wraps
     ``ValueError``/``AssertionError`` raised inside any field validator
     into its own ``ValidationError``, but propagates every other exception
     type unchanged. If ``CaliperError`` ever became a ``ValueError``

@@ -5,7 +5,7 @@ Pins the six acceptance scenarios in
 unit level. See ``docs/architecture/adr/010-signal-delivery-and-absorb-but-surface.md``
 section 6 and ``docs/domain-model.md`` Glossary -- ``log_receiver``.
 
-``caliper.monitoring.log_receiver`` does not exist yet -- importing it fails
+``drift_caliper.monitoring.log_receiver`` does not exist yet -- importing it fails
 until ``domain-implementer`` adds it. That ``ImportError`` is the correct
 red state for this ticket (TDD red phase).
 
@@ -38,7 +38,7 @@ alongside it.
    make a "no handler configured anywhere" claim untestable by simply
    using `caplog` -- so
    ``test_log_receiver_is_visible_with_zero_additional_logging_configuration``
-   below strips ``"caliper.monitoring"``'s own handlers and sets
+   below strips ``"drift_caliper.monitoring"``'s own handlers and sets
    ``propagate = False`` (isolating it from pytest's own root-logger
    capture handler, which `caplog` installs independent of whether a given
    test requests the fixture) and reads real process ``stderr`` via
@@ -63,20 +63,25 @@ from typing import Protocol, cast
 import pytest
 from pytest_mock import MockerFixture
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
     FittedShewhart,
     fit_shewhart,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
-from caliper.monitoring import Monitor, MonitoringResult, log_receiver
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
+from drift_caliper.monitoring import Monitor, MonitoringResult, log_receiver
 from tests.factories import ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"
 _CRITERIA = "Evaluate the response for factual accuracy and helpfulness."
-_LOGGER_NAME = "caliper.monitoring"
+_LOGGER_NAME = "drift_caliper.monitoring"
 
 
 class _CaliperExtra(Protocol):
@@ -208,7 +213,7 @@ def test_logged_signal_appears_through_the_engineers_own_handler_and_formatter()
     None
 ):
     """A signal is delivered through whatever handler/formatter the engineer
-    has attached to `"caliper.monitoring"` -- no Caliper-owned destination."""
+    has attached to `"drift_caliper.monitoring"` -- no Caliper-owned destination."""
     # Arrange
     logger = logging.getLogger(_LOGGER_NAME)
     stream = io.StringIO()
@@ -241,7 +246,7 @@ def test_log_receiver_is_visible_with_zero_additional_logging_configuration(
     """🚨 Critical: `WARNING` is required, not stylistic.
 
     Python's `logging.lastResort` only surfaces `WARNING`+ output with zero
-    configuration anywhere in the logger hierarchy. `"caliper.monitoring"`'s
+    configuration anywhere in the logger hierarchy. `"drift_caliper.monitoring"`'s
     handlers are stripped and `propagate` is set to `False` (isolating it
     from pytest's own root-logger capture handler, which is installed
     independently of whether a test requests `caplog`) so `logging.
@@ -335,7 +340,7 @@ def test_a_logging_failure_surfaces_via_delivery_failures_not_the_log_itself(
 
 
 def test_log_receiver_is_importable_from_caliper_monitoring() -> None:
-    """`caliper.monitoring.log_receiver` -- the DX snippet ADR-010 §6 commits to."""
+    """The DX snippet ADR-010 §6 commits to: `drift_caliper.monitoring.log_receiver`."""
     assert callable(log_receiver)
 
 

@@ -32,7 +32,7 @@ from dataclasses import dataclass
 
 from pytest_bdd import given, parsers, then, when
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_DIRECTION,
     DEFAULT_REFERENCE_VALUE,
     DEFAULT_SUFFICIENCY_THRESHOLD,
@@ -42,7 +42,7 @@ from caliper.baseline import (
 )
 
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
-# re-exported from caliper.baseline, so steps that need the exact bound
+# re-exported from drift_caliper.baseline, so steps that need the exact bound
 # values import them from the owning submodule directly.
 #
 # BIN-117: `_min_attainable_arl0` is imported directly too, for the same
@@ -53,14 +53,14 @@ from caliper.baseline import (
 # `fit_cusum` rejects an unattainable combination, not to re-verify the
 # calibration formula itself (unchanged, still the job of
 # `test_cusum_arl_published_values.py`).
-from caliper.baseline.domain.cusum_fitting import (
+from drift_caliper.baseline.domain.cusum_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_REFERENCE_VALUE,
     MIN_REFERENCE_VALUE,
     MIN_TARGET_ARL,
     _min_attainable_arl0,
 )
-from caliper.errors import (
+from drift_caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
     InsufficientBaselineError,

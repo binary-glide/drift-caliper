@@ -236,3 +236,20 @@ __marimo__/
 
 # code-memory MCP index — regenerated on demand, never source
 code_memory.db
+
+# Agent operating instructions — deliberately not published.
+#
+# CLAUDE.md carries two kinds of content: pipeline-private material (Linear
+# IDs, vault paths, MemoryGraph namespaces, agent overrides) and engineering
+# standards a contributor genuinely needs. Only the first kind is private.
+#
+# ⚠️ The standards are NOT in this repository yet. They live only in
+# CLAUDE.md, and `grep` for "beartype" or "developer experience" across docs/
+# returns nothing. The extracted content is held in the vault at
+# Projects/caliper/engineering-standards.md, ready to drop into
+# CONTRIBUTING.md — that port is outstanding work, not done.
+#
+# 🚨 Removing this line does not make the file publishable. The public
+# repository is a separate export with CLAUDE.md filtered from every commit
+# — adding it back here would put it in the next one.
+CLAUDE.md

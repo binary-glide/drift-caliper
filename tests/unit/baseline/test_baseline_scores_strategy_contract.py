@@ -18,7 +18,7 @@ all three ``test_{ewma,cusum,shewhart}_arl_simulated_properties.py`` files
 (consolidated from three identical copies under this same ticket). This
 test draws from that shared strategy and asserts, for every draw, that
 **all three public fitting entry points accept it** --
-``caliper.baseline.fit_ewma``/``fit_cusum``/``fit_shewhart``, the exact
+``drift_caliper.baseline.fit_ewma``/``fit_cusum``/``fit_shewhart``, the exact
 functions an engineer calls, at a fixed, already-proven-attainable
 ``target_arl``. Nothing here reimplements ``is_fittable()``'s predicate,
 ``_has_zero_variance()``, or ``_moving_range_sigma()`` -- it asks the
@@ -115,8 +115,8 @@ from __future__ import annotations
 import pytest
 from hypothesis import example, given, settings
 
-from caliper.baseline import fit_cusum, fit_ewma, fit_shewhart
-from caliper.errors import CaliperError
+from drift_caliper.baseline import fit_cusum, fit_ewma, fit_shewhart
+from drift_caliper.errors import CaliperError
 from tests.support.baseline_strategies import (
     baseline_from_scores,
     baseline_scores_strategy,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from caliper.errors import (
+from drift_caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
     InsufficientBaselineError,

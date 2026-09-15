@@ -14,7 +14,7 @@ is broken."
 **Design, following the ``BIN-124`` precedent
 (``tests/support/baseline_strategies.py`` /
 ``tests/unit/baseline/test_baseline_scores_strategy_contract.py``):** a
-registry maps every name in ``caliper.__all__`` to either *how to exercise
+registry maps every name in ``drift_caliper.__all__`` to either *how to exercise
 it* (an :class:`ExercisableEntryPoint` -- a tuple of :class:`HostileCase`\\
 s, each a zero-argument callable that attempts one hostile invocation) or
 an explicit *not-an-entry-point* classification (:class:`ExcludedEntryPoint`
@@ -22,7 +22,7 @@ an explicit *not-an-entry-point* classification (:class:`ExcludedEntryPoint`
 adversarial input). A meta-test
 (``tests/unit/test_exception_contract_audit.py::
 test_every_public_name_is_classified``) asserts every name in
-``caliper.__all__`` appears in exactly one of the two registries -- so
+``drift_caliper.__all__`` appears in exactly one of the two registries -- so
 adding a new export *forces* a classification decision before this file
 compiles a passing test suite around it; it cannot silently go unaudited.
 The audit test itself then runs every :class:`HostileCase` and asserts:
@@ -67,7 +67,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     Baseline,
     FittingAdvisory,
     compare_provenance,
@@ -75,8 +75,12 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import JudgeRefusalError, MalformedResponseError, ProviderError
-from caliper.measurement import (
+from drift_caliper.errors import (
+    JudgeRefusalError,
+    MalformedResponseError,
+    ProviderError,
+)
+from drift_caliper.measurement import (
     Judge,
     JudgeProviderResponse,
     ModelVersion,
@@ -84,7 +88,7 @@ from caliper.measurement import (
     ScoringCriteria,
     ScoringResult,
 )
-from caliper.monitoring import Monitor
+from drift_caliper.monitoring import Monitor
 from tests.factories import (
     ProvenanceFactory,
     ScoringCriteriaFactory,
@@ -173,7 +177,7 @@ class _RaisingScoreCandidate:
     a property backed by a closed resource) used to propagate that failure
     through ``Baseline.record``'s and ``Monitor.record``'s identical
     ``_missing_observation_fields`` helpers. Both now go through the shared,
-    guarded ``caliper.baseline.domain.attribute_probe.probe_fields`` instead
+    guarded ``drift_caliper.baseline.domain.attribute_probe.probe_fields`` instead
     (BIN-127) -- this case is a regression test for that fix, not a live
     leak.
     """
@@ -218,7 +222,7 @@ class _RaisingProvenanceArtefact:
     directly. It used to do so with no guard equivalent to ``Monitor``'s
     ``_safe_repr`` (``BIN-118``/``BIN-120``'s fix) -- a hazard neither of
     those fixes touched. It now reads both through
-    ``caliper.baseline.domain.attribute_probe.probe_attribute`` and raises
+    ``drift_caliper.baseline.domain.attribute_probe.probe_attribute`` and raises
     ``InvalidParameterError`` instead (BIN-127); this case is a regression
     test for that fix, not a live leak.
     """
@@ -315,7 +319,7 @@ class InputKind(Enum):
     """The kinds of hostile input an entry point can be probed with.
 
     **This enumeration is the point of BIN-136.** Before it, the registry
-    forced *name* coverage -- every name in ``caliper.__all__`` must be
+    forced *name* coverage -- every name in ``drift_caliper.__all__`` must be
     classified -- but said nothing about *which hostile inputs* each name
     was probed with. A missing name failed the build; a missing input
     **kind** was invisible.

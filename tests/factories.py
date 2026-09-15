@@ -1,7 +1,7 @@
 """Domain factories for the Measurement bounded context.
 
 
-``factory_boy`` factories for the value objects in ``caliper.measurement``,
+``factory_boy`` factories for the value objects in ``drift_caliper.measurement``,
 per ``test-patterns/references/python.md`` ("Fixtures and Factories"). Each
 factory builds a *valid* instance by default -- these are for tests that
 need "a Judge" or "some ScoringCriteria" as supporting setup, not for tests
@@ -51,7 +51,7 @@ from typing import TYPE_CHECKING, Any
 
 import factory
 
-from caliper.measurement import (
+from drift_caliper.measurement import (
     Judge,
     ModelVersion,
     Provenance,

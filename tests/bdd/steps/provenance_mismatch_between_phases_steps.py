@@ -11,7 +11,7 @@ str]]`` keyed by dimension name) plus its ``.mismatches`` sugar property --
 type and required context keys only, never message text.
 
 ``compare_provenance()`` does not exist yet -- importing it from
-``caliper.baseline`` fails until ``domain-implementer`` adds it. That
+``drift_caliper.baseline`` fails until ``domain-implementer`` adds it. That
 ``ImportError`` is the correct red state for this ticket (TDD red phase).
 
 Fitted artefacts are obtained by calling ``fit_ewma``/``fit_cusum``/
@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 from pytest_bdd import given, then, when
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -39,8 +39,13 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import CaliperError, ProvenanceMismatchError
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
+from drift_caliper.errors import CaliperError, ProvenanceMismatchError
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
 from tests.factories import ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"

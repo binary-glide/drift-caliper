@@ -91,9 +91,12 @@ import math
 
 import pytest
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_shewhart
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL, VERIFIED_ARL_FLOOR
-from caliper.errors import InsufficientBaselineError, InvalidParameterError
+from drift_caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_shewhart
+from drift_caliper.baseline.domain.parameter_guards import (
+    MIN_TARGET_ARL,
+    VERIFIED_ARL_FLOOR,
+)
+from drift_caliper.errors import InsufficientBaselineError, InvalidParameterError
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 from tests.support.baseline_strategies import probe_baseline
 

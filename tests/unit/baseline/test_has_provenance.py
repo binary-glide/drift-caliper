@@ -5,7 +5,7 @@ Pins the three items in the amendment's scope:
 1. ``HasProvenance`` is a ``@runtime_checkable`` ``Protocol`` with exactly
    two string-typed property declarations (``provenance_model_version``,
    ``provenance_criteria``), exported from ``caliper`` and
-   ``caliper.baseline``.
+   ``drift_caliper.baseline``.
 2. ``compare_provenance`` accepts any ``HasProvenance``-satisfying object --
    in particular, one that satisfies *only* ``HasProvenance`` and **not**
    ``FittedControlLimits``. This is a *widening* in principle, identical in
@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import pytest
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -54,9 +54,14 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import InvalidParameterError, ProvenanceMismatchError
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
-from caliper.monitoring import Monitor
+from drift_caliper.errors import InvalidParameterError, ProvenanceMismatchError
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
+from drift_caliper.monitoring import Monitor
 from tests.factories import ScoringResultFactory
 
 # --- Constants ---------------------------------------------------------------

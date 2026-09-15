@@ -25,7 +25,7 @@ in, whether a broken test means "the API contract changed" (this file) or
 "the calibration is statistically wrong" (that file).
 
 ``fit_shewhart()``, ``FittedShewhart`` and ``FittedControlLimits`` exist
-only as scaffolds (``src/caliper/baseline/domain/``): ``fit_shewhart()``
+only as scaffolds (``src/drift_caliper/baseline/domain/``): ``fit_shewhart()``
 always raises ``NotImplementedError``. Every test below that calls it is
 expected to fail for that reason until ``domain-implementer`` replaces the
 scaffold -- ``uv run pytest`` therefore fails; that is the correct state for
@@ -83,7 +83,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -93,7 +93,7 @@ from caliper.baseline import (
 )
 
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
-# re-exported from caliper.baseline, so tests that need the exact bound
+# re-exported from drift_caliper.baseline, so tests that need the exact bound
 # values import them from the owning submodule directly.
 #
 # MIN_TARGET_ARL (100, ADR-011's hard floor) replaces MIN_MEANINGFUL_ARL as
@@ -101,19 +101,19 @@ from caliper.baseline import (
 # MIN_MEANINGFUL_ARL) is the older, weaker, purely-arithmetic floor and is
 # imported separately below only where a test specifically exercises the
 # now-illegal gap between the two (BIN-131).
-from caliper.baseline.domain.ewma_fitting import MIN_COHERENT_ARL
-from caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
-from caliper.baseline.domain.shewhart_fitting import (
+from drift_caliper.baseline.domain.ewma_fitting import MIN_COHERENT_ARL
+from drift_caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
+from drift_caliper.baseline.domain.shewhart_fitting import (
     MAX_MEANINGFUL_ARL,
     MIN_TARGET_ARL,
 )
-from caliper.errors import (
+from drift_caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
     InsufficientBaselineError,
     InvalidParameterError,
 )
-from caliper.measurement import Provenance
+from drift_caliper.measurement import Provenance
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Arbitrary, sufficiently-large target ARL0 used across the happy-path/shape
@@ -141,7 +141,7 @@ _SIGMA_UNDERFLOW_REASON = "sigma_estimate_underflow"
 
 # The unbiasing constant d_2 for a moving-range span of 2. Reproduced here as
 # a literal, deliberately independent of
-# caliper.baseline.domain.spc_numerics._MOVING_RANGE_D2 -- this file's
+# drift_caliper.baseline.domain.spc_numerics._MOVING_RANGE_D2 -- this file's
 # order-dependency assertions are written fresh from the published
 # definition, never imported from the module under test (see
 # tests/unit/baseline/test_spc_numerics.py, which established this

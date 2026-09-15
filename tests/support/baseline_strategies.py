@@ -13,7 +13,7 @@ never in a constant, a predicate, or a function body.
 
 **Why one definition matters, not just tidiness (BIN-124).** The floor this
 module defines exists to dodge a real, currently-true fact about
-``caliper.baseline.domain.spc_numerics._moving_range_sigma``: a baseline
+``drift_caliper.baseline.domain.spc_numerics._moving_range_sigma``: a baseline
 whose consecutive-score spread is too small underflows its moving-range
 sigma estimate to exactly zero and is rejected with
 ``DegenerateBaselineError`` (BIN-119). That fact can change -- the floor
@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from hypothesis import strategies as st
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline
+from drift_caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # BIN-123: `len(set(scores)) > 1` is no longer a sufficient definition of

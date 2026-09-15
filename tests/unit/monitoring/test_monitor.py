@@ -7,8 +7,8 @@ the domain model requires but no scenario names individually (ADR-009,
 ``docs/domain-model.md`` Object Map -- Monitor).
 
 ``Monitor``/``MonitoringResult`` do not exist yet anywhere in ``src/`` --
-importing them from ``caliper.monitoring`` fails until ``domain-implementer``
-adds ``src/caliper/monitoring/``. That ``ImportError`` is the correct red
+importing them from ``drift_caliper.monitoring`` fails until ``domain-implementer``
+adds ``src/drift_caliper/monitoring/``. That ``ImportError`` is the correct red
 state for this ticket (TDD red phase), the same shape every other E2/E3 test
 file in this repo starts from.
 
@@ -37,7 +37,7 @@ file in this repo starts from.
 
 3. **CUSUM's exact update formula is assumed from the standardised-CUSUM
    convention ``fit_cusum``'s own module docstring already commits to**
-   (``src/caliper/baseline/domain/cusum_fitting.py``: "CUSUM statistic
+   (``src/drift_caliper/baseline/domain/cusum_fitting.py``: "CUSUM statistic
    accumulates deviations of the *standardised* score from its target...
    S_t = max(0, S_(t-1) + ...)", citing Siegmund 1985 via Montgomery).
    Boundary and accumulation tests below compute an exact input score from
@@ -88,8 +88,8 @@ from dataclasses import dataclass
 
 import pytest
 
-import caliper
-from caliper.baseline import (
+import drift_caliper
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -101,13 +101,18 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import (
+from drift_caliper.errors import (
     InvalidObservationError,
     InvalidParameterError,
     ProvenanceMismatchError,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
-from caliper.monitoring import Monitor, MonitoringResult
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
+from drift_caliper.monitoring import Monitor, MonitoringResult
 from tests.factories import ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"
@@ -483,7 +488,7 @@ class _RaisingScoreObservation:
 
     Used for BIN-127 -- mirrors ``test_baseline.py``'s identically-named
     fixture, since both entry points now share
-    ``caliper.baseline.domain.attribute_probe`` and must report the same
+    ``drift_caliper.baseline.domain.attribute_probe`` and must report the same
     ``context`` distinction.
     """
 
@@ -801,7 +806,7 @@ def test_monitor_is_usable_from_the_top_level_caliper_namespace() -> None:
     artefact = _fitted_shewhart()
 
     # Act
-    monitor = caliper.Monitor(artefact)
+    monitor = drift_caliper.Monitor(artefact)
 
     # Assert
     assert isinstance(monitor, Monitor)

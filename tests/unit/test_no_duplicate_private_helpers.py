@@ -43,7 +43,7 @@ import ast
 import collections
 import pathlib
 
-_SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "caliper"
+_SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "drift_caliper"
 
 
 def _module_level_private_functions() -> dict[str, list[str]]:

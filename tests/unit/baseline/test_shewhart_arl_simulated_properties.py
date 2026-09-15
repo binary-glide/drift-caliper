@@ -30,7 +30,7 @@ Three properties, one test group each below:
    identical affine map.
 
 **AC6 -- no shared algebra.** Nothing below imports from
-``caliper.baseline.domain.shewhart_fitting`` at all. The round-trip's
+``drift_caliper.baseline.domain.shewhart_fitting`` at all. The round-trip's
 comparison target is ``achieved_arl`` -- the artefact's own already-reported
 value -- checked only against independently simulated run lengths from
 ``tests.support.spc_simulation``, which itself only calls
@@ -54,8 +54,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_shewhart
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
+from drift_caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_shewhart
+from drift_caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
 from tests.factories import ProvenanceFactory
 from tests.support.baseline_strategies import (
     baseline_from_scores,

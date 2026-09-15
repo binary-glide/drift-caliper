@@ -23,7 +23,7 @@ wrong" (that file) -- see the backend-test-writer brief's explicit
 instruction to keep them separate.
 
 ``fit_ewma()``, ``FittedEWMA`` and ``FittedControlLimits`` exist only as
-scaffolds (``src/caliper/baseline/domain/``): ``fit_ewma()`` always raises
+scaffolds (``src/drift_caliper/baseline/domain/``): ``fit_ewma()`` always raises
 ``NotImplementedError``. Every test below that calls it is expected to fail
 for that reason until ``domain-implementer`` replaces the scaffold --
 ``uv run pytest`` therefore fails; that is the correct state for this
@@ -58,7 +58,7 @@ produced.
    Both designs the ADR names satisfy every assertion here.
 4. **``InsufficientBaselineError.context["need"]`` is pinned to
    ``DEFAULT_SUFFICIENCY_THRESHOLD``** (imported from
-   ``caliper.baseline``, itself ratified by ADR-005 as 100). ``fit_ewma()``
+   ``drift_caliper.baseline``, itself ratified by ADR-005 as 100). ``fit_ewma()``
    has no threshold parameter in its signature (ADR-004 section 5), so
    there is no other value it could reasonably use, and OQ-4 (no override
    mechanism) forecloses an alternative. This is a value in the *error's
@@ -81,7 +81,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SMOOTHING_PARAM,
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
@@ -92,7 +92,7 @@ from caliper.baseline import (
 )
 
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
-# re-exported from caliper.baseline, so tests that need the exact bound
+# re-exported from drift_caliper.baseline, so tests that need the exact bound
 # values import them from the owning submodule directly.
 #
 # MIN_TARGET_ARL (100, ADR-011's hard floor) replaces MIN_MEANINGFUL_ARL as
@@ -100,20 +100,23 @@ from caliper.baseline import (
 # MIN_MEANINGFUL_ARL) is the older, weaker, purely-arithmetic floor and is
 # imported separately below only where a test specifically exercises the
 # now-illegal gap between the two (BIN-131).
-from caliper.baseline.domain.ewma_fitting import (
+from drift_caliper.baseline.domain.ewma_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_SMOOTHING_PARAM,
     MIN_COHERENT_ARL,
     MIN_SMOOTHING_PARAM,
 )
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL, VERIFIED_ARL_FLOOR
-from caliper.errors import (
+from drift_caliper.baseline.domain.parameter_guards import (
+    MIN_TARGET_ARL,
+    VERIFIED_ARL_FLOOR,
+)
+from drift_caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
     InsufficientBaselineError,
     InvalidParameterError,
 )
-from caliper.measurement import Provenance
+from drift_caliper.measurement import Provenance
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Arbitrary, sufficiently-large target ARL0 and smoothing parameter used

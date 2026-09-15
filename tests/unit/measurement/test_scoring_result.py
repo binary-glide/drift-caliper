@@ -17,8 +17,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from caliper.errors import InvalidParameterError
-from caliper.measurement import ScoringResult
+from drift_caliper.errors import InvalidParameterError
+from drift_caliper.measurement import ScoringResult
 from tests.factories import ProvenanceFactory
 
 

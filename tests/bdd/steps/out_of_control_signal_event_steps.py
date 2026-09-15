@@ -23,7 +23,7 @@ scenario by whichever ``Given`` step establishes one).
 
 ``Monitor(..., receivers=...)``/``MonitoringResult.direction`` etc. do not
 exist yet -- importing them fails until ``domain-implementer`` extends
-``src/caliper/monitoring/``. That ``ImportError`` is the correct red state
+``src/drift_caliper/monitoring/``. That ``ImportError`` is the correct red state
 for this ticket.
 """
 
@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 import pytest
 from pytest_bdd import given, then, when
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -44,8 +44,13 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
-from caliper.monitoring import Monitor, MonitoringResult
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
+from drift_caliper.monitoring import Monitor, MonitoringResult
 from tests.factories import ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"

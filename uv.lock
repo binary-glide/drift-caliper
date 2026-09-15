@@ -92,59 +92,6 @@ wheels = [
 ]
 
 [[package]]
-name = "caliper-ai"
-version = "0.1.0.dev0"
-source = { editable = "." }
-dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "pydantic" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "beartype" },
-    { name = "dirty-equals" },
-    { name = "factory-boy" },
-    { name = "freezegun" },
-    { name = "hypothesis" },
-    { name = "mutmut" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-bdd" },
-    { name = "pytest-cov" },
-    { name = "pytest-mock" },
-    { name = "ruff" },
-    { name = "ty" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "pydantic", specifier = ">=2.13" },
-    { name = "scipy", specifier = ">=1.14" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "beartype", specifier = ">=0.22" },
-    { name = "dirty-equals", specifier = ">=0.11" },
-    { name = "factory-boy", specifier = ">=3.3" },
-    { name = "freezegun", specifier = ">=1.5" },
-    { name = "hypothesis", specifier = ">=6.168" },
-    { name = "mutmut", specifier = ">=3.7" },
-    { name = "mypy", specifier = ">=2.3" },
-    { name = "pytest", specifier = ">=9.1" },
-    { name = "pytest-bdd", specifier = ">=8.1" },
-    { name = "pytest-cov", specifier = ">=7.1" },
-    { name = "pytest-mock", specifier = ">=3.15" },
-    { name = "ruff", specifier = ">=0.16.7" },
-    { name = "ty", specifier = ">=0.0.80" },
-]
-
-[[package]]
 name = "click"
 version = "8.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -288,6 +235,59 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/30/1d/c5913ac9d6615515a00f4bdc71356d302437cb74ff2e9aaccd3c14493b78/dirty_equals-0.11.tar.gz", hash = "sha256:f4ac74ee88f2d11e2fa0f65eb30ee4f07105c5f86f4dc92b09eb1138775027c3", size = 128067, upload-time = "2025-11-17T01:51:24.451Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bb/8d/dbff05239043271dbeace563a7686212a3dd517864a35623fe4d4a64ca19/dirty_equals-0.11-py3-none-any.whl", hash = "sha256:b1d7093273fc2f9be12f443a8ead954ef6daaf6746fd42ef3a5616433ee85286", size = 28051, upload-time = "2025-11-17T01:51:22.849Z" },
+]
+
+[[package]]
+name = "drift-caliper"
+version = "0.1.0.dev0"
+source = { editable = "." }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pydantic" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "beartype" },
+    { name = "dirty-equals" },
+    { name = "factory-boy" },
+    { name = "freezegun" },
+    { name = "hypothesis" },
+    { name = "mutmut" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-bdd" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "pydantic", specifier = ">=2.13" },
+    { name = "scipy", specifier = ">=1.14" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "beartype", specifier = ">=0.22" },
+    { name = "dirty-equals", specifier = ">=0.11" },
+    { name = "factory-boy", specifier = ">=3.3" },
+    { name = "freezegun", specifier = ">=1.5" },
+    { name = "hypothesis", specifier = ">=6.168" },
+    { name = "mutmut", specifier = ">=3.7" },
+    { name = "mypy", specifier = ">=2.3" },
+    { name = "pytest", specifier = ">=9.1" },
+    { name = "pytest-bdd", specifier = ">=8.1" },
+    { name = "pytest-cov", specifier = ">=7.1" },
+    { name = "pytest-mock", specifier = ">=3.15" },
+    { name = "ruff", specifier = ">=0.16.7" },
+    { name = "ty", specifier = ">=0.0.80" },
 ]
 
 [[package]]

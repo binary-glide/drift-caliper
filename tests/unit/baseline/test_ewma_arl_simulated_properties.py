@@ -28,7 +28,7 @@ Three properties, one test group each below:
    the identical affine map.
 
 **AC6 -- no shared algebra.** Nothing below imports from
-``caliper.baseline.domain.ewma_fitting`` except the public ``fit_ewma``.
+``drift_caliper.baseline.domain.ewma_fitting`` except the public ``fit_ewma``.
 The round-trip's comparison target is ``achieved_arl`` -- the artefact's
 own already-reported value -- never a value this file computes from the
 Markov-chain helper (``_in_control_arl``) or the limit-multiplier solver.
@@ -79,12 +79,12 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_ewma
-from caliper.baseline.domain.ewma_numerics import (
+from drift_caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, fit_ewma
+from drift_caliper.baseline.domain.ewma_numerics import (
     # Formula only, not the Markov-chain calibration helper -- see below.
     _ewma_asymptotic_std_ratio,
 )
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
+from drift_caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
 from tests.factories import ProvenanceFactory
 from tests.support.baseline_strategies import (
     baseline_from_scores,

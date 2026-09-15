@@ -41,7 +41,7 @@ from collections.abc import Callable
 
 import pytest
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedCUSUM,
@@ -80,7 +80,7 @@ SHARED_AUDIT_LABELS: tuple[str, ...] = (
 )
 
 # Deliberately hand-typed, not imported from
-# `caliper.baseline.domain.audit_summary`. Importing the constant would make
+# `drift_caliper.baseline.domain.audit_summary`. Importing the constant would make
 # `assert CHART_SPECIFIC_HEADING in summary` read
 # `assert src.CONST in render_using(src.CONST)` -- true for any value, so
 # renaming the heading would still pass. The duplication IS the assertion:

@@ -153,13 +153,13 @@ from statistics import NormalDist
 
 import pytest
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedEWMA,
     fit_ewma,
 )
-from caliper.baseline.domain.ewma_numerics import (
+from drift_caliper.baseline.domain.ewma_numerics import (
     _MARKOV_CHAIN_STATES,
     _ewma_asymptotic_std_ratio,
     _in_control_arl,

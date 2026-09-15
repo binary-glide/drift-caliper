@@ -7,8 +7,8 @@ assertions follow ADR-002/ADR-008: type + required ``context`` keys only,
 never message text.
 
 ``Monitor``/``MonitoringResult`` do not exist yet -- importing them from
-``caliper.monitoring`` fails until ``domain-implementer`` adds
-``src/caliper/monitoring/``. That ``ImportError`` is the correct red state
+``drift_caliper.monitoring`` fails until ``domain-implementer`` adds
+``src/drift_caliper/monitoring/``. That ``ImportError`` is the correct red state
 for this ticket (TDD red phase).
 
 **Decisions this file makes, flagged rather than guessed silently:**
@@ -41,7 +41,7 @@ from dataclasses import dataclass
 
 from pytest_bdd import given, then, when
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -51,13 +51,18 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import (
+from drift_caliper.errors import (
     CaliperError,
     InvalidObservationError,
     ProvenanceMismatchError,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
-from caliper.monitoring import Monitor, MonitoringResult
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
+from drift_caliper.monitoring import Monitor, MonitoringResult
 from tests.factories import ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"

@@ -49,7 +49,7 @@ from beartype.claw import beartype_package
 # the six merged feature files asserting on it. Catching and translating it
 # does not work either: the violation carries prose rather than structure, so
 # ``missing_fields`` cannot be recovered from it. See BIN-109.
-beartype_package("caliper.baseline.domain.ewma_numerics")
+beartype_package("drift_caliper.baseline.domain.ewma_numerics")
 
 # ``spc_numerics`` (hoisted during BIN-94) and ``ewma_numerics`` (split out of
 # ``ewma_fitting`` during BIN-130) have no public entry point at all -- their
@@ -72,12 +72,12 @@ beartype_package("caliper.baseline.domain.ewma_numerics")
 # ``fit_ewma`` was pre-empted by ``BeartypeCallHintParamViolation`` before its
 # body ever ran, unreachable inside this suite even though it worked in the
 # shipped wheel, which never imports beartype. BIN-130 split
-# ``caliper.baseline.domain.ewma_numerics`` out of ``ewma_fitting`` specifically
+# ``drift_caliper.baseline.domain.ewma_numerics`` out of ``ewma_fitting`` specifically
 # so this hook could stop covering ``fit_ewma`` while still covering the scipy
 # calls it exists for. **Do not read the surviving numerics hook as a
 # precedent for hooking a boundary that does raise properly** -- it is hooked
 # because it has no boundary to guard, not despite having one.
-beartype_package("caliper.baseline.domain.spc_numerics")
+beartype_package("drift_caliper.baseline.domain.spc_numerics")
 
 
 def pytest_collection_modifyitems(

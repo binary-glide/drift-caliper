@@ -1,6 +1,6 @@
 """Unit tests for the shared guarded attribute probe (BIN-127).
 
-``caliper.baseline.domain.attribute_probe`` is the one implementation
+``drift_caliper.baseline.domain.attribute_probe`` is the one implementation
 ``Baseline.record()``, ``Monitor.record()``, and ``compare_provenance()``
 now share, replacing what used to be a duplicated ``_missing_observation_fields``
 in ``baseline.py``/``monitor.py`` and no guard at all in
@@ -15,14 +15,14 @@ from __future__ import annotations
 
 import pytest
 
-from caliper.baseline.domain.attribute_probe import (
+from drift_caliper.baseline.domain.attribute_probe import (
     REQUIRED_OBSERVATION_FIELDS,
     AttributeProbe,
     invalid_observation_error,
     probe_attribute,
     probe_fields,
 )
-from caliper.errors import InvalidObservationError
+from drift_caliper.errors import InvalidObservationError
 
 
 class _RaisingAttribute:

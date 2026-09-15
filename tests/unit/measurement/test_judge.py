@@ -21,8 +21,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from caliper.errors import InvalidParameterError
-from caliper.measurement import Judge, ModelVersion
+from drift_caliper.errors import InvalidParameterError
+from drift_caliper.measurement import Judge, ModelVersion
 
 
 def test_creates_judge_and_reports_model_version_when_pinned_version_provided() -> None:

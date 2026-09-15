@@ -58,7 +58,7 @@ whoever reads either one next.
 list of "the parameters we know are library-validated" has the identical
 weakness round 1's own docstring already named: it catches today's known
 bounds and silently misses tomorrow's ninth file. There is no equivalent of
-``BIN-121``'s ``caliper.__all__`` enumeration here -- nothing in ``src/``
+``BIN-121``'s ``drift_caliper.__all__`` enumeration here -- nothing in ``src/``
 lists "every Hypothesis strategy bound in the test suite". What **is**
 mechanically enumerable is the test suite's own source text:
 ``tests/support/hypothesis_bound_scan.py`` AST-walks every ``.py`` file
@@ -144,7 +144,7 @@ from pathlib import Path
 import pytest
 from _pytest.outcomes import Failed
 
-from caliper.errors import CaliperError
+from drift_caliper.errors import CaliperError
 from tests.support.hypothesis_bound_scan import (
     BoundSite,
     UnresolvedGivenSite,

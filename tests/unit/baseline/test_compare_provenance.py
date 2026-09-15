@@ -15,8 +15,8 @@ needs no migration ... it is written directly against mismatches"), this
 file is written directly against the new shape with nothing to migrate
 from. ``uv run pytest`` is expected to fail at collection with
 ``ImportError`` until ``domain-implementer`` adds
-``src/caliper/baseline/domain/compare_provenance.py`` and exports it from
-``caliper.baseline`` -- that import failure is the correct red state for
+``src/drift_caliper/baseline/domain/compare_provenance.py`` and exports it from
+``drift_caliper.baseline`` -- that import failure is the correct red state for
 this ticket (TDD red phase), not a mistake to fix here.
 
 **API shape this file commits to, flagged because no ADR settles it.**
@@ -27,7 +27,7 @@ Four choices below are this file's own, made to keep the ADR-002 amendment
 testable, not decisions any ADR dictates:
 
 1. **Location and name**: ``compare_provenance(result, artefact)``,
-   importable from ``caliper.baseline`` -- the same package
+   importable from ``drift_caliper.baseline`` -- the same package
    ``Baseline``/``fit_ewma``/``fit_cusum``/``fit_shewhart`` are promoted
    to, since this is baseline-context machinery (Phase I baseline vs. a
    Phase II observation) in exactly the same sense. Not promoted to the
@@ -71,7 +71,7 @@ from collections.abc import Callable
 
 import pytest
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittedControlLimits,
@@ -83,8 +83,17 @@ from caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
-from caliper.errors import CaliperError, InvalidParameterError, ProvenanceMismatchError
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
+from drift_caliper.errors import (
+    CaliperError,
+    InvalidParameterError,
+    ProvenanceMismatchError,
+)
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
 from tests.factories import ScoringResultFactory
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"

@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import pytest
 
-from caliper.errors import InvalidParameterError
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria
+from drift_caliper.errors import InvalidParameterError
+from drift_caliper.measurement import ModelVersion, Provenance, ScoringCriteria
 
 
 def _provenance() -> Provenance:

@@ -23,9 +23,13 @@ from dataclasses import dataclass
 
 from pytest_bdd import given, parsers, then, when
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, SufficiencyResult
-from caliper.errors import CaliperError, InvalidParameterError
-from caliper.measurement import ScoringResult
+from drift_caliper.baseline import (
+    DEFAULT_SUFFICIENCY_THRESHOLD,
+    Baseline,
+    SufficiencyResult,
+)
+from drift_caliper.errors import CaliperError, InvalidParameterError
+from drift_caliper.measurement import ScoringResult
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # The only DataQualityConcern.kind this story introduces -- see

@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import pytest
 
-from caliper.errors import InvalidParameterError
-from caliper.measurement import ModelVersion
+from drift_caliper.errors import InvalidParameterError
+from drift_caliper.measurement import ModelVersion
 
 
 def test_str_returns_the_wrapped_value_directly() -> None:

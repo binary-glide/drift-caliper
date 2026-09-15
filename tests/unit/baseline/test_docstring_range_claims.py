@@ -16,7 +16,7 @@ finding deserves an automated guard, not a closed ticket.
 
 **Audit performed while writing this file (2026-09-12), against
 ``trunk`` at the commit this ticket started from.** Every public docstring
-in ``caliper.baseline`` naming a numeric range was enumerated by hand
+in ``drift_caliper.baseline`` naming a numeric range was enumerated by hand
 (module docstrings, and every ``fit_ewma``/``fit_cusum``/``fit_shewhart``/
 ``FittedControlLimits`` docstring -- the only public callables with a
 ``Raises``/range-shaped claim in this bounded context) and checked against
@@ -46,7 +46,7 @@ the live library:
   (BIN-124 round 3, Blocker 2)** -- this section previously claimed
   ``FittedControlLimits.advisories``'s docstring was the **only** place
   this range appears as literal numbers rather than named constants. That
-  undercounted. Grepping the full ``caliper.baseline`` source finds it
+  undercounted. Grepping the full ``drift_caliper.baseline`` source finds it
   **seven times**: the ``advisories`` docstring, ``fit_ewma``'s,
   ``fit_cusum``'s and ``fit_shewhart``'s own ``Returns`` docstrings (each
   states "carries a non-empty ``advisories`` when ``target_arl`` is
@@ -78,8 +78,8 @@ recorded here in case a future run of this file does find one.
 
 **What this file cannot catch.**
 
-* **Only the four docstrings named above.** ``caliper.measurement`` and
-  ``caliper.monitoring`` carry no numeric range claim in their own public
+* **Only the four docstrings named above.** ``drift_caliper.measurement`` and
+  ``drift_caliper.monitoring`` carry no numeric range claim in their own public
   docstrings today (also checked by hand while writing this file -- neither
   bounded context validates a numeric parameter against a fixed
   ``[min, max]`` the way baseline's three fitting functions do), so nothing
@@ -102,21 +102,24 @@ from __future__ import annotations
 import inspect
 import re
 
-from caliper.baseline import fit_cusum, fit_ewma, fit_shewhart
-from caliper.baseline.domain.cusum_fitting import (
+from drift_caliper.baseline import fit_cusum, fit_ewma, fit_shewhart
+from drift_caliper.baseline.domain.cusum_fitting import (
     MAX_REFERENCE_VALUE,
     MIN_REFERENCE_VALUE,
 )
-from caliper.baseline.domain.ewma_fitting import (
+from drift_caliper.baseline.domain.ewma_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_SMOOTHING_PARAM,
     MIN_SMOOTHING_PARAM,
 )
-from caliper.baseline.domain.fitted_control_limits import FittedControlLimits
-from caliper.baseline.domain.fitted_cusum import FittedCUSUM
-from caliper.baseline.domain.fitted_ewma import FittedEWMA
-from caliper.baseline.domain.fitted_shewhart import FittedShewhart
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL, VERIFIED_ARL_FLOOR
+from drift_caliper.baseline.domain.fitted_control_limits import FittedControlLimits
+from drift_caliper.baseline.domain.fitted_cusum import FittedCUSUM
+from drift_caliper.baseline.domain.fitted_ewma import FittedEWMA
+from drift_caliper.baseline.domain.fitted_shewhart import FittedShewhart
+from drift_caliper.baseline.domain.parameter_guards import (
+    MIN_TARGET_ARL,
+    VERIFIED_ARL_FLOOR,
+)
 from tests.support.baseline_strategies import probe_baseline
 
 _PROBE_BASELINE = probe_baseline()

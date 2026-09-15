@@ -61,9 +61,9 @@ from __future__ import annotations
 
 import pytest
 
-from caliper.baseline import Baseline, fit_cusum, fit_ewma, fit_shewhart
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria
-from caliper.monitoring import Monitor
+from drift_caliper.baseline import Baseline, fit_cusum, fit_ewma, fit_shewhart
+from drift_caliper.measurement import ModelVersion, Provenance, ScoringCriteria
+from drift_caliper.monitoring import Monitor
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Arbitrary target ARL0 shared by the three fit_* calls below -- a DX/shape

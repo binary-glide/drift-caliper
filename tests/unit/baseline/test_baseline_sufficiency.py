@@ -9,7 +9,7 @@ gap, via Hypothesis). Error assertions follow ADR-002/ADR-008: type +
 required ``context`` keys only -- never message text.
 
 ``SufficiencyResult`` and ``DataQualityConcern`` exist only as scaffolded
-value objects (``src/caliper/baseline/domain/``), and
+value objects (``src/drift_caliper/baseline/domain/``), and
 ``Baseline.check_sufficiency()`` is a scaffold that always raises
 ``NotImplementedError`` -- every test below that calls it is expected to
 fail for that reason until ``domain-implementer`` replaces the scaffold.
@@ -79,13 +79,13 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     DataQualityConcern,
     SufficiencyResult,
 )
-from caliper.errors import InvalidParameterError
+from drift_caliper.errors import InvalidParameterError
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # The only DataQualityConcern.kind this story introduces -- see the module

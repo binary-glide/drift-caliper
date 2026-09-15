@@ -26,7 +26,7 @@ wrong" (that file) -- the same split the BIN-94 brief explicitly instructs,
 mirroring BIN-65.
 
 ``fit_cusum()``, ``FittedCUSUM`` and ``FittedControlLimits`` exist only as
-scaffolds (``src/caliper/baseline/domain/``): ``fit_cusum()`` always raises
+scaffolds (``src/drift_caliper/baseline/domain/``): ``fit_cusum()`` always raises
 ``NotImplementedError``. Every test below that calls it is expected to fail
 for that reason until ``domain-implementer`` replaces the scaffold --
 ``uv run pytest`` therefore fails; that is the correct state for this
@@ -150,7 +150,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from caliper.baseline import (
+from drift_caliper.baseline import (
     DEFAULT_REFERENCE_VALUE,
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
@@ -161,7 +161,7 @@ from caliper.baseline import (
 )
 
 # MIN_*/MAX_* validation bounds are internal (BIN-110 P2) -- no longer
-# re-exported from caliper.baseline, so tests that need the exact bound
+# re-exported from drift_caliper.baseline, so tests that need the exact bound
 # values import them from the owning submodule directly.
 #
 # BIN-117: `_min_attainable_arl0` is imported directly too -- see the module
@@ -174,22 +174,22 @@ from caliper.baseline import (
 # attainable floor) instead of re-deriving it here removes that drift risk
 # entirely: this file and `fit_cusum` now cannot disagree about what "the
 # minimum attainable ARL0" means, because they call the same function.
-from caliper.baseline.domain.cusum_fitting import (
+from drift_caliper.baseline.domain.cusum_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_REFERENCE_VALUE,
     MIN_REFERENCE_VALUE,
     MIN_TARGET_ARL,
     _min_attainable_arl0,
 )
-from caliper.baseline.domain.ewma_fitting import MIN_COHERENT_ARL
-from caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
-from caliper.errors import (
+from drift_caliper.baseline.domain.ewma_fitting import MIN_COHERENT_ARL
+from drift_caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
+from drift_caliper.errors import (
     CaliperError,
     DegenerateBaselineError,
     InsufficientBaselineError,
     InvalidParameterError,
 )
-from caliper.measurement import Provenance
+from drift_caliper.measurement import Provenance
 from tests.factories import ProvenanceFactory, ScoringResultFactory
 
 # Arbitrary, sufficiently-large target ARL0 and reference value used across

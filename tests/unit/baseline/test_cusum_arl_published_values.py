@@ -54,7 +54,7 @@ formula above simplifies algebraically (substituting ``Delta = -k``) to:
 
     ARL0(k, h) = [exp(2*k*b) - 1 - 2*k*b] / (2*k^2)
 
-This is ``_cusum_arl0`` in ``caliper.baseline.domain.cusum_fitting``, tested
+This is ``_cusum_arl0`` in ``drift_caliper.baseline.domain.cusum_fitting``, tested
 directly below.
 
 **Route 2 -- an independent numeric anchor.** The SAS/STAT QC procedure
@@ -229,8 +229,8 @@ import math
 
 import pytest
 
-from caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_cusum
-from caliper.baseline.domain.cusum_fitting import (
+from drift_caliper.baseline import DEFAULT_SUFFICIENCY_THRESHOLD, Baseline, fit_cusum
+from drift_caliper.baseline.domain.cusum_fitting import (
     _calibrate_decision_interval,
     _combine_two_sided_arl0,
     _cusum_arl0,
@@ -249,7 +249,7 @@ _SAS_ARL0 = 117.595692
 
 # Siegmund's (1985) correction constant, per the citation chain in the
 # module docstring. Reproduced here as a literal, deliberately independent
-# of caliper.baseline.domain.cusum_fitting._SIEGMUND_CORRECTION -- this
+# of drift_caliper.baseline.domain.cusum_fitting._SIEGMUND_CORRECTION -- this
 # file's formula is written fresh from the published definition, never
 # imported from the implementation under test (see "Helpers whose effect
 # cancels out" section below).
@@ -275,7 +275,7 @@ def _sufficient_baseline() -> Baseline:
 def _published_cusum_arl0(reference_value: float, decision_interval: float) -> float:
     """Siegmund's (1985) one-sided in-control ARL0, computed fresh from the definition.
 
-    Deliberately NOT calling ``caliper.baseline.domain.cusum_fitting._cusum_arl0``
+    Deliberately NOT calling ``drift_caliper.baseline.domain.cusum_fitting._cusum_arl0``
     -- this is an independent re-derivation used only to check the fitted
     artefact's *public* output (``reference_value``, ``decision_interval``)
     in the two-sided test below, so that a bug shared between this file and

@@ -2,7 +2,7 @@
 
 **Pairs with** ``tests/support/hypothesis_bound_scan.py`` **the way
 ``tests/support/exception_contract_registry.py`` pairs with**
-``caliper.__all__``: the scanner enumerates every ``min_value=``/
+``drift_caliper.__all__``: the scanner enumerates every ``min_value=``/
 ``max_value=`` bound site in ``tests/`` mechanically, by parsing source; this
 module says, for each distinct name the scanner can attach to a site
 (a ``@given(...)`` keyword, or a strategy-factory function name), whether it
@@ -74,9 +74,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from caliper.baseline import Baseline, fit_cusum, fit_ewma, fit_shewhart
-from caliper.baseline.domain.cusum_fitting import _min_attainable_arl0
-from caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
+from drift_caliper.baseline import Baseline, fit_cusum, fit_ewma, fit_shewhart
+from drift_caliper.baseline.domain.cusum_fitting import _min_attainable_arl0
+from drift_caliper.baseline.domain.parameter_guards import VERIFIED_ARL_FLOOR
 from tests.support.baseline_strategies import probe_baseline
 
 # An ordinary, unremarkable fittable baseline -- see `probe_baseline()`

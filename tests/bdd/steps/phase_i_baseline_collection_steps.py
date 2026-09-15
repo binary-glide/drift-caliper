@@ -17,13 +17,18 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 from pytest_bdd import given, then, when
 
-from caliper.baseline import Baseline
-from caliper.errors import (
+from drift_caliper.baseline import Baseline
+from drift_caliper.errors import (
     CaliperError,
     InvalidObservationError,
     ProvenanceMismatchError,
 )
-from caliper.measurement import ModelVersion, Provenance, ScoringCriteria, ScoringResult
+from drift_caliper.measurement import (
+    ModelVersion,
+    Provenance,
+    ScoringCriteria,
+    ScoringResult,
+)
 
 _MODEL_VERSION = "claude-sonnet-4-5-20250929"
 _CRITERIA = "Evaluate the response for factual accuracy and helpfulness."

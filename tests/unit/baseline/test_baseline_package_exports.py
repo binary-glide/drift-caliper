@@ -1,6 +1,6 @@
-"""``caliper.baseline``'s public export surface (BIN-110 P2).
+"""``drift_caliper.baseline``'s public export surface (BIN-110 P2).
 
-Before BIN-110, `caliper.baseline.__all__` listed 6 internal validation
+Before BIN-110, `drift_caliper.baseline.__all__` listed 6 internal validation
 bounds (`MIN_*`/`MAX_*`) alongside the useful domain types and `fit_*`
 functions -- noise on autocomplete that an engineer never needs to type.
 `DEFAULT_*` constants are ruled to belong (see below); `MIN_*`/`MAX_*` are
@@ -33,7 +33,7 @@ larger set of names rather than silently narrowing its own coverage.
 
 from __future__ import annotations
 
-import caliper.baseline as baseline_pkg
+import drift_caliper.baseline as baseline_pkg
 
 # The internal validation bounds removed from the public surface entirely
 # (not just from __all__ -- see module docstring). 6 from BIN-110, plus 3
@@ -88,7 +88,7 @@ _RETAINED_DOMAIN_EXPORTS = (
 def test_internal_validation_bounds_are_removed_from_the_module_entirely() -> None:
     """MIN_*/MAX_* must not be reachable at all -- not just absent from __all__.
 
-    `__all__` only changes `from caliper.baseline import *`; REPL
+    `__all__` only changes `from drift_caliper.baseline import *`; REPL
     tab-completion and `hasattr` see every module attribute regardless of
     `__all__`. The DX complaint was about autocomplete noise, so the
     re-export itself must go, not just the list entry.
@@ -96,7 +96,7 @@ def test_internal_validation_bounds_are_removed_from_the_module_entirely() -> No
     for name in _REMOVED_VALIDATION_BOUNDS:
         assert not hasattr(baseline_pkg, name), (
             f"{name} is internal validation noise; it must not be an "
-            "attribute of caliper.baseline at all"
+            "attribute of drift_caliper.baseline at all"
         )
         assert name not in baseline_pkg.__all__
 

@@ -77,20 +77,20 @@ import math
 
 import pytest
 
-from caliper.baseline import fit_cusum, fit_ewma, fit_shewhart
-from caliper.baseline.domain.ewma_fitting import (
+from drift_caliper.baseline import fit_cusum, fit_ewma, fit_shewhart
+from drift_caliper.baseline.domain.ewma_fitting import (
     MAX_MEANINGFUL_ARL,
     MAX_SMOOTHING_PARAM,
     MIN_COHERENT_ARL,
     MIN_SMOOTHING_PARAM,
 )
-from caliper.baseline.domain.ewma_numerics import (
+from drift_caliper.baseline.domain.ewma_numerics import (
     _ILL_CONDITIONED_ARL_SENTINEL,
     _MARKOV_CHAIN_STATES,
     _in_control_arl,
 )
-from caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
-from caliper.errors import CaliperError
+from drift_caliper.baseline.domain.parameter_guards import MIN_TARGET_ARL
+from drift_caliper.errors import CaliperError
 from tests.support.baseline_strategies import probe_baseline
 
 # Reuse the same fixed probe baseline every fitting function uses in the
