@@ -228,6 +228,18 @@ including the ones that were rejected and why.
 
 Apache 2.0 — see [LICENSE](LICENSE).
 
+## References
+
+<!-- Both renderers hoist footnote *definitions* to the end of the document
+     regardless of where they appear in the source, so this heading has to be
+     the last one for the list to land under it.
+
+     It is not decoration. GitHub labels the block
+     `<h2 class="sr-only">Footnotes</h2>` -- visually hidden, so sighted
+     readers get an unlabelled list -- and PyPI's readme_renderer emits a bare
+     `<section><ol>` with no heading at all. Without this, the citations render
+     as though they belong to the Licence section on both surfaces. -->
+
 [^d2]:
     Montgomery, D.C. *Introduction to Statistical Quality Control*, 7th ed.,
     Wiley 2013, Appendix VI. The exact value is `2/√π` for subgroups of size
