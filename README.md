@@ -66,7 +66,7 @@ pip install drift-caliper   # planned
 ```
 
 ```python
-import caliper
+import drift_caliper
 ```
 
 ## Licence
