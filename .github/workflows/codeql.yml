@@ -26,6 +26,13 @@
 name: CodeQL
 
 on:
+  # Manual trigger. ⚠️ Added 2026-09-16 when the repository went public and
+  # neither security workflow could be re-evaluated on demand: both are guarded
+  # on `repository.visibility`, that guard is read from the event payload, and
+  # the only triggers were push and a weekly cron. Confirming a
+  # visibility-gated job actually starts working should not require an
+  # otherwise-pointless commit or a week's wait.
+  workflow_dispatch:
   push:
     branches: [trunk]
   pull_request:
