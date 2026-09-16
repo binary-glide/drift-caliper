@@ -87,8 +87,10 @@ Given the above, the plausible reports are **not** the usual injection classes:
   commit cannot. The rest of CI pins by tag — the release job is the exception,
   because it is the only one holding `id-token: write`.
 
-⚠️ **Nothing is published to PyPI yet.** The pipeline exists and is audited;
-the first release has not been cut.
+`0.1.0a1` was published through this pipeline on 2026-09-16, with attestations
+on both the wheel and the sdist. ⚠️ **Verify them rather than take this on
+trust** — PyPI serves the provenance for each file from its own integrity
+endpoint, linked from the project's file list.
 
 ⚠️ **Verify rather than trust either list.** The workflows are in
 [`.github/workflows/`](.github/workflows/) and the Scorecard result is linked
