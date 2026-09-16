@@ -243,11 +243,9 @@ code_memory.db
 # IDs, vault paths, MemoryGraph namespaces, agent overrides) and engineering
 # standards a contributor genuinely needs. Only the first kind is private.
 #
-# ⚠️ The standards are NOT in this repository yet. They live only in
-# CLAUDE.md, and `grep` for "beartype" or "developer experience" across docs/
-# returns nothing. The extracted content is held in the vault at
-# Projects/caliper/engineering-standards.md, ready to drop into
-# CONTRIBUTING.md — that port is outstanding work, not done.
+# The standards a contributor needs are published in CONTRIBUTING.md. Keep
+# them there: anything in this file that a contributor would need to follow
+# belongs in CONTRIBUTING.md, not only here.
 #
 # 🚨 Removing this line does not make the file publishable. The public
 # repository is a separate export with CLAUDE.md filtered from every commit
