@@ -39,6 +39,19 @@ _ENOUGH = 120
 class _HashRaisingFloat(float):
     """A ``float`` subclass whose ``__hash__`` raises. BIN-149's input.
 
+    🚨 **``RuntimeError`` rather than ``TypeError`` is deliberate, and CodeQL
+    flags it** (*non-standard exception raised in special method*). The rule is
+    right about ordinary code — an unhashable type should raise ``TypeError``,
+    because that is what callers catch. **But that is exactly why it is wrong
+    here.** ``set()`` on a genuinely unhashable value already raises
+    ``TypeError``; if this fixture did the same, it would prove only that the
+    guard handles the one exception type Python itself produces. Raising
+    something arbitrary is what demonstrates that **no** foreign exception
+    escapes, which is the contract under test.
+
+    ⚠️ Do not "fix" this to ``TypeError``. It would weaken the test while
+    leaving it green.
+
     ⚠️ ``__eq__`` is defined alongside ``__hash__`` even though only the hash
     is under test. CodeQL's *inconsistent equality and hashing* rule flags a
     class overriding one without the other, and it is right to: a type whose
