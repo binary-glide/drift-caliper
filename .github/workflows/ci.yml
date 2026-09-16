@@ -5,6 +5,14 @@
 name: CI
 
 on:
+  # Manual trigger. Earned twice over:
+  #
+  #   * a secret added after the last run is not picked up until something
+  #     pushes -- setting CODECOV_TOKEN meant re-running an old run by id to
+  #     verify the upload, which is not a thing anyone should have to work out;
+  #   * a flake or an infrastructure failure should be re-runnable without an
+  #     empty commit on a protected branch.
+  workflow_dispatch:
   push:
     branches: [trunk]
   pull_request:
