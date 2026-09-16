@@ -66,5 +66,25 @@ jobs:
       - uses: github/codeql-action/init@977e6ceaea7361825998245d787fa3b4d6b9e5df # codeql-bundle-v2.27.0
         with:
           languages: python
-          queries: security-and-quality
+          # security-extended, not security-and-quality.
+          #
+          # Verified against GitHub's own description: security-and-quality is
+          # security-extended PLUS maintainability and reliability queries. So
+          # this drops the style layer and keeps every security query.
+          #
+          # 🚨 The style layer was 62 findings, none of them defects. Twelve
+          # were `py/ineffectual-statement` on the `...` bodies of a Protocol
+          # -- the canonical way to declare one. Two were
+          # `py/call/wrong-named-argument` on the tests that deliberately pin
+          # the ABSENCE of `force=` and `acknowledge=` on compare_provenance,
+          # so CodeQL confirming those keywords do not exist *is the assertion
+          # passing*. The rest were unused-import and polluting-import notes in
+          # test support code.
+          #
+          # ⚠️ This is not "turning off the noisy check". ruff, mypy --strict
+          # and ty already cover Python style here, and they understand
+          # Protocol stubs. CodeQL is carried for security credibility, and
+          # 62 open alerts on a public repository reads as neglect when every
+          # one of them is a query we did not want.
+          queries: security-extended
       - uses: github/codeql-action/analyze@977e6ceaea7361825998245d787fa3b4d6b9e5df # codeql-bundle-v2.27.0

@@ -205,15 +205,17 @@ def test_reported_observation_gap_is_exactly_enough_to_reach_sufficiency() -> No
     """
     baseline = _insufficient_baseline(short_by=10)
 
-    try:
+    # `pytest.raises` rather than try/except with a `raised` flag. The flag
+    # version left `have` and `need` unbound on the non-raising path -- safe in
+    # practice, because `assert raised` fired first, but CodeQL flagged it as a
+    # possible use-before-assignment and was right that nothing *static* rules
+    # it out. This form makes the guarantee structural: the body cannot be
+    # reached unless the error was raised.
+    with pytest.raises(InsufficientBaselineError) as exc_info:
         fit_shewhart(baseline, target_arl=370.0)
-        raised = False
-    except InsufficientBaselineError as exc:
-        raised = True
-        have = exc.context["have"]
-        need = exc.context["need"]
 
-    assert raised, "an intentionally-insufficient baseline unexpectedly fitted"
+    have = exc_info.value.context["have"]
+    need = exc_info.value.context["need"]
     gap = need - have
     assert gap == 10
 
