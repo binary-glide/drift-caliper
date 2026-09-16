@@ -1,0 +1,157 @@
+# Publish to PyPI via Trusted Publishing (BIN-88).
+#
+# 🚨 THIS IS THE PROJECT'S ONLY GENUINE SUPPLY-CHAIN EXPOSURE, and the file is
+# written accordingly. `src/` contains zero security-relevant sinks -- which is
+# why CodeQL finds nothing and is expected to -- but a workflow that can publish
+# to PyPI under the maintainer's identity is a real attack path. Everything
+# below that looks over-careful is deliberate:
+#
+#   * actions are pinned by COMMIT SHA, not tag. A tag can be re-pointed; a SHA
+#     cannot. ⚠️ The rest of CI uses tags -- this job is the exception, because
+#     it is the only one holding `id-token: write`.
+#   * the job that builds and the job that publishes are SEPARATE, so the build
+#     never runs with publishing rights.
+#   * `permissions:` is declared at the top as `{}` and granted per job, so a
+#     new job added later starts with nothing.
+#   * the publish job runs in a GitHub Environment, which is where a manual
+#     approval gate can be attached without touching this file.
+#
+# No PyPI API token exists anywhere. Trusted Publishing exchanges the workflow's
+# OIDC identity for a short-lived credential, so there is no long-lived secret
+# to leak, rotate, or accidentally print.
+#
+# ✅ Attestations are produced automatically by the official action -- PyPI
+# generates and uploads provenance with no configuration. ⚠️ Do NOT add Cosign
+# or `pypi-attestations`: manual attestation does not bypass PyPI's rules about
+# attesting identities and buys nothing here.
+#
+# Versions and SHAs verified live 2026-09-16:
+#   pypa/gh-action-pypi-publish  v1.14.2  a892a5a61159132606e93a2fa6f4358831b04d26
+#   actions/checkout             v7.0.1   3d3c42e5aac5ba805825da76410c181273ba90b1
+#   astral-sh/setup-uv           v10.1.0  bec219d24cd3e171d82865faccec33120bb574f4
+name: Release
+
+on:
+  # A published GitHub release is the trigger, not a pushed tag. ⚠️ That is
+  # deliberate and interacts with immutable releases: GitHub recommends
+  # create-as-draft, attach, then publish -- so `released` fires once, on an
+  # artefact whose tag can no longer move.
+  release:
+    types: [published]
+  # Manual trigger for a dry run against TestPyPI, which is the only way to
+  # rehearse this without spending a version number.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish"
+        required: true
+        default: testpypi
+        type: choice
+        options: [testpypi, pypi]
+
+permissions: {}
+
+jobs:
+  build:
+    name: build distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `checkout` writes GITHUB_TOKEN into .git/config by default, where
+          # any later step -- or anything they invoke -- can read it (zizmor
+          # `artipacked`). This job only reads the tree and never pushes, so
+          # there is nothing to keep credentials for.
+          persist-credentials: false
+
+      # 🚨 NO CACHE HERE, unlike every other workflow in this repository.
+        # zizmor flags `enable-cache: true` in a workflow that publishes
+        # artefacts as a cache-poisoning vector, and it is right: a poisoned
+        # cache entry would be baked into the distribution that gets uploaded
+        # under our name and attested as ours.
+        #
+        # ⚠️ The trade is explicit. A release build runs a handful of times a
+        # year and takes seconds longer without the cache. That is nothing
+        # against a supply-chain risk on the one job holding `id-token: write`.
+        # Do not add `enable-cache` here to match the other workflows.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      # 🚨 The README IS the PyPI long description, and PyPI's renderer
+      # (`readme_renderer`) supports strictly less than GitHub's. `twine check`
+      # validates against that exact renderer, so a README that renders on
+      # GitHub and breaks on PyPI fails HERE rather than after the upload --
+      # which cannot be undone.
+      - name: Validate metadata and long description
+        run: uv run --with twine twine check --strict dist/*
+
+      # The version in the artefact filename is the version being claimed.
+      # Printing it makes the release log self-documenting, and makes a
+      # mistaken version obvious before the publish job runs.
+      - name: Show what will be published
+        run: ls -l dist/
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # ⚠️ NOT CONFIGURED as of 2026-09-16, deliberately.
+  #
+  # TestPyPI is a separate service with its own account database -- it shares
+  # no credentials with PyPI -- and no account was registered. The GitHub
+  # `testpypi` environment exists, but there is no Trusted Publisher on the
+  # TestPyPI side, so dispatching this job will fail at the upload step with an
+  # OIDC error that does not mention the missing publisher.
+  #
+  # Kept rather than deleted because the rehearsal it offers is genuinely
+  # valuable: it exercises OIDC and the environment binding for real, without
+  # spending a version number. To enable it, register at test.pypi.org and add
+  # a pending publisher -- owner `binary-glide`, repo `drift-caliper`, workflow
+  # `release.yml`, environment `testpypi`.
+  #
+  # 🚨 It cannot fire by accident: `workflow_dispatch` only, and only when the
+  # target input is explicitly `testpypi`.
+  publish-testpypi:
+    name: publish to TestPyPI (not yet configured)
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/drift-caliper
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: build
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/drift-caliper
+    permissions:
+      # The only place this permission appears in the repository. It is what
+      # lets the action exchange an OIDC token for a PyPI credential -- and it
+      # is why every action in this file is SHA-pinned.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
