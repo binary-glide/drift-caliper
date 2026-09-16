@@ -40,6 +40,7 @@ from drift_caliper.baseline.domain.spc_numerics import (
     _has_zero_variance,
     _moving_range_sigma,
     _overflow_safe_mean,
+    baseline_scores,
     require_representable_limits,
 )
 from drift_caliper.errors import (
@@ -276,7 +277,7 @@ def fit_ewma(
             ),
         )
 
-    scores = [observation.score for observation in baseline.observations]
+    scores = baseline_scores(baseline.observations)
     if _has_zero_variance(scores):
         raise DegenerateBaselineError(
             "baseline has zero score variance -- EWMA control limits cannot "
