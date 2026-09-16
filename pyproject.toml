@@ -1,6 +1,6 @@
 [project]
 name = "drift-caliper"
-version = "0.1.0.dev0"
+version = "0.1.0a1"
 description = "Statistical Process Control for LLM-as-a-judge agent quality scores"
 readme = "README.md"
 license = "Apache-2.0"
