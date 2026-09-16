@@ -28,8 +28,8 @@ Caliper treats LLM-as-a-judge as a **measurement instrument** and applies
 choose a false alarm rate; the library derives control limits that deliver it,
 and reports what it actually achieved.
 
-**Status:** pre-release. The API below is implemented and tested, but nothing is
-published to PyPI yet.
+**Status:** alpha. Published and installable; the API below is implemented and
+tested. Expect it to move before 1.0.
 
 ---
 
@@ -59,19 +59,22 @@ print(fitted.requested_arl, fitted.achieved_arl)   # 370.0 370.0
 
 ## Install
 
-Not yet published.
-
 ```bash
-uv add drift-caliper        # planned
+uv add drift-caliper
 ```
 
 ```bash
-pip install drift-caliper   # planned
+pip install drift-caliper
 ```
 
 ```python
 import drift_caliper
 ```
+
+⚠️ `0.1.0a1` is a pre-release. Both commands above find it **today**, because
+pip and uv fall back to a pre-release when no stable version exists — but that
+changes the moment `0.1.0` ships, and a plain install will then resolve to the
+stable line instead. Pin explicitly if you want to stay on the alpha.
 
 ## Example
 
