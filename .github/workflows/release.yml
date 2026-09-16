@@ -101,8 +101,24 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  # ⚠️ NOT CONFIGURED as of 2026-09-16, deliberately.
+  #
+  # TestPyPI is a separate service with its own account database -- it shares
+  # no credentials with PyPI -- and no account was registered. The GitHub
+  # `testpypi` environment exists, but there is no Trusted Publisher on the
+  # TestPyPI side, so dispatching this job will fail at the upload step with an
+  # OIDC error that does not mention the missing publisher.
+  #
+  # Kept rather than deleted because the rehearsal it offers is genuinely
+  # valuable: it exercises OIDC and the environment binding for real, without
+  # spending a version number. To enable it, register at test.pypi.org and add
+  # a pending publisher -- owner `binary-glide`, repo `drift-caliper`, workflow
+  # `release.yml`, environment `testpypi`.
+  #
+  # 🚨 It cannot fire by accident: `workflow_dispatch` only, and only when the
+  # target input is explicitly `testpypi`.
   publish-testpypi:
-    name: publish to TestPyPI
+    name: publish to TestPyPI (not yet configured)
     needs: build
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
     runs-on: ubuntu-latest
