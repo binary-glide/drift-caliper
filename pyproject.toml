@@ -7,14 +7,47 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Binary Glide" }]
-keywords = ["spc", "control-chart", "llm", "drift-detection", "observability"]
+# Searcher's words first, ours after. brand.md § Discoverability: "Nobody types
+# 'SPC library for LLM scores'" -- they type "LLM quality drift detection" or
+# "how do I tell if my AI agent is getting worse". Two of the five keywords here
+# used to be our framing (`spc`, `control-chart`) and `llm-as-a-judge` was
+# absent, despite being in this file's own `description`. `spc` and
+# `control-chart` stay: some people do search them, they were just leading.
+keywords = [
+  "llm-as-a-judge",
+  "llm-evaluation",
+  "llm-drift-detection",
+  "drift-detection",
+  "agent-monitoring",
+  "quality-monitoring",
+  "observability",
+  "statistical-process-control",
+  "control-chart",
+  "spc",
+]
+# Verified against PyPI's canonical list (pypi.org/pypi?:action=list_classifiers)
+# on 2026-09-16 -- an invalid classifier is a hard upload rejection, and these
+# are exactly the facets someone browses rather than searches.
+#
+# ⚠️ No `License ::` classifier: `license = "Apache-2.0"` above is the PEP 639
+# form, and the two together are rejected.
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
+  # Pure Python, no OS-specific code in src/ (no `os`, `sys.platform`,
+  # `platform`). ⚠️ CI runs ubuntu-latest only, so this is a claim about the
+  # code rather than about tested coverage.
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  # The facet people actually browse for this. Its absence was the bigger gap
+  # than any keyword -- a package about LLM quality was filed only under
+  # Mathematics.
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: System :: Monitoring",
   "Typing :: Typed",
 ]
 
@@ -220,8 +253,11 @@ convention = "numpy"
 # checks that make BIN-85's "ships with strict type annotations" enforceable
 # rather than aspirational. Drop mypy when ty can express that, not before.
 #
-# ty needs no config here: it infers the target version from requires-python
-# and discovers the project from pyproject.toml.
+# ty needs no *version* config: it infers the target from requires-python and
+# discovers the project from pyproject.toml. ⚠️ It does have a `[tool.ty.src]`
+# section further down, excluding mutmut's generated mutants -- this comment
+# read "ty needs no config here" until 2026-09-16, which was true when ty was
+# added and stopped being true when that exclusion arrived.
 # ---------------------------------------------------------------------------
 [tool.mypy]
 # Deliberately NOT pinned to the 3.11 floor via `python_version`.
