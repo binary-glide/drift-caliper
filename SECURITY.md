@@ -68,6 +68,33 @@ Given the above, the plausible reports are **not** the usual injection classes:
 - **A judge that scores badly.** Caliper does not choose or call your judge.
 - **Resource use from a baseline you chose to make enormous.**
 
+## Two OpenSSF Scorecard checks we do not satisfy, deliberately
+
+Both show red on the badge. Neither is an oversight, and an unexplained
+permanent red is worse than a stated no.
+
+**`Code-Review`** wants every change reviewed by **another person**. This is a
+single-maintainer project, so it cannot be satisfied — and setting a required
+approval count would not earn the points, it would make every merge impossible.
+`trunk` is protected in every other respect: pull requests required, status
+checks required and up to date, linear history, no force-pushes, no deletions.
+⚠️ Revisit the moment a second maintainer exists.
+
+**`Fuzzing`** wants a fuzzing harness. We have property-based testing instead,
+via `hypothesis`, plus an exception-contract registry that drives every public
+entry point with deliberately hostile inputs and asserts that nothing escapes
+as a non-`CaliperError`.
+
+🚨 **That is a better fit than a fuzzer for this surface, and the project's own
+history says so.** Caliper's inputs are floats and short strings — a fuzzer's
+strength is finding crashes in parsers and decoders, and there are none here.
+Every defect this library has actually shipped was found by a *property* or a
+*contract*, not by random input: a negative average run length from two
+individually-legal parameters, a control limit that was infinite because an
+intermediate overflowed, an exception type escaping from a set membership test.
+⚠️ A fuzzer would have found none of them, because none involved malformed
+bytes.
+
 ## How releases are protected
 
 **In place today:**

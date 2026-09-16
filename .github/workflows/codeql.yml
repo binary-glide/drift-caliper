@@ -57,9 +57,14 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: github/codeql-action/init@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `checkout` writes GITHUB_TOKEN into .git/config by default, where
+          # any later step can read it (zizmor `artipacked`). Nothing in this
+          # workflow pushes, so there is nothing to keep credentials for.
+          persist-credentials: false
+      - uses: github/codeql-action/init@977e6ceaea7361825998245d787fa3b4d6b9e5df # codeql-bundle-v2.27.0
         with:
           languages: python
           queries: security-and-quality
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@977e6ceaea7361825998245d787fa3b4d6b9e5df # codeql-bundle-v2.27.0
