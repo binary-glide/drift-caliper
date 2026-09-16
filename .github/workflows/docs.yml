@@ -51,4 +51,3 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --group docs
       - run: uv run --group docs mkdocs build --strict
-

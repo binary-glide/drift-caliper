@@ -1,0 +1,157 @@
+# Commit-time quality gates (BIN-89).
+#
+# Hook versions verified live on 2026-09-16: pre-commit 4.6.2 (PyPI),
+# pre-commit-hooks v6.0.0 (GitHub releases). Per the standing project rule,
+# no version here was pinned from recollection.
+#
+# Install once, after `uv sync`:
+#
+#     uv run pre-commit install
+#
+# `default_install_hook_types` below means that single command installs the
+# commit-msg hook too. Getting only half the gates because you did not know to
+# pass `--hook-type commit-msg` is exactly the silent-partial-enforcement
+# failure this repository keeps re-learning.
+#
+# ---------------------------------------------------------------------------
+# 🚨 Why the linters are `local` hooks running `uv run`, not their own repos
+# ---------------------------------------------------------------------------
+#
+# The obvious form is `astral-sh/ruff-pre-commit` and `mirrors-mypy`. Both were
+# rejected, for one reason: **they pin their own tool versions, separately from
+# `uv.lock`.** That makes two records of truth for "which ruff runs", and this
+# project has been bitten by a hook and CI disagreeing before -- PR #39 cost a
+# red CI run because `ruff check` passed locally from a stale cache while CI
+# failed `I001` on the same tree. A second ruff *version* is a worse version of
+# that same bug, and `mirrors-mypy` is worse still: mypy is only meaningful
+# here with numpy's and pydantic's real stubs present, so an isolated env would
+# need `additional_dependencies` duplicating the lockfile by hand.
+#
+# Running `uv run` means the hooks and CI execute the same binaries from the
+# same lockfile, by construction rather than by attention.
+#
+# Cost: `uv` must be on PATH. It already must be -- every gate in CLAUDE.md is
+# a `uv run` command.
+#
+# ---------------------------------------------------------------------------
+# ⚠️ What is deliberately NOT here: the test suite
+# ---------------------------------------------------------------------------
+#
+# `uv run pytest` takes **99 seconds** (1076 tests, measured 2026-09-16). A
+# pre-push hook that slow gets routed around with `--no-verify`, and a gate
+# people bypass is worse than one that was never claimed -- it reads as
+# enforced while enforcing nothing. CI runs the suite on 3.11, 3.12 and 3.13,
+# which is the honest place for it. BIN-89's scope is lint, types and commit
+# format; tests were never in it.
+
+minimum_pre_commit_version: "4.0.0"
+
+# `pre-commit install` installs both, so the commit-msg gate cannot be missed.
+default_install_hook_types: [pre-commit, commit-msg]
+
+# ⚠️ Every hook declares `stages` explicitly. A hook that omits it runs at
+# *every* stage, including commit-msg -- where `end-of-file-fixer` and
+# `trailing-whitespace` would rewrite the commit message itself and fail the
+# commit with "files were modified by this hook". Found by running the
+# commit-msg stage directly, not by reading the config.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Two trailing spaces are a hard line break in Markdown, so stripping
+      # them blindly would silently reflow prose in the ADRs -- documents this
+      # project treats as ratified records.
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: check-yaml
+        # mkdocs.yml carries `!!python/name:pymdownx.superfences...`, which is
+        # a MkDocs-specific tag that safe-loading cannot resolve. Excluding the
+        # one file is more honest than passing `--unsafe` globally, which would
+        # downgrade every other YAML to a syntax-only check.
+        exclude: ^mkdocs\.yml$
+        stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: check-case-conflict
+        stages: [pre-commit]
+      - id: check-added-large-files
+        args: [--maxkb=512]
+        stages: [pre-commit]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      # `--no-cache` is load-bearing, not caution. Ruff's isort decides
+      # first-party vs third-party by whether a module resolves; introduce a
+      # package mid-branch and every already-linted test file keeps its old
+      # classification, because those files did not change. `ruff check .`
+      # then reports success while CI fails I001 on the same tree. Ruff runs
+      # in well under a second here either way.
+      - id: ruff-check
+        name: ruff (lint)
+        entry: uv run ruff check --no-cache .
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: ruff-format
+        name: ruff (format)
+        entry: uv run ruff format --check .
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      # Both type checkers run, per ADR-007: `ty` is the house Astral gate,
+      # and `mypy --strict` stays because Caliper ships `py.typed` -- its
+      # annotations are a contract consumers check with mypy, and ty 0.0.x has
+      # no strict mode.
+      #
+      # ⚠️ Neither takes filenames. Type errors are non-local: checking only
+      # the staged files would miss the caller a changed signature just broke,
+      # and report a clean run while doing it.
+      - id: ty
+        name: ty (types)
+        entry: uv run ty check --error-on-warning
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: mypy
+        name: mypy --strict
+        entry: uv run mypy
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      # The release workflow holds `id-token: write` and is this project's
+      # single genuine supply-chain exposure -- `src/` has zero
+      # security-relevant sinks, but a workflow that can publish to PyPI under
+      # the maintainer's identity is a real attack path. BIN-88 made running
+      # zizmor an acceptance criterion; this makes it a gate instead of a
+      # thing someone remembers.
+      - id: zizmor
+        name: zizmor (workflow audit)
+        entry: uv run zizmor .github/workflows/
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: commit-message
+        name: commit message format (gitmoji + conventional)
+        entry: uv run python scripts/check_commit_message.py
+        language: system
+        stages: [commit-msg]
+        always_run: true
