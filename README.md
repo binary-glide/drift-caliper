@@ -62,6 +62,10 @@ print(fitted.requested_arl, fitted.achieved_arl)   # 370.0 370.0
 Not yet published.
 
 ```bash
+uv add drift-caliper        # planned
+```
+
+```bash
 pip install drift-caliper   # planned
 ```
 
