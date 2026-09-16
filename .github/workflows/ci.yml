@@ -52,6 +52,42 @@ jobs:
       - run: uv run ty check --error-on-warning
       - run: uv run mypy
 
+  # Runs the pre-commit hooks against the whole tree (BIN-89).
+  #
+  # ⚠️ This deliberately overlaps the `lint` job above, which is not an
+  # oversight. `lint` is the authoritative four-gate contract named in
+  # CLAUDE.md: it runs the tools directly, needs nothing but uv, and fails
+  # legibly per tool. This job checks that the *hook configuration* is green,
+  # and catches what `lint` cannot see -- trailing whitespace, missing final
+  # newlines, mixed line endings, an unparseable YAML, and the zizmor workflow
+  # audit -- for the contributor who never ran `pre-commit install`.
+  #
+  # The overlap costs a few seconds: ruff is ~0.3s and mypy ~2.2s. Keeping
+  # both means a broken hook repo cannot take the real gates down with it.
+  #
+  # The commit-msg hook is not exercised here: it validates one message at a
+  # time, and on a pull request the subject that will actually land is the
+  # squash title, which is typed on the web and never reaches any hook.
+  pre-commit:
+    name: pre-commit hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      # No hook-environment cache on purpose: the only managed environment is
+      # pre-commit-hooks, which installs in seconds, and caching it would mean
+      # pinning another action for no meaningful saving.
+      #
+      # `--show-diff-on-failure` matters because several hooks fix rather than
+      # report -- without it a failure says "files were modified" and not what
+      # changed.
+      - run: uv run pre-commit run --all-files --show-diff-on-failure
+
   audit:
     name: dependency audit
     runs-on: ubuntu-latest

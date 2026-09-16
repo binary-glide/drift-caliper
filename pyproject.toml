@@ -92,6 +92,12 @@ dev = [
   # tests/conftest.py, so it instruments nothing in the shipped wheel.
   "beartype>=0.22",
   "ruff>=0.16.7",
+  # Commit-time gates (BIN-89). `pre-commit` drives them; `zizmor` audits the
+  # workflow files, and lives here rather than being invoked via `uvx` so that
+  # the version is pinned by uv.lock like every other tool -- an unpinned
+  # security auditor is the one tool whose result must be reproducible.
+  "pre-commit>=4.6.2",
+  "zizmor>=1.30.1",
 ]
 
 # Documentation stack (BIN-86). Chosen deliberately, not inherited: the ticket
@@ -276,7 +282,7 @@ convention = "numpy"
 strict = true
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 exclude = ["^mutants/"]
 
 [[tool.mypy.overrides]]
