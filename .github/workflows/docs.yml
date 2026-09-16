@@ -19,6 +19,11 @@
 name: Docs
 
 on:
+  # Manual trigger. The published site is built by Read the Docs, so this job
+  # is a pre-merge gate rather than a deploy -- which makes it exactly the kind
+  # of check worth running on demand after changing mkdocs.yml or a docstring,
+  # without waiting for a push.
+  workflow_dispatch:
   push:
     branches: [trunk]
   pull_request:
