@@ -37,8 +37,13 @@ jobs:
     name: lint and types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `checkout` writes GITHUB_TOKEN into .git/config by default, where
+          # any later step can read it (zizmor `artipacked`). Nothing in this
+          # workflow pushes, so there is nothing to keep credentials for.
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -51,8 +56,13 @@ jobs:
     name: dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `checkout` writes GITHUB_TOKEN into .git/config by default, where
+          # any later step can read it (zizmor `artipacked`). Nothing in this
+          # workflow pushes, so there is nothing to keep credentials for.
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
       # `uv audit` audits the *lockfile*, so a vulnerable pin is caught
@@ -75,8 +85,13 @@ jobs:
         # classifiers. All three are tested; none is a smoke run.
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `checkout` writes GITHUB_TOKEN into .git/config by default, where
+          # any later step can read it (zizmor `artipacked`). Nothing in this
+          # workflow pushes, so there is nothing to keep credentials for.
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
@@ -91,7 +106,7 @@ jobs:
       #
       # Action version verified live 2026-09-15: codecov/codecov-action v7.1.0.
       - if: matrix.python-version == '3.13'
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@0b35c9ecc4f0529d0eb674914510c22f85b196b4 # v7.1.0
         with:
           files: coverage.xml
           fail_ci_if_error: false
