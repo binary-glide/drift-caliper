@@ -83,7 +83,9 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -144,3 +146,4 @@ nav:
       - 010 Signal delivery: architecture/adr/010-signal-delivery-and-absorb-but-surface.md
       - 011 Minimum target ARL0: architecture/adr/011-minimum-meaningful-target-arl0.md
   - Domain model: domain-model.md
+  - Changelog: changelog.md
