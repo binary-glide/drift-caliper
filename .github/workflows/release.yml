@@ -9,6 +9,21 @@
 #   * actions are pinned by COMMIT SHA, not tag. A tag can be re-pointed; a SHA
 #     cannot. ⚠️ The rest of CI uses tags -- this job is the exception, because
 #     it is the only one holding `id-token: write`.
+#
+#     🚨 WITH ONE FORCED EXCEPTION: `gh-action-pypi-publish` CANNOT be
+#     SHA-pinned. It is a composite action that generates a Docker trampoline
+#     using `github.action_ref` as the IMAGE TAG, so a SHA pin asks for
+#     `ghcr.io/pypa/gh-action-pypi-publish:<sha>` -- an image that is never
+#     published, because the images are tagged by release. Discovered the hard
+#     way on the first release attempt (2026-09-16):
+#
+#         docker: Error response from daemon: manifest unknown
+#
+#     So it is pinned to the exact version tag `v1.14.2`, never a floating
+#     `release/v1`: a patch tag moving is a far smaller surface than a major
+#     alias moving, and Dependabot's github-actions ecosystem bumps it.
+#     ⚠️ Do not "fix" this back to a SHA -- it fails at the last possible
+#     moment, after a release is already published and immutable.
 #   * the job that builds and the job that publishes are SEPARATE, so the build
 #     never runs with publishing rights.
 #   * `permissions:` is declared at the top as `{}` and granted per job, so a
@@ -132,7 +147,9 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
+      # Version tag, not a SHA -- see the header. This action cannot be
+      # SHA-pinned; doing so breaks its Docker image pull.
+      - uses: pypa/gh-action-pypi-publish@v1.14.2 # zizmor: ignore[unpinned-uses]
         with:
           repository-url: https://test.pypi.org/legacy/
 
@@ -154,4 +171,6 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
+      # Version tag, not a SHA -- see the header. This action cannot be
+      # SHA-pinned; doing so breaks its Docker image pull.
+      - uses: pypa/gh-action-pypi-publish@v1.14.2 # zizmor: ignore[unpinned-uses]
