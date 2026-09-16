@@ -37,10 +37,22 @@ _ENOUGH = 120
 
 
 class _HashRaisingFloat(float):
-    """A ``float`` subclass whose ``__hash__`` raises. BIN-149's input."""
+    """A ``float`` subclass whose ``__hash__`` raises. BIN-149's input.
+
+    ⚠️ ``__eq__`` is defined alongside ``__hash__`` even though only the hash
+    is under test. CodeQL's *inconsistent equality and hashing* rule flags a
+    class overriding one without the other, and it is right to: a type whose
+    hash and equality disagree misbehaves in sets and dicts in ways that are
+    miserable to debug. Defining both is also what BIN-121's ``_HostileStr``
+    already does, so this follows the convention rather than suppressing the
+    rule.
+    """
 
     def __hash__(self) -> int:
         raise RuntimeError("float hash exploded")
+
+    def __eq__(self, other: object) -> bool:
+        return float.__eq__(self, other)
 
 
 class _FloatRaisingFloat(float):
@@ -53,6 +65,10 @@ class _FloatRaisingFloat(float):
 
     def __hash__(self) -> int:
         raise RuntimeError("float hash exploded")
+
+    def __eq__(self, other: object) -> bool:
+        # Defined for the same reason as _HashRaisingFloat's -- see above.
+        return float.__eq__(self, other)
 
     def __float__(self) -> float:
         raise RuntimeError("float conversion exploded")
