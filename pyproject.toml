@@ -98,6 +98,10 @@ dev = [
   # security auditor is the one tool whose result must be reproducible.
   "pre-commit>=4.6.2",
   "zizmor>=1.30.1",
+  # Changelog generation (BIN-90). Pinned by uv.lock rather than invoked via
+  # `uvx` so the tool that produces a release artefact is the same version for
+  # everyone: `uv run git-cliff -o CHANGELOG.md`.
+  "git-cliff>=2.13.1",
 ]
 
 # Documentation stack (BIN-86). Chosen deliberately, not inherited: the ticket
