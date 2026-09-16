@@ -52,6 +52,51 @@ class MyJudgeProvider:
     score came from. The seam is a `Protocol`, so your class needs no base
     class and no registration — it just needs the method.
 
+### Already using an eval library? Use its judge
+
+If your stack includes **LlamaIndex**, **Haystack**, **Ragas**, **DeepEval**,
+**TruLens**, **Giskard** or **Evidently**, each ships an LLM-as-judge and you
+have already paid for the dependency. Call it inside `score` and return what it
+gives you.
+
+**That is the intended outcome, not a gap in Caliper.** An adapter for a library
+you already have would add a dependency to wrap a call you can make in ten
+lines.
+
+Two things to check, whichever you use:
+
+!!! warning "Pin the model explicitly, and make sure you get a number"
+
+    **Several judge libraries default the model.** `pydantic-evals`, for
+    example, defaults to a specific OpenAI model and lets it be changed
+    process-wide with a single call. ⚠️ **Pass the model on every call and
+    never rely on the default** — an unpinned judge that changes underneath you
+    is the failure Caliper exists to detect, and it is not much use if the
+    library detecting it is itself unpinned.
+
+    **Check what the judge actually returns.** Some default to a pass/fail
+    assertion rather than a score, and some grade on a fixed scale —
+    Inspect AI's built-in scorers, for instance, produce *correct / partial /
+    incorrect*, which becomes 1.0, 0.5 or 0.0.
+
+    🚨 **A three-valued score is not enough to run a control chart on.** The
+    spread estimate has almost nothing to work with, and you are likely to get
+    `DegenerateBaselineError`. It is the same discreteness problem that
+    [ADR-001](architecture/adr/001-spc-engine-in-house-with-scipy.md) describes
+    when rejecting the p-chart — arriving through the judge rather than the
+    chart. **Ask your judge for a continuous score.**
+
+!!! warning "A model alias is not a pinned version"
+
+    `"openai:gpt-5.2"` and `"anthropic:claude-sonnet-4-6"` are *aliases*, and
+    aliases are re-pointed. If you record an alias as your `model_version`,
+    Caliper will compare it against itself happily while the model behind it
+    changes — which is precisely the invalidation
+    [provenance](concepts.md#4-provenance-why-the-judge-is-pinned) is there to
+    catch.
+
+    Record the most specific identifier your provider exposes.
+
 ## 2. Pin the judge
 
 ```python
