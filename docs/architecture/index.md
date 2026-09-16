@@ -24,6 +24,7 @@ It tells you the question was asked.
 | [009](adr/009-phase-ii-monitor-and-observation-store.md) | Where Phase II chart state lives between calls |
 | [010](adr/010-signal-delivery-and-absorb-but-surface.md) | Signal delivery, and what happens when a receiver raises |
 | [011](adr/011-minimum-meaningful-target-arl0.md) | The minimum meaningful `target_arl`, and why two sourced numbers were not rivals |
+| [012](adr/012-bernoulli-chart-design-and-reference-value.md) | How binary charts are designed, and which of them has an exact ARL |
 
 ## Three that are worth reading even if you never touch the code
 
