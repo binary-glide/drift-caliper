@@ -44,7 +44,9 @@ import itertools
 import math
 from collections.abc import Sequence
 
+from drift_caliper.baseline.domain.attribute_probe import invalid_observation_error
 from drift_caliper.errors import DegenerateBaselineError
+from drift_caliper.measurement import ScoringResult
 
 # The unbiasing constant d_2 for a moving-range span of 2 (consecutive
 # individual observations).
@@ -103,6 +105,55 @@ _MOVING_RANGE_METHOD = "moving_range"
 _NON_FINITE_SIGMA_REASON = "non_finite_sigma_estimate"
 _SIGMA_UNDERFLOW_REASON = "sigma_estimate_underflow"
 _NON_FINITE_LIMITS_REASON = "non_representable_control_limits"
+
+
+def baseline_scores(observations: Sequence[ScoringResult]) -> list[float]:
+    """Extract scores as **exact** ``float``s, ready to hash and compute with.
+
+    🚨 **The normalisation is the point, not the extraction** (BIN-149).
+    ``_has_zero_variance`` below calls ``set(scores)``, and ``Baseline``'s
+    sufficiency probe builds a set comprehension over the same values --
+    **and ``set()`` hashes every element.** A ``float`` subclass whose
+    ``__hash__`` raises therefore escaped every ``fit_*`` and
+    ``check_sufficiency()`` as a bare ``RuntimeError`` rather than a
+    ``CaliperError``.
+
+    ⚠️ **Reachable despite ``ScoringResult``'s validator**, which coerces a
+    ``float`` subclass to an exact ``float``: ``model_construct()`` and
+    ``model_copy(update=...)`` skip validation **by design**, and
+    ``Baseline.record()``'s ``isinstance(result, ScoringResult)`` check passes
+    such an instance. **A Pydantic field annotation is a validation-time
+    guarantee, not a storage-time one.**
+
+    ⚠️ **``float.__float__(value)``, not ``float(value)``.** The latter
+    dispatches to a hijackable ``__float__`` and merely relocates the defect --
+    verified: against a subclass overriding both, ``float(v)`` raises and
+    ``float.__float__(v)`` returns a clean ``float``. The same reasoning, and
+    the same shape, as ``str.__str__`` in ``compare_provenance`` (BIN-139) and
+    ``parameter_guards.require_exact_str`` (BIN-143).
+
+    🚨 **``isinstance``, never ``type(x) is float``.** ``numpy.float64`` **is**
+    a ``float`` subclass and hashes perfectly well; rejecting it would trade a
+    leak for a false rejection of a legitimate input -- the BIN-123 class.
+    ``tests/unit/baseline/test_hashed_score_normalisation.py`` fails that fix
+    deliberately.
+
+    Also the one definition of an extraction that was previously written out
+    in all three ``fit_*`` functions (BIN-125's pattern, twelfth instance).
+
+    Raises
+    ------
+    InvalidObservationError
+        An observation's ``score`` is not a ``float`` at all -- only reachable
+        by bypassing ``ScoringResult``'s validation.
+    """
+    scores: list[float] = []
+    for observation in observations:
+        score = observation.score
+        if not isinstance(score, float):
+            raise invalid_observation_error(observation)
+        scores.append(float.__float__(score))
+    return scores
 
 
 def _has_zero_variance(scores: Sequence[float]) -> bool:

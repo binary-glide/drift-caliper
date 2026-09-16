@@ -18,6 +18,7 @@ from drift_caliper.baseline.domain.attribute_probe import invalid_observation_er
 from drift_caliper.baseline.domain.data_quality_concern import DataQualityConcern
 from drift_caliper.baseline.domain.parameter_guards import require_real_number
 from drift_caliper.baseline.domain.provenance_comparison import build_mismatches
+from drift_caliper.baseline.domain.spc_numerics import baseline_scores
 from drift_caliper.baseline.domain.sufficiency_result import SufficiencyResult
 from drift_caliper.errors import InvalidParameterError, ProvenanceMismatchError
 from drift_caliper.measurement import Provenance, ScoringResult
@@ -93,7 +94,11 @@ def _zero_variance_concerns(
     """
     if len(observations) < _MIN_OBSERVATIONS_FOR_VARIANCE_CHECK:
         return ()
-    distinct_scores = {observation.score for observation in observations}
+    # Normalised before hashing -- a set comprehension hashes every element,
+    # and a float subclass with a raising __hash__ reaches here through
+    # Pydantic's validation bypasses (BIN-149). Same helper the three
+    # fit_* functions use, so the two paths cannot diverge.
+    distinct_scores = set(baseline_scores(observations))
     if len(distinct_scores) > 1:
         return ()
     return (

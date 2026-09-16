@@ -594,7 +594,6 @@ _BASELINE_CASES = (
         "hash_raising_score_in_sufficiency",
         lambda: _hash_hostile_baseline().check_sufficiency(),
         kind=InputKind.HASH_RAISES,
-        known_leak=KnownLeak(ticket="BIN-149", leaked_type=RuntimeError),
     ),
     HostileCase(
         "record_none",
@@ -1210,7 +1209,6 @@ _FIT_EWMA_CASES = (
         "hash_raising_score_in_zero_variance_probe",
         lambda: fit_ewma(_hash_hostile_baseline(), target_arl=370.0),
         kind=InputKind.HASH_RAISES,
-        known_leak=KnownLeak(ticket="BIN-149", leaked_type=RuntimeError),
     ),
     HostileCase(
         "missing_target_arl",
@@ -1413,7 +1411,6 @@ _FIT_SHEWHART_CASES = (
         "hash_raising_score_in_zero_variance_probe",
         lambda: fit_shewhart(_hash_hostile_baseline(), target_arl=370.0),
         kind=InputKind.HASH_RAISES,
-        known_leak=KnownLeak(ticket="BIN-149", leaked_type=RuntimeError),
     ),
     HostileCase(
         "missing_target_arl",
