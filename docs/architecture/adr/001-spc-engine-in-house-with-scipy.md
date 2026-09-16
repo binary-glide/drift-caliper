@@ -442,6 +442,16 @@ finite reachable lattice, so the Markov chain is solved rather than
 discretised — unlike the continuous EWMA, where published tables are the only
 independent check.
 
+> 🚨 **Correction 2026-09-16 (ADR-012): the paragraph above is true of the
+> Bernoulli CUSUM and false of the Bernoulli EWMA.** Counting each statistic's
+> reachable support directly, the CUSUM's is bounded by `H/r` while the EWMA's
+> is exactly `2^t` after `t` observations — 1,048,576 states at `t = 20`, with
+> no collapse. The CUSUM's floor at zero and fixed increments confine it to a
+> lattice; `zₜ = λXₜ + (1 − λ)zₜ₋₁` has neither. **The Bernoulli EWMA therefore
+> needs a discretisation scheme and its own accuracy argument, exactly as the
+> continuous EWMA does**, and ADR-012 reorders the two charts accordingly. The
+> claim was written for the family and holds only for one member of it.
+
 **A published cross-check is still wanted before any constant ships. None of
 these are held.** Citations verified against Crossref 2026-09-14, not recalled:
 
