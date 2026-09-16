@@ -1,0 +1,96 @@
+# Security policy
+
+## Reporting a vulnerability
+
+**Use GitHub's private vulnerability reporting:**
+[Report a vulnerability](https://github.com/binary-glide/drift-caliper/security/advisories/new).
+
+That opens a private advisory visible only to the maintainers. Please do not
+open a public issue for a suspected vulnerability.
+
+If you would rather not use GitHub, open a public issue saying only that you
+have a report and how to reach you — **no details** — and we will arrange a
+private channel.
+
+### What to expect
+
+| | |
+|---|---|
+| Acknowledgement | within 5 working days |
+| Assessment | within 14 days |
+| Fix or a stated reason it is not one | with the assessment |
+
+⚠️ **This is a small project, not a vendor with an on-call security team.**
+Those windows are what we intend to meet, not a contractual SLA. If a report is
+urgent and unacknowledged, escalate by opening a public issue saying a report is
+outstanding — still without details.
+
+## Supported versions
+
+Pre-1.0. **Only the latest release is supported**, and fixes land in a new
+release rather than being backported.
+
+## What the attack surface actually is
+
+Stated plainly, because it is unusually small and that changes what is worth
+your time:
+
+**Three runtime dependencies** — `numpy`, `scipy`, `pydantic`.
+
+**No I/O of any kind.** `src/` contains no `subprocess`, `pickle`, `eval`,
+`exec`, `os.system`, `open`, `yaml`, `requests`, `urllib`, `socket`, `hashlib`,
+`secrets`, `tempfile`, `shutil`, `__import__`, `marshal` or `input`. There is no
+network code, no filesystem access, no deserialisation, no templating, no SQL,
+no cryptography and no credential handling.
+
+**The library does not call an LLM.** Judging happens behind a `Protocol` you
+implement, so any provider SDK, API key or network call lives in *your* code,
+not ours.
+
+### Where a real issue is most likely
+
+Given the above, the plausible reports are **not** the usual injection classes:
+
+- **A numerical defect that produces a control limit that is wrong rather than
+  absent.** A chart that silently never signals, or reports a false alarm rate
+  it does not deliver, is the failure this library exists to prevent. We treat
+  that as a correctness bug of the highest order — see the project's own history
+  of such fixes — but if you believe it is exploitable rather than merely wrong,
+  report it here.
+- **A crash reachable from caller-supplied data** that escapes as something
+  other than a `CaliperError`. Several have been found and fixed; the
+  exception-contract test suite exists because of them.
+- **Supply chain** — a compromised dependency or release artefact.
+
+### Not vulnerabilities
+
+- **Control limits you disagree with.** Open an issue; bring the derivation.
+- **A judge that scores badly.** Caliper does not choose or call your judge.
+- **Resource use from a baseline you chose to make enormous.**
+
+## How releases are protected
+
+**In place today:**
+
+- **Immutable releases** — a published release's tag cannot move and its assets
+  cannot be altered.
+- **CodeQL** on every pull request.
+- **OpenSSF Scorecard** reporting supply-chain posture publicly, including the
+  findings we have not yet addressed.
+- **Dependency audit** on every pull request.
+
+**Planned, and deliberately listed as planned:**
+
+- **Trusted Publishing (OIDC)** to PyPI, so no long-lived API token exists to
+  steal.
+- **Attestations** binding each artefact to this repository, workflow and
+  commit.
+
+⚠️ **Nothing is published to PyPI yet**, and no release workflow exists — so
+the two items above describe intent, not protection you currently benefit from.
+They are named here because a security policy that quietly omits what is
+missing is worse than one that admits it.
+
+⚠️ **Verify rather than trust either list.** The workflows are in
+[`.github/workflows/`](.github/workflows/) and the Scorecard result is linked
+from the README badge — including the checks currently failing.

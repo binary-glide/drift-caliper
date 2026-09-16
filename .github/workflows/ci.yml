@@ -13,6 +13,17 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege at the top level, inherited by every job that does not
+# narrow it further (OpenSSF Scorecard `Token-Permissions`). Without this the
+# workflow runs with whatever the repository default grants, which for a public
+# repository is read-only today but is a setting rather than a guarantee --
+# and a compromised action in a write-scoped job can push to the repository.
+#
+# Nothing here writes: lint, audit and test all only read the checkout. The
+# Codecov upload authenticates with its own token, not GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: lint and types
