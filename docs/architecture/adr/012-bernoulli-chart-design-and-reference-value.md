@@ -196,10 +196,10 @@ They do not. The ordering now follows verification, not symmetry:
 | Independent published cross-check | **held** | none obtained |
 | Blocking work before it can ship | baseline threshold measurement | discretisation scheme, accuracy argument, oracle |
 
-**The EWMA remains the intended primary chart.** It is deferred, not rejected:
-ADR-001's argument for EWMA as the default — near-optimal across a *range* of
-shift sizes, which is the right default when the engineer does not know what
-degradation they face — is untouched by any of this.
+**The EWMA is deferred, not rejected.** ⚠️ **Which binary chart is ultimately
+*primary* is not decided here** — an earlier version of this section asserted
+that the EWMA remains the intended primary chart, carrying ADR-001's
+continuous-score default forward unexamined. See the amendment below.
 
 ### 6. Degenerate rates raise
 
@@ -264,3 +264,130 @@ verifiable behind the chart that is not.
   type or a separate fitting function infers it. Interacts with BIN-61.
 - **When BIN-132's `bool` rejection lifts.** It lifts when a binary chart ships,
   not when this ADR is accepted.
+- **Which binary chart is primary.** Added by the amendment below; it was
+  previously asserted as settled in the body of this ADR and should not have
+  been.
+
+---
+
+## Amendment 2026-09-17 — ratified by the product owner
+
+Three decisions and two corrections, following a retrospective architecture
+review of this ADR and a spike commissioned by it. The review was called
+because this ADR was authored outside the architecture phase; it re-derived
+the reference value, the exactness distinction and the lattice behaviour
+independently and confirmed all three. What follows is what it found missing.
+
+### 1. 🚨 Sign convention — Bernoulli observations are higher-is-better
+
+**A Bernoulli observation follows the same convention as every other Caliper
+score: `1.0` is the good outcome.** Where this ADR says "the failure rate", it
+means `1 − mean(score)`.
+
+This ADR did not state that, and the omission is more dangerous than it looks.
+Every other Caliper chart is higher-is-better — the lower arm detects
+degradation — while this ADR's text is written throughout in terms of a
+*failure* rate rising. The two only reconcile under the mapping above.
+
+⚠️ **The failure mode is silent.** A rubric like *"did it cite a source"*
+naturally returns `True` for the good outcome; a rubric like *"was it
+harmful"* naturally returns `True` for the bad one. An engineer recording the
+second as `1.0` gets a chart that is internally consistent, reports a
+plausible achieved ARL₀, and signals on the wrong side. Nothing about it looks
+wrong.
+
+### 2. Two-sided by default
+
+**The Bernoulli CUSUM is two-sided by default, configurable to one-sided.**
+
+ADR-004 already settled exactly this for the continuous CUSUM, and this ADR
+neither cited it nor explained a departure from it — the omission was an
+oversight, not a decision.
+
+The upper arm's design point is `p₀ / detect_rate_multiple`, the same lever
+applied symmetrically, so the common case gains **no new API surface**. It
+detects a failure rate that has *fallen*, which under Caliper's convention
+means the process improved and the baseline is stale — the same reasoning the
+continuous charts already apply.
+
+**Rejected:** a separate `improve_rate_multiple` for independent tuning of the
+upper arm. No use case names asymmetric tuning, and splitting one parameter
+into two later is additive rather than breaking.
+
+### 3. Which binary chart is primary is OPEN
+
+The body of this ADR asserted that the EWMA remains the intended primary
+chart. **That assertion was already in question on the record before this ADR
+was written, and this ADR neither cited nor addressed it.**
+
+> Neuburger, Walker, Sherlaw-Johnson, van der Meulen & Cromwell (2017),
+> *"Comparison of control charts for monitoring clinical performance using
+> binary data"*, **BMJ Quality & Safety 26(11), 919–928**, open access:
+> *"For small absolute increases in rates of less than 10%, the CUSUM detected
+> change most quickly, followed by the EWMA and then the Shewhart p-chart."*
+
+⚠️ **This is not a reason to flip the default either.** The paper's setting is
+clinical adverse events, where small sustained increases are the signal of
+interest; an abrupt judge-model swap is a *large* shift, a regime where the
+gap narrows. **The honest position is that the question is open**, with
+published evidence favouring CUSUM in an analogous domain and no
+Caliper-specific evidence either way. It is settled by a regret comparison
+between the two binary charts once the EWMA's discretisation scheme exists —
+not by inheritance from the continuous case.
+
+**Unchanged: the Bernoulli CUSUM still ships first**, on verification
+readiness. That decision never depended on which chart is eventually primary.
+
+### 4. The g-chart is rejected, not merely unconsidered
+
+Raised as an alternative this ADR never weighed, and spiked. **It cannot hold
+the library's central promise, and fails harder than the p-chart did.**
+
+A g-chart plots successes between failures, so signalling means observing a
+gap of `L` or fewer successes, with `L` a non-negative integer. **`L = 0` is a
+hard floor** — there is no gap shorter than zero — so the largest attainable
+ARL₀ is `1/p²` observations:
+
+| p₀ | closest attainable ARL₀ to 370 | error |
+|---|---|---|
+| 0.02 | 379.1 | +2.5% |
+| 0.05 | 400.0 | +8.1% |
+| 0.10 | **100.0** | −73.0% |
+| 0.20 | **25.0** | −93.2% |
+| 0.30 | **11.1** | −97.0% |
+
+From a 10% failure rate upward the target is not merely missed, it is **above
+the maximum the chart can produce**. The p-chart at least had subgroup size as
+a lever to trade cost for precision; the g-chart has none, and randomised
+signalling is foreclosed on auditability.
+
+⚠️ **It would not have helped even if it calibrated.** It estimates the same
+parameter from the same data as the Bernoulli CUSUM, so it inherits the same
+Phase I estimation error — the low-failure-rate baseline problem that motivated
+the spike is not a property of the chart.
+
+### 5. Two corrections to the body
+
+- **`p₀ < r < p₁` is provable for every `0 < p₀ < p₁ < 1`**, not merely
+  verified numerically over the tested range. Writing `a = ln(p₁/p₀) = ∫dx/x`
+  and `b = ln((1−p₀)/(1−p₁)) = ∫dx/(1−x)` over `[p₀, p₁]`, we have
+  `r = b/(a+b)`, and `a/b` is a weighted average of the strictly decreasing
+  `(1−x)/x`, so it lies strictly between the endpoint values `(1−p₁)/p₁` and
+  `(1−p₀)/p₀` — which is exactly the stated condition.
+- **"bounded by `H/r`" in §4 is loose.** The bound is of order `H·N` for a
+  lattice of granularity `1/N`; the two coincide only when `r = 1/N`. The
+  load-bearing claim — bounded versus unbounded — is unaffected.
+
+### 6. ⚠️ What this amendment does NOT fix
+
+**The default multiple's regret study still only covers `p₀ ≤ 0.20`**, while
+`detect_rate_multiple = 2.0` is legal up to `p₀ < 0.5`. The review derived a
+real degeneracy in the untested region: with `M` fixed, `r → p₁` as
+`p₀ → 0.5`, so the statistic barely accumulates under the alternative it is
+tuned to detect. Measured relative position of `r` between `p₀` and `p₁`:
+0.447 at `p₀ = 0.05`, 0.467 at 0.20, **0.781 at 0.499**.
+
+**`2.0` remains the ratified default** — nothing in the tested range disputes
+it, and it is still the largest multiple legal across the whole domain. But
+"defined for all `p₀`" and "measured for all `p₀`" are different claims, and
+only the first is currently true. Extending the study is outstanding work.
