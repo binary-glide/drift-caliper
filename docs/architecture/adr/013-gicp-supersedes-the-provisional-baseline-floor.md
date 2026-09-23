@@ -1,10 +1,16 @@
 # ADR-013: Guaranteed In-Control Performance supersedes the provisional Bernoulli baseline floor
 
-**Status:** ✅ **ACCEPTED — ratified by the product owner 2026-09-23**
-`α = 0.10` is already ratified (2026-09-23), as the outcome of the derivation
-in §3. The ADR as a whole — adopting GICP, governing its cost by disclosure
-rather than a second floor, and lifting `DegenerateBaselineError` for
-`p̂ = 0` — has not been ruled on.
+**Status:** ✅ **ACCEPTED — ratified in full by the product owner 2026-09-23**
+
+> ⚠️ **Corrected 2026-09-23.** When this ADR moved from PROPOSED to ACCEPTED,
+> only the status line was changed. The sentence beneath it — written for the
+> PROPOSED draft, saying that only `α = 0.10` was ratified and *"the ADR as a
+> whole… has not been ruled on"* — was left in place, so the header
+> contradicted itself. **The whole ADR was ratified**: GICP adoption,
+> governance by disclosure, the `p̂ = 0` lift and its §4 contingency, and
+> `α = 0.10`. Found by `requirements-reviewer`, which correctly declined to
+> assume which half was true.
+
 **Date:** 2026-09-23
 **Refs:** `BIN-133`, ADR-005, ADR-011, ADR-012 (referenced, not edited)
 
