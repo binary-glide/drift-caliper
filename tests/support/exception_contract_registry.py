@@ -67,11 +67,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from drift_caliper.baseline import (
+# 🚨 BIN-133: does not exist in `drift_caliper.baseline` yet -- the expected red.
+from drift_caliper.baseline import (  # type: ignore[attr-defined]
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittingAdvisory,
     compare_provenance,
+    fit_bernoulli_cusum,  # ty: ignore[unresolved-import]
     fit_cusum,
     fit_ewma,
     fit_shewhart,
@@ -126,6 +128,29 @@ _FITTED_EWMA = fit_ewma(_BASELINE, target_arl=370.0)
 # BIN-143: the only artefact carrying a `direction`, and therefore the only
 # one whose Phase II check membership-tests a caller-supplied value.
 _FITTED_CUSUM = fit_cusum(_BASELINE, target_arl=370.0)
+
+
+def _binary_baseline(count: int, *, num_failures: int) -> Baseline:
+    """A sufficient baseline of exactly-0.0/1.0 scores -- BIN-133's binary probe.
+
+    Mirrors `probe_baseline()`'s "ordinary, unremarkable, fittable" role
+    (`tests/support/baseline_strategies.py`) but for a Bernoulli CUSUM,
+    which requires every score to be exactly `0.0` or `1.0`
+    (ADR-014 Decision 1) -- `FITTABLE_PROBE_SCORES` (cycling 0.0-4.0) is not
+    usable here.
+    """
+    provenance = ProvenanceFactory()
+    baseline = Baseline()
+    for i in range(count):
+        score = 0.0 if i < num_failures else 1.0
+        baseline.record(ScoringResultFactory(provenance=provenance, score=score))
+    return baseline
+
+
+_BERNOULLI_BASELINE = _binary_baseline(
+    DEFAULT_SUFFICIENCY_THRESHOLD + 5, num_failures=10
+)
+_FITTED_BERNOULLI_CUSUM = fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=370.0)
 
 
 def _hash_hostile_baseline() -> Baseline:
@@ -1086,6 +1111,20 @@ _MONITOR_CASES = (
         ),
         kind=InputKind.REGRESSION_ANCHOR,
     ),
+    # BIN-133/ADR-014 Decision 2: a legal, finite, in-range continuous score
+    # -- accepted by every other chart type -- is outside the domain a
+    # FittedBernoulliCUSUM can interpret. This is what moves OUT_OF_RANGE_VALUE
+    # from Monitor's `_MONITOR_NA` (below) into an exercised case: before this
+    # chart existed, record() took no parameter with a bounded legal range.
+    HostileCase(
+        "record_non_binary_score_against_bernoulli_cusum",
+        lambda: Monitor(_FITTED_BERNOULLI_CUSUM).record(
+            ScoringResultFactory(
+                provenance=_BERNOULLI_BASELINE.provenance_signature, score=0.42
+            )
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
 )
 
 _MONITOR_NA: Mapping[InputKind, str] = {
@@ -1102,13 +1141,6 @@ _MONITOR_NA: Mapping[InputKind, str] = {
         "as non-finite before Monitor.record() ever sees it (ADR-006 "
         "OQ-2). Monitor's chart-specific arithmetic operates on "
         "already-validated ScoringResult.score values."
-    ),
-    InputKind.OUT_OF_RANGE_VALUE: (
-        "Takes no bounded numeric parameter. retain_history is a bool "
-        "(configuration, not an SPC quantity); receivers is a sequence "
-        "of callables. Neither has a range to fall outside. The "
-        "artefact's own parameters (ARL, sigma, etc.) are already "
-        "validated at fit time."
     ),
     InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
         "Monitor.__init__'s isinstance check narrows the artefact to "
@@ -1401,6 +1433,111 @@ _FIT_CUSUM_NA: Mapping[InputKind, str] = {
     ),
 }
 
+_FIT_BERNOULLI_CUSUM_CASES = (
+    HostileCase(
+        "wrong_type_baseline",
+        lambda: fit_bernoulli_cusum(
+            "not a baseline",
+            target_arl=370.0,
+        ),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "missing_target_arl",
+        lambda: fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=None),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "nan_target_arl",
+        lambda: fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=math.nan),
+        kind=InputKind.NON_FINITE_FLOAT,
+    ),
+    HostileCase(
+        "wrong_type_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl=370.0,
+            detect_rate_multiple="not a float",
+        ),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        # p_U * multiple >= 1 -- not a valid design-point probability.
+        "unattainable_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=1e6
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        "wrong_type_direction",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl=370.0,
+            direction=123,
+        ),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "invalid_direction",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, direction="bogus"
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    # BIN-143's class: `direction` is compared against a fixed set here too
+    # (ADR-012's vocabulary, shared with fit_cusum) -- `in` on a frozenset
+    # hashes the caller's object before comparing anything.
+    HostileCase(
+        "hash_raising_str_subclass_direction",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl=370.0,
+            direction=_HashRaisingStr("two_sided"),
+        ),
+        kind=InputKind.HASH_RAISES,
+    ),
+    HostileCase(
+        # ADR-014 Decision 1: a legal, finite, in-range CONTINUOUS score is
+        # exactly the hostile case this entry point's own validation exists
+        # to catch -- not adversarial in the BIN-121 sense, but the specific
+        # boundary this chart adds beyond every other fit_* entry point.
+        "score_not_binary_in_baseline",
+        lambda: fit_bernoulli_cusum(
+            baseline_from_scores([0.0, 1.0, 0.42] + [0.0, 1.0] * 60), target_arl=370.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+)
+
+_FIT_BERNOULLI_CUSUM_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "Takes Baseline, floats, and a direction string from a fixed set "
+        "('two_sided'/'upper'/'lower'). direction is validated against a "
+        "membership set, not as freeform text -- an empty string is "
+        "rejected the same way 'bogus' is (invalid_direction above), which "
+        "is OUT_OF_RANGE_VALUE, not EMPTY_STRING."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "baseline is narrowed to Baseline via require_type() before any "
+        "attribute is accessed. target_arl and detect_rate_multiple are "
+        "scalar floats; direction is a str checked against a fixed set. No "
+        "duck-typed object survives to have its attributes probed."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- no attribute of a caller-supplied "
+        "duck-typed object is read. All parameters are concrete types "
+        "validated before use."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "fit_bernoulli_cusum() compares nothing caller-supplied against "
+        "another caller-supplied object. Numeric comparisons are against "
+        "constants; direction is compared against a frozenset of string "
+        "literals -- the HASH_RAISES case above is the one that actually "
+        "reaches the caller's object (BIN-143's class), not __eq__/__ne__."
+    ),
+}
+
 _FIT_SHEWHART_CASES = (
     # BIN-149. `_has_zero_variance` calls `set(scores)`, hashing every
     # caller-supplied score. Shared by all three charts via spc_numerics, so
@@ -1488,6 +1625,9 @@ EXERCISABLE: tuple[ExercisableEntryPoint, ...] = (
     ExercisableEntryPoint("fit_ewma", _FIT_EWMA_CASES, _FIT_EWMA_NA),
     ExercisableEntryPoint("fit_cusum", _FIT_CUSUM_CASES, _FIT_CUSUM_NA),
     ExercisableEntryPoint("fit_shewhart", _FIT_SHEWHART_CASES, _FIT_SHEWHART_NA),
+    ExercisableEntryPoint(
+        "fit_bernoulli_cusum", _FIT_BERNOULLI_CUSUM_CASES, _FIT_BERNOULLI_CUSUM_NA
+    ),
 )
 
 # ---------------------------------------------------------------------------
@@ -1609,6 +1749,17 @@ EXCLUDED: tuple[ExcludedEntryPoint, ...] = (
         "FittedShewhart",
         "An output artefact type -- see FittedEWMA's reason (fit_shewhart() "
         "is exercised directly above).",
+    ),
+    ExcludedEntryPoint(
+        "FittedBernoulliCUSUM",
+        "An output artefact type -- see FittedEWMA's reason "
+        "(fit_bernoulli_cusum() is exercised directly above). Unlike the "
+        "three continuous artefacts it does not satisfy FittedControlLimits "
+        "(ADR-014 Decision 6a) -- it satisfies only HasProvenance, which is "
+        "itself excluded below for the same Protocol reason as "
+        "FittedControlLimits. That narrower conformance does not change why "
+        "this type is excluded here: it is still an output value object, "
+        "not a caller-invoked operation.",
     ),
     ExcludedEntryPoint(
         "JudgeProviderPort",

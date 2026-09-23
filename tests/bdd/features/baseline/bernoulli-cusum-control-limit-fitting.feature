@@ -113,75 +113,47 @@ Feature: Fit a Bernoulli CUSUM chart from a binary pass/fail rubric baseline
   # === Story 1: fit a calibrated chart from a binary-rubric baseline ===
 
   Scenario: Fitting succeeds from a baseline with a genuine mix of passes and failures
-    Given a Phase I baseline of pass/fail judgements whose failure rate is
-      neither zero nor total, with enough observations to meet the minimum
-      Caliper requires for binary data
-    When the engineer fits a chart requesting a specific false-alarm
-      tolerance
-    Then they receive a fitted chart reporting a false-alarm rate that
-      matches their request to within the chart's stated tolerance
-    And the fitted chart reports the failure rate it is tuned to detect a
-      rise from
-    And the fitted chart reports how quickly it is expected to catch the
-      degradation it is tuned to detect
+    Given a Phase I baseline of pass/fail judgements whose failure rate is neither zero nor total, with enough observations to meet the minimum Caliper requires for binary data
+    When the engineer fits a chart requesting a specific false-alarm tolerance
+    Then they receive a fitted chart reporting a false-alarm rate that matches their request to within the chart's stated tolerance
+    And the fitted chart reports the failure rate it is tuned to detect a rise from
+    And the fitted chart reports how quickly it is expected to catch the degradation it is tuned to detect
 
   Scenario: Fitting succeeds when the baseline has exactly the minimum number of observations Caliper requires for binary data
-    Given a Phase I baseline of pass/fail judgements whose failure rate is
-      neither zero nor total, with exactly the minimum number of
-      observations Caliper requires for binary data
-    When the engineer fits a chart requesting a specific false-alarm
-      tolerance
-    Then they receive a fitted chart reporting a false-alarm rate that
-      matches their request to within the chart's stated tolerance
+    Given a Phase I baseline of pass/fail judgements whose failure rate is neither zero nor total, with exactly the minimum number of observations Caliper requires for binary data
+    When the engineer fits a chart requesting a specific false-alarm tolerance
+    Then they receive a fitted chart reporting a false-alarm rate that matches their request to within the chart's stated tolerance
 
   Scenario: Fitting is refused when the baseline has too few observations
-    Given a Phase I baseline of pass/fail judgements below the minimum
-      Caliper requires for binary data
+    Given a Phase I baseline of pass/fail judgements below the minimum Caliper requires for binary data
     When the engineer attempts to fit a chart
-    Then the fitting fails with an error classifiable as an insufficient
-      baseline
-    And the error reports how many observations the baseline has and how
-      many more that minimum requires
+    Then the fitting fails with an error classifiable as an insufficient baseline
+    And the error reports how many observations the baseline has and how many more that minimum requires
     And no control limits are produced
 
   Scenario: Fitting succeeds from a baseline where every judgement passed, and discloses its detection weakness
-    Given a Phase I baseline of pass/fail judgements where every judgement
-      passed, with enough observations to meet the minimum Caliper requires
-      for binary data
-    When the engineer fits a chart requesting a specific false-alarm
-      tolerance
-    Then they receive a fitted chart reporting a false-alarm rate that
-      matches their request to within the chart's stated tolerance
-    And the fitted chart reports how quickly it is expected to catch a
-      failure rate rising from a baseline that showed no failures at all
+    Given a Phase I baseline of pass/fail judgements where every judgement passed, with enough observations to meet the minimum Caliper requires for binary data
+    When the engineer fits a chart requesting a specific false-alarm tolerance
+    Then they receive a fitted chart reporting a false-alarm rate that matches their request to within the chart's stated tolerance
+    And the fitted chart reports how quickly it is expected to catch a failure rate rising from a baseline that showed no failures at all
 
   Scenario: Fitting is refused when every judgement in the baseline failed
-    Given a Phase I baseline where every recorded judgement failed, with
-      enough observations to meet the minimum Caliper requires for binary
-      data
+    Given a Phase I baseline where every recorded judgement failed, with enough observations to meet the minimum Caliper requires for binary data
     When the engineer attempts to fit a chart
-    Then the fitting fails with an error classifiable as an invalid
-      parameter
-    And the error explains that no valid detection design exists for a
-      baseline with no passing judgements
+    Then the fitting fails with an error classifiable as an invalid parameter
+    And the error explains that no valid detection design exists for a baseline with no passing judgements
     And no control limits are produced
 
   Scenario: Fitted Bernoulli CUSUM artefact carries baseline statistics and provenance for auditability
-    Given the engineer has fitted a Bernoulli CUSUM chart from a Phase I
-      baseline
+    Given the engineer has fitted a Bernoulli CUSUM chart from a Phase I baseline
     When they inspect the fitted artefact
-    Then the artefact reports the observed failure rate and the number of
-      baseline observations the chart was fitted from
-    And the artefact reports the judge model version from the baseline
-      provenance
-    And the artefact reports the scoring criteria from the baseline
-      provenance
+    Then the artefact reports the observed failure rate and the number of baseline observations the chart was fitted from
+    And the artefact reports the judge model version from the baseline provenance
+    And the artefact reports the scoring criteria from the baseline provenance
 
   Scenario: The fitted Bernoulli CUSUM artefact is immutable after creation
-    Given the engineer has fitted a Bernoulli CUSUM chart from a Phase I
-      baseline
-    When they attempt to modify the limits, parameters, baseline statistics,
-      or provenance of the fitted artefact
+    Given the engineer has fitted a Bernoulli CUSUM chart from a Phase I baseline
+    When they attempt to modify the limits, parameters, baseline statistics, or provenance of the fitted artefact
     Then the modification is rejected
     And the artefact continues to report its original values
 
@@ -189,52 +161,38 @@ Feature: Fit a Bernoulli CUSUM chart from a binary pass/fail rubric baseline
 
   Scenario: Fitting without specifying a detection sensitivity uses the documented default
     Given a sufficient Phase I baseline of pass/fail judgements
-    When the engineer fits a chart without specifying how large a rise in
-      the failure rate to watch for
-    Then they receive a fitted chart tuned to a documented default rise in
-      the failure rate
+    When the engineer fits a chart without specifying how large a rise in the failure rate to watch for
+    Then they receive a fitted chart tuned to a documented default rise in the failure rate
     And the fitted chart reports what that rise is
 
   Scenario: The engineer requests a chart tuned to a specific degradation size
     Given a sufficient Phase I baseline of pass/fail judgements
-    When the engineer fits a chart specifying how large a rise in the
-      failure rate to watch for, expressed as a multiple of their own
-      baseline's failure rate
+    When the engineer fits a chart specifying how large a rise in the failure rate to watch for, expressed as a multiple of their own baseline's failure rate
     Then they receive a fitted chart tuned to that degradation
-    And the fitted chart reports the same kind of false-alarm-rate
-      guarantee as the default case
+    And the fitted chart reports the same kind of false-alarm-rate guarantee as the default case
 
   Scenario: Fitting is refused when the requested sensitivity is not achievable
     Given a sufficient Phase I baseline of pass/fail judgements
-    When the engineer requests a detection sensitivity so large that the
-      failure rate it implies is no longer a valid probability
-    Then the fitting fails with an error classifiable as an invalid
-      parameter
-    And the error reports the largest sensitivity their baseline's failure
-      rate can support
+    When the engineer requests a detection sensitivity so large that the failure rate it implies is no longer a valid probability
+    Then the fitting fails with an error classifiable as an invalid parameter
+    And the error reports the largest sensitivity their baseline's failure rate can support
     And no control limits are produced
 
   Scenario: The largest sensitivity reported by the error is itself accepted
-    Given a fitting attempt was refused because the requested detection
-      sensitivity was not achievable for the baseline's failure rate
-    When the engineer fits a chart requesting exactly the largest
-      sensitivity that the error reported, against the same baseline
+    Given a fitting attempt was refused because the requested detection sensitivity was not achievable for the baseline's failure rate
+    When the engineer fits a chart requesting exactly the largest sensitivity that the error reported, against the same baseline
     Then they receive a fitted chart tuned to that sensitivity
     And no error is raised
 
   Scenario: Fitting a chart watches for a falling failure rate by default
     Given a sufficient Phase I baseline of pass/fail judgements
-    When the engineer fits a chart without specifying which directions of
-      drift to watch
-    Then they receive a fitted chart that reports it watches for both a
-      rising and a falling failure rate
+    When the engineer fits a chart without specifying which directions of drift to watch
+    Then they receive a fitted chart that reports it watches for both a rising and a falling failure rate
 
   Scenario: The engineer can restrict monitoring to a rising failure rate only
     Given a sufficient Phase I baseline of pass/fail judgements
-    When the engineer fits a chart specifying that only a rise in the
-      failure rate should be watched
-    Then they receive a fitted chart that reports it watches for a rising
-      failure rate only
+    When the engineer fits a chart specifying that only a rise in the failure rate should be watched
+    Then they receive a fitted chart that reports it watches for a rising failure rate only
 
   # === Story 3: protected from a stale or mismatched judge ===
   #
@@ -246,39 +204,26 @@ Feature: Fit a Bernoulli CUSUM chart from a binary pass/fail rubric baseline
   # stated reason -- not to duplicate its mechanism.
 
   Scenario: A Phase II judgement made under a different judge model is refused
-    Given a fitted Bernoulli CUSUM chart tied to a specific judge model
-      version and rubric
-    When the engineer records a Phase II judgement made under a different
-      judge model version
-    Then the recording fails with an error classifiable as a provenance
-      mismatch, identifying which aspect of the judge changed and what it
-      was expected to be
+    Given a fitted Bernoulli CUSUM chart tied to a specific judge model version and rubric
+    When the engineer records a Phase II judgement made under a different judge model version
+    Then the recording fails with an error classifiable as a provenance mismatch, identifying which aspect of the judge changed and what it was expected to be
     And no drift signal is computed from that judgement
 
   Scenario: A Phase II judgement made under the same judge model and rubric is accepted
-    Given a fitted Bernoulli CUSUM chart tied to a specific judge model
-      version and rubric
-    When the engineer records a Phase II judgement made under that same
-      judge model version and rubric
-    Then the judgement is accepted into monitoring and contributes to the
-      chart's running state
+    Given a fitted Bernoulli CUSUM chart tied to a specific judge model version and rubric
+    When the engineer records a Phase II judgement made under that same judge model version and rubric
+    Then the judgement is accepted into monitoring and contributes to the chart's running state
 
   # === Edge cases spanning multiple business rules ===
 
   Scenario: Fitting errors are distinguishable by category with distinct recovery guidance
-    Given a fitting attempt has failed because the baseline had too few
-      observations
-    And a separate fitting attempt has failed because the requested
-      detection sensitivity was not achievable
+    Given a fitting attempt has failed because the baseline had too few observations
+    And a separate fitting attempt has failed because the requested detection sensitivity was not achievable
     When the engineer compares the two errors
-    Then each is classifiable under a different category without
-      inspecting the error message text
+    Then each is classifiable under a different category without inspecting the error message text
     And the recovery guidance for each category is distinct from the other
 
   Scenario: Fitting the same baseline with the same parameters twice produces the same chart
-    Given the engineer has a sufficient Phase I baseline of pass/fail
-      judgements
-    When they fit a chart from it twice, with identical parameters both
-      times
-    Then both fitted charts report identical false-alarm and detection
-      figures
+    Given the engineer has a sufficient Phase I baseline of pass/fail judgements
+    When they fit a chart from it twice, with identical parameters both times
+    Then both fitted charts report identical false-alarm and detection figures
