@@ -392,17 +392,16 @@ def _lattice_denominator(*values: float) -> int:
 
     Uses each value's own best rational approximation
     (``fractions.Fraction.limit_denominator``) rather than a single fixed
-    denominator, because the two ARL functions below are called two ways:
-    internally, with reference values/decision intervals this module itself
-    quantised to ``_LATTICE_DENOMINATOR`` (which this recovers exactly, or a
-    divisor of it); and directly, in
+    denominator.  Called in two contexts: internally, with reference
+    values and decision intervals that ``_adaptive_lattice_denominator``
+    (Decision 7) already quantised to a per-arm ``N`` (which this recovers
+    exactly, or a divisor of it); and directly, in
     ``tests/unit/baseline/test_bernoulli_cusum_arl_published_values.py``,
-    with arbitrary round decimals chosen independently of that constant. A
-    single fixed ``N`` would force the joint (two-armed) solver's state
-    count -- which grows as the PRODUCT of both arms' lattice sizes -- far
-    higher than the smallest exact representation needs, which is
-    infeasible for realistic decision intervals (see that test file's own
-    "N=20, not a finer lattice" note on exactly this trade-off).
+    with arbitrary round decimals chosen independently of any per-arm ``N``.
+
+    The reconstruction cap (100,000) comfortably exceeds the largest
+    per-arm denominator the adaptive finder produces (~2,800 at m=5000,
+    f=0, upper arm), so every production value reconstructs exactly.
     """
     denominators = [
         Fraction(value).limit_denominator(_DENOMINATOR_RECONSTRUCTION_CAP).denominator
@@ -745,10 +744,9 @@ def _find_max_two_sided_target_arl(
         # the raise path that leads here is never taken.
         return hi  # pragma: no cover
 
-    # Bisect to find the boundary.
-    for _ in range(100):  # ~50 iterations needed for 1e6 range at 1.0 precision
-        if hi - lo < 1.0:
-            break
+    # Bisect to find the boundary.  Halving a 1e6 range falls below 1.0
+    # in ~20 iterations, so no iteration cap is needed.
+    while hi - lo >= 1.0:
         mid = (lo + hi) / 2.0
         try:
             count = _joint_state_count_at_target(

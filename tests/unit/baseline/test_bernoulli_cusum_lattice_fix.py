@@ -349,6 +349,61 @@ class TestSearchCapEnforcement:
 
 
 # ---------------------------------------------------------------------------
+# Item 4b: Coverage -- the cap-bisection path (line 650)
+#
+# When the required h lies strictly between the last power-of-two the
+# exponential search reaches (2^20 = 1,048,576) and _MAX_DECISION_INTERVAL_UNITS
+# (2,000,000), the search enters the "cap achieves the target" bisection
+# instead of raising. This exercises the `hi = mid` branch inside
+# _calibrate_one_sided_decision_interval_units.
+# ---------------------------------------------------------------------------
+
+
+class TestCapBisectionPath:
+    """The answer lies between the last power-of-two the exponential search
+    reaches and the decision interval cap -- exercises the ``hi = mid``
+    branch inside _calibrate_one_sided_decision_interval_units.
+
+    _MAX_DECISION_INTERVAL_UNITS is monkeypatched to 1000 so each
+    Markov-chain solve stays under 1001 states and the test runs in
+    under a second, while the cap-bisection path is genuine."""
+
+    @pytest.mark.timeout(30)
+    def test_returns_smallest_h_between_last_power_of_two_and_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import drift_caliper.baseline.domain.bernoulli_cusum_fitting as mod
+
+        monkeypatch.setattr(mod, "_MAX_DECISION_INTERVAL_UNITS", 1000)
+
+        n = 100
+        r_units = 1
+        p = 0.011
+        up = n - r_units
+        down = -r_units
+
+        # Use the ARL at h=750 as the target.  The ARL function is
+        # monotonically non-decreasing in h, so the calibration must
+        # return exactly 750 (the smallest h whose ARL meets the target).
+        # This makes the ``>= target`` vs ``> target`` distinction
+        # meaningful -- a ``>`` mutation would skip h=750 and return 751.
+        target = mod._one_sided_arl0_in_units(up, down, 750 + 1, p)
+
+        h = mod._calibrate_one_sided_decision_interval_units(r_units, n, p, target)
+
+        # h must lie strictly between 512 and 1000.
+        assert 512 < h <= 1000
+        # And must be exactly 750.
+        assert h == 750
+
+        # h is the smallest meeting the target: h meets it, h-1 does not.
+        arl_at_h = mod._one_sided_arl0_in_units(up, down, h + 1, p)
+        arl_at_h_minus_1 = mod._one_sided_arl0_in_units(up, down, h, p)
+        assert arl_at_h >= target
+        assert arl_at_h_minus_1 < target
+
+
+# ---------------------------------------------------------------------------
 # Item 5: target_arl above MAX_MEANINGFUL_ARL raises; exactly MAX_MEANINGFUL_ARL
 #         is accepted
 #
@@ -450,6 +505,83 @@ class TestJointStateCountCap:
             assert math.isfinite(result.achieved_arl), (
                 f"m={m}, f={f}: achieved_arl not finite"
             )
+
+
+# ---------------------------------------------------------------------------
+# Item 6b: Coverage -- the except-InvalidParameterError path in
+#          _find_max_two_sided_target_arl (lines 740-741 and 757-758)
+#
+# When one arm's per-arm calibration raises (because the per-arm target
+# exceeds its max_attainable_arl), the bisection must catch it and treat
+# the configuration as "over the cap".  The cap on _MAX_DECISION_INTERVAL_UNITS
+# is monkeypatched to 100 so each Markov-chain solve is trivially fast
+# and the exception fires from the real calibration search, not a mock.
+# ---------------------------------------------------------------------------
+
+
+class TestBisectionHandlesPerArmCalibrationException:
+    """_find_max_two_sided_target_arl catches InvalidParameterError from
+    per-arm calibration and still returns a finite, round-tripping value."""
+
+    @pytest.mark.timeout(30)
+    def test_returns_finite_value_when_one_arm_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Monkepatching _MAX_DECISION_INTERVAL_UNITS to 100 makes the
+        positive-drift arm's cap_arl small enough that the bisection's
+        per-arm targets (up to 2 * MAX_MEANINGFUL_ARL) exceed it, triggering
+        the except path.  The negative-drift arm calibrates instantly at
+        any target (ARL at h=1 already exceeds any per-arm target the
+        bisection would try)."""
+        import drift_caliper.baseline.domain.bernoulli_cusum_fitting as mod
+
+        monkeypatch.setattr(mod, "_MAX_DECISION_INTERVAL_UNITS", 100)
+
+        # Arm 1: n=100, r_units=1, p=0.6 -- positive drift, cap_arl small
+        # at h=100 (~166), so per-arm targets > 166 raise.
+        # Arm 2: n=100, r_units=1, p=0.01 -- negative drift, ARL enormous
+        # at h=1, calibration always returns immediately.
+        max_t = mod._find_max_two_sided_target_arl(
+            r_lower_units=1,
+            n_lower=100,
+            p_lower=0.6,
+            r_upper_units=1,
+            n_upper=100,
+            p_upper=0.01,
+        )
+
+        assert isinstance(max_t, (int, float))
+        assert math.isfinite(max_t)
+        assert max_t >= 1.0
+
+    @pytest.mark.timeout(30)
+    def test_returned_value_round_trips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The value _find_max_two_sided_target_arl returns must be accepted
+        by _joint_state_count_at_target at the same arm parameters."""
+        import drift_caliper.baseline.domain.bernoulli_cusum_fitting as mod
+
+        monkeypatch.setattr(mod, "_MAX_DECISION_INTERVAL_UNITS", 100)
+
+        max_t = mod._find_max_two_sided_target_arl(
+            r_lower_units=1,
+            n_lower=100,
+            p_lower=0.6,
+            r_upper_units=1,
+            n_upper=100,
+            p_upper=0.01,
+        )
+
+        # Must not raise -- the value round-trips.
+        count = mod._joint_state_count_at_target(
+            max_t,
+            r_lower_units=1,
+            n_lower=100,
+            p_lower=0.6,
+            r_upper_units=1,
+            n_upper=100,
+            p_upper=0.01,
+        )
+        assert count <= mod._MAX_JOINT_STATES
 
 
 # ---------------------------------------------------------------------------
