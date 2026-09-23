@@ -46,8 +46,10 @@ and, independently of that, a g-chart estimates the same `p₀` from the same
 `m` Bernoulli trials as the CUSUM does; the observed failure count is a
 sufficient statistic, so no reparameterisation of the same data can reduce
 the estimation-error problem the baseline floor exists to address. The
-g-chart does not change the binary picture. This ADR does not reopen
-primacy or two-sidedness — see §8.
+g-chart does not change the binary picture. Both deferred questions were
+then ruled on the same day, in **ADR-012's 2026-09-17 amendment**: the
+Bernoulli CUSUM is **two-sided by default**, and chart primacy is
+**deliberately open**. This ADR does not revisit either — see §8.
 
 **What does close the gap is a published method, found after that spike.**
 
@@ -674,13 +676,27 @@ new judgement call. A candidate for a future amendment.
   could ship.
 - **How a binary score is declared** on `Baseline`/`ScoringResult` —
   ADR-012's own open item, interacting with `BIN-61`. Untouched here.
-- **Chart primacy, and whether the Bernoulli CUSUM should be two-sided by
-  default.** Both were deliberately left unactioned by the product owner
-  pending the g-chart spike, which has since closed with a negative
-  result and therefore does not change either picture — but neither
-  question has been re-raised or re-ruled on since. This ADR is scoped to
-  calibration; it does not decide either, and leaves them exactly where
-  the 2026-09-17 ruling put them: open, now unblocked, not yet acted on.
+- **Chart primacy and two-sidedness — both already decided elsewhere, not
+  here.** ADR-012's 2026-09-17 amendment, ratified by the product owner after
+  the g-chart spike closed, made the Bernoulli CUSUM **two-sided by default**
+  (upper arm at `p₀ / detect_rate_multiple`) and marked primacy
+  **deliberately open** pending a regret comparison once the EWMA's
+  discretisation exists. This ADR is scoped to calibration and changes
+  neither.
+
+  > 🚨 **Corrected 2026-09-23, before implementation.** An earlier version
+  > of this bullet — and of the Context section — said both questions were
+  > *"not yet acted on"* and had not been *"re-ruled on since"* the
+  > morning deferral. **That was stale.** It recorded the ruling that
+  > *deferred* them and missed the one, hours later, that *decided* them.
+  > Found by `bdd-scenario-writer`, which wrote two-sided scenarios per
+  > ADR-012 and flagged the conflict rather than silently picking a side.
+  >
+  > ⚠️ **Third factual error found in this ADR before implementation, and
+  > all three share a cause:** a claim written from an agent's working
+  > memory of the conversation rather than checked against the merged
+  > record — here, ADR-012 as it stands on `trunk`. When one ADR describes
+  > another's decisions, read the other ADR.
 - **The exact field name `expected_detection_arl`.** The *definition* in
   §4 is the decision; the name is this document's proposal, open to
   revision at implementation.

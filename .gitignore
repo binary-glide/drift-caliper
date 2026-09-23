@@ -235,7 +235,9 @@ __marimo__/
 .memsearch/
 
 # code-memory MCP index — regenerated on demand, never source
-code_memory.db
+# The index plus its SQLite WAL-mode sidecars (-wal, -shm). The exact name
+# alone missed both, and an 8 MB write-ahead log was staged by `git add -A`.
+code_memory.db*
 
 # Agent operating instructions — deliberately not published.
 #
