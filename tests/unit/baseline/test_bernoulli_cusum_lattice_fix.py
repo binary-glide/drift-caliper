@@ -114,6 +114,7 @@ class TestReferenceValueIntervalInvariant:
     """Property: quantised r_q lies strictly inside (p0, p1) AND within
     epsilon * (p1 - p0) of the unquantised r, for both arms."""
 
+    @pytest.mark.timeout(120)
     @given(
         m=st.integers(min_value=DEFAULT_SUFFICIENCY_THRESHOLD, max_value=10_000),
         f_frac=st.floats(min_value=0.0, max_value=1.0),
@@ -370,6 +371,7 @@ class TestTargetArlCeiling:
         assert error.context["max_value"] == MAX_MEANINGFUL_ARL
         assert error.context["max_inclusive"] is True
 
+    @pytest.mark.timeout(30)
     def test_exactly_max_meaningful_arl_is_accepted(self) -> None:
         """Round-trip: the ceiling value itself must be accepted."""
         baseline = _bernoulli_baseline(
@@ -396,6 +398,7 @@ class TestJointStateCountCap:
     """Decision 10b: a configuration exceeding 1,000,000 joint states is
     refused with the correct context."""
 
+    @pytest.mark.timeout(30)
     def test_raises_with_joint_state_count_exceeded_context(self) -> None:
         """m=1000, f=0, target=1e6, two_sided — produces ~16M states
         (Decision 8's table), well above the 1M cap."""
@@ -414,6 +417,7 @@ class TestJointStateCountCap:
         assert isinstance(max_t, (int, float))
         assert max_t >= 1.0
 
+    @pytest.mark.timeout(30)
     def test_max_two_sided_target_arl_round_trips(self) -> None:
         """BIN-122 rule: passing the reported max back must succeed."""
         baseline = _bernoulli_baseline(1000, num_failures=0)
@@ -434,6 +438,7 @@ class TestJointStateCountCap:
         )
         assert result.requested_arl == float(max_t)
 
+    @pytest.mark.timeout(30)
     def test_target_370_fits_every_baseline(self) -> None:
         """Decision 10b's measurement: target_arl=370 fits every baseline,
         even the worst corner for the joint state count."""
@@ -458,6 +463,7 @@ class TestJointStateCountCap:
 class TestOneSidedFitsSucceedAtMaxArl:
     """One-sided fits at MAX_MEANINGFUL_ARL succeed for f=0 baselines."""
 
+    @pytest.mark.timeout(30)
     @pytest.mark.parametrize(
         "m",
         [100, 500, 1000, 5000, 10000],
@@ -496,8 +502,14 @@ class TestBoundedTimeWorstCorner:
     """Decision 11 items 3 and 8: the worst legal corner completes in bounded
     time — it must either produce a result or raise, never hang."""
 
+    @pytest.mark.timeout(30)
     def test_worst_corner_completes_or_raises_within_budget(self) -> None:
         """m=10,000, f=0, target_arl=MAX_MEANINGFUL_ARL, direction=two_sided.
+
+        The pytest-timeout marker (30s, signal method) is the hard enforcer:
+        if the fit hangs, the test is killed with a clear timeout failure
+        instead of blocking the suite. The clock assertion inside is a tighter
+        check that tells the implementer how fast the fix actually is.
 
         Budget: 30 seconds. Chosen from ADR-014 amendment: < 1s on Apple
         Silicon (the bisection for max_two_sided_target_arl is O(50)
