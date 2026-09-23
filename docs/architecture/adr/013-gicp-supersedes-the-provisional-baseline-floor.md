@@ -323,12 +323,53 @@ would need its own measurement and verification before shipping, exactly
 like `α` itself did. Recorded as a real option for a future amendment, not
 adopted now. See §8.
 
-**Routing.** `expected_detection_arl` should be delivered through the same
-non-raising advisory mechanism ADR-011 already called for and left
-unbuilt (`DataQualityConcern` — needed for ADR-005's middle tier and for
-ADR-011's own advisory band too). This is a third caller for the same
-vehicle, not a reason to invent a fourth shape; building it is now
-overdue across three separate decisions, not one.
+**Routing.** `expected_detection_arl` is delivered through
+**`FittingAdvisory`**, the non-raising disclosure vehicle ADR-011 specified
+for the fitting side. This is a second caller for an existing type, not a
+reason to invent a new shape.
+
+> 🚨 **Corrected 2026-09-23, before implementation.** An earlier version of
+> this paragraph routed the figure through **`DataQualityConcern`** and
+> described that mechanism as *"unbuilt"*. **Both halves were wrong**, and
+> the correction is recorded rather than silently applied because the error
+> is instructive.
+>
+> **The vehicle is built and wired.**
+> `src/drift_caliper/baseline/domain/fitting_advisory.py` defines
+> `FittingAdvisory` (`kind`, `description`, `boundary: float`); all three
+> fitted artefacts already carry `advisories: tuple[FittingAdvisory, ...]`,
+> and the `FittedControlLimits` protocol exposes it. One producer is live —
+> `parameter_guards.py` emits `target_arl_below_verified_range` for
+> ADR-011's flagged tier.
+>
+> ⚠️ **And it named the wrong one of two types that exist precisely to be
+> distinguished.** `FittingAdvisory` is the fitting-side carrier;
+> `DataQualityConcern` (`kind`, `description`) belongs to
+> `SufficiencyResult`. `fitting_advisory.py`'s own module docstring records
+> why: a data-quality-named type *"would misdescribe both of this type's
+> intended uses."* Routing a fitting-time disclosure through the
+> sufficiency-time type would have undone a distinction the codebase makes
+> deliberately.
+>
+> **What remains genuinely unimplemented is ADR-005's middle tier** — an
+> advisory from `check_sufficiency()` for a baseline above the hard floor
+> but below `adequate(target_arl)`. `fitting_advisory.py` records that as
+> its second intended caller and notes `adequate()` itself is still
+> unratified. That is one unbuilt caller, not a missing mechanism.
+>
+> ⚠️ **The error came from reading the decision record instead of the
+> source.** This project's own note — *"`CLAUDE.md` is a record of
+> decisions, not of what shipped"* — applies to ADRs with equal force. A
+> claim that something is unbuilt is a claim about the repository, and
+> claims about the repository get checked against it.
+
+⚠️ **One API question is left to implementation, not settled here.**
+`FittingAdvisory.boundary` is already a `float` and could carry the figure,
+or `expected_detection_arl` could be a first-class field on the fitted
+artefact as this section's definition implies. Those are different public
+surfaces. The *definition* above — the exact `ARL₁` of the constructed
+chart, evaluated at `p̂ × detect_rate_multiple`, falling back to
+`p_U × M` at `f = 0` — is what must survive either choice.
 
 ### 5. `p̂ = 0`: `DegenerateBaselineError` is lifted, contingent on §4 shipping in the same release
 
@@ -450,7 +491,7 @@ contract requires once `p_U` is the design's operative rate.**
 Implementers must compute the reported maximum admissible multiple from
 `p_U`, not `p̂`.
 
-**Considered and not adopted here: a `DataQualityConcern` advisory for
+**Considered and not adopted here: a `FittingAdvisory` for
 high-rate baselines that remain designable but sit close to this
 ceiling.** There is a plausible case for one — a baseline near the
 `p₀ → 0.5` region gets a *valid* chart whose regret is measurably worse
@@ -551,8 +592,12 @@ own** (§6b) — up to 62% of `m=100` baselines at `p₀=0.45`, against 19.6%
 under plug-in — the mirror image of §5's relief at `p̂=0`, and it must be
 read together with that relief, not separately.
 
-**Neutral.** `DataQualityConcern` (ADR-011) remains unbuilt; this ADR adds
-a third caller to the backlog rather than a first one.
+**Neutral.** `FittingAdvisory` (ADR-011) is **already built and wired** —
+all three fitted artefacts carry `advisories`, and `parameter_guards.py`
+already produces one. This ADR adds a second producer to an existing
+vehicle, not an item to a backlog. ⚠️ An earlier draft of this line said the
+mechanism *"remains unbuilt"*; see §4's correction. What is genuinely
+unbuilt is ADR-005's middle-tier caller, which is a separate matter.
 
 **Reversibility.** Moderate. `α = 0.10` can be revised without a breaking
 change to the design rule (it is a default, not part of the public
@@ -597,7 +642,7 @@ privileged domain knowledge about any given baseline. Worth revisiting
 only if a future release adds an explicit, opt-in way for an engineer to
 supply such a prior.
 
-**A `DataQualityConcern` advisory for high-rate baselines near the
+**A `FittingAdvisory` for high-rate baselines near the
 `p₀ → 0.5` ceiling** (§6b). A plausible idea — the baseline is
 designable but sits closer to outright refusal and carries measurably
 worse regret — rejected for this ADR as scope creep: no threshold for
@@ -620,7 +665,7 @@ new judgement call. A candidate for a future amendment.
   `M=2.0` by construction (a larger `M` would push the ceiling lower and
   the refusal rate higher; a smaller `M` the reverse). Neither has been
   checked at another multiple.
-- **A threshold for a high-rate `DataQualityConcern` advisory** (§6b) —
+- **A threshold for a high-rate `FittingAdvisory`** (§6b) —
   considered and rejected as scope creep for this ADR, not because the
   idea is wrong, but because no such threshold has been measured.
 - **A conservative, lower-confidence-bound companion to
