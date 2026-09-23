@@ -293,6 +293,13 @@ exclude = ["^mutants/"]
 module = ["scipy.*"]
 follow_untyped_imports = true
 
+# gherkin -- the parser pytest-bdd itself uses -- ships no py.typed marker.
+# Following its imports keeps the calls in test_feature_files_parse.py
+# type-checked, which a blanket ignore would not. Same treatment as scipy.
+[[tool.mypy.overrides]]
+module = ["gherkin.*"]
+follow_untyped_imports = true
+
 # factory_boy ships a `py.typed` marker but its own `factory/__init__.py`
 # re-exports `Factory`, `Faker`, `Sequence`, `SubFactory`, `LazyFunction`
 # etc. from submodules without `__all__` or explicit `as` re-exports, and
