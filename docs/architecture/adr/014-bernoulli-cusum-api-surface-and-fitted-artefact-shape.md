@@ -797,3 +797,608 @@ safe (values converge, string changes), the reverse is not.
   ADR introduces rather than one it closes.
 
 This is `domain-modeller`'s step, not performed here.
+
+---
+
+## Amendment 2026-09-23 — lattice correctness defect and cost-bounding
+
+**Status:** ✅ **ACCEPTED — ratified by the product owner 2026-09-23**, with the joint state cap set at 1,000,000 (Decision 10b).
+
+**Refs:** BIN-133 PR #29 code review, ADR-011, ADR-012 §3, ADR-013 §1/§7.
+
+### 0. The defect — stated in full, because the tests missed it
+
+**Found:** verification of the implementation on branch `feat/BIN-133/bernoulli-cusum`
+(PR #29, not merged) *after* `code-reviewer` had approved it — Codecov's
+failing patch check prompted a look at the uncovered lines. Measured independently, reproduced from first
+principles, and confirmed against the running code.
+
+**`_quantise_reference_value` rounds each arm's log-LR reference value `r` to
+a fixed lattice with denominator `N = 100` (`_LATTICE_DENOMINATOR`).** When
+`p₁ − p₀` is narrower than one lattice step (`1/100`), the rounded `r_q`
+leaves the open interval `(p₀, p₁)` ADR-012's derivation requires:
+
+```
+arm     m     f   p₀          p₁          r_real      r_q     status
+lower   300   0   0.007646    0.015292    0.011036    0.0100   OK
+upper   300   0   0.992354    0.996177    0.994483    0.9900   VIOLATED: r_q < p₀
+lower   500   0   0.004595    0.009189    0.006630    0.0100   VIOLATED: r_q > p₁
+upper   500   0   0.995405    0.997703    0.996685    0.9900   VIOLATED
+lower  1000   0   0.002300    0.004600    0.003319    0.0100   VIOLATED
+upper  1000   0   0.997700    0.998850    0.998341    0.9900   VIOLATED
+upper  1000   5   0.990745    0.995373    0.993322    0.9900   VIOLATED
+```
+
+**Every existing test sat at `p₀ ∈ [0.02, 0.30]`; failure rates under 1% —
+the common case for a healthy agent on a binary rubric — were never exercised.
+The test strategies used "realistic" ranges that systematically excluded the
+defect region.**
+
+**Consequence.** The chart's `achieved_arl` is exactly computed **for the
+rounded chart**, so the reported number is not wrong on its own terms — but the
+rounded chart is not the designed CUSUM:
+
+- **Lower arm:** when `r_q > p₁` (e.g. m=500, f=0), the in-control drift
+  `E[X − r_q] = p₀ − r_q` is **deeply negative** and the out-of-control
+  drift `p₁ − r_q` is **also negative**. The chart never signals on either
+  hypothesis — detection is destroyed.
+- **Upper arm:** when `r_q < p₀` (e.g. m=300, f=0: `r_q = 0.99, p₀ = 0.992`),
+  the in-control drift is **positive**, so the accumulator drifts toward the
+  boundary even under the null hypothesis. The calibration search compensates
+  by pushing the decision interval ever higher. Measured at the upper arm
+  of m=1000, f=0, per-arm target 2×10⁶:
+  `_calibrate_one_sided_decision_interval_units` returns 2,097,152 (= 2²¹),
+  exceeding `_MAX_DECISION_INTERVAL_UNITS` (2,000,000) — **silently**.
+
+- **Joint two-sided state count** at m=1000, f=0, `target_arl = 10⁶`:
+  `(h_lower + 1) × (h_upper + 1)` reached **826 million** states. A
+  two-sided fit at that configuration did not finish in 2 minutes. Even at
+  configurations where the invariant holds (e.g. m=200, f=20, target=10⁹
+  two-sided), the fit took 26 seconds — all within the fixed `N = 100`
+  lattice.
+
+**Root cause.** `_LATTICE_DENOMINATOR = 100` was chosen as the smallest
+denominator ADR-013's measurements were stable at (§1: "stable from `N=100`
+upward but not at `N=50`"). But that measurement was a statement about
+*ARL convergence* at specific grid points, not a claim that `N = 100`
+satisfies the `(p₀, p₁)` interval invariant across the whole legal space.
+The two properties are unrelated: a denominator can produce converged ARLs
+for the chart it constructs while placing `r_q` outside the interval the
+design requires — which is exactly what it does here. ADR-012 §3 and
+ADR-013's "what this deliberately does not decide" both deferred the
+denominator choice, and neither noticed it carried a correctness invariant.
+
+**Why the test suite missed it.** The BDD scenarios contain no numeric
+literals (deliberately). The unit tests' Hypothesis strategies bounded
+`failure_count` to `[2, max_failures]` — realistic ranges that never reached
+`f = 0` at large `m`. The published-oracle tests (`sand2016-7395c`) cover
+`r ∈ {0.01, 0.02, 0.03, 0.04}` and `p ≤ 0.10`, which are all well within
+`N = 100`'s safe region. **No test checked the invariant `p₀ < r_q < p₁`
+directly.**
+
+---
+
+### Decision 7: per-arm adaptive lattice denominator with centring tolerance
+
+**Each arm computes its own lattice denominator `N`, independently**, as the
+smallest integer such that `round(r × N) / N` lies strictly inside
+`(p₀, p₁)` **and** within `ε × (p₁ − p₀)` of the unquantised `r`.
+
+**Why the interval invariant alone is not enough.** A denominator that
+merely places `r_q` inside `(p₀, p₁)` can place it at the *edge* of the
+interval, which reintroduces the defect in milder form. Measured with the
+smallest-safe-N rule (the original draft's proposal), the normalised
+position `(r_q − p₀) / (p₁ − p₀)`:
+
+```
+m=300  f=0:  lower arm position 0.98  upper arm position 0.00
+m=1000 f=0:  lower arm position 0.99  upper arm position 0.00
+m=1000 f=5:  lower arm position 0.96  upper arm position 0.02
+```
+
+A lower-arm `r_q` at position 0.99 (nearly touching `p₁`) means the
+out-of-control drift `p₁ − r_q` is near zero — detection is not destroyed
+(the invariant holds) but is severely degraded. An upper-arm `r_q` at
+position 0.00 (on `p₀`) means the in-control drift is near zero — the
+calibration compensates by inflating the decision interval, and the joint
+state count explodes at high targets:
+
+```
+                             min-safe rule       centred (ε=0.25)
+m=300  f=0 target=1e6:       7,478,688 states    2,090,772 states
+m=1000 f=0 target=1e6:      41,511,879 states   16,377,848 states
+m=1000 f=5 target=1e6:       4,483,750 states    1,472,526 states
+```
+
+**The `ε`-centring rule keeps `r_q` near `r` rather than at the edge.**
+With `ε = 0.25`, positions are consistently 0.40–0.60 and joint state
+counts at high targets are 2.5–3.5x smaller.
+
+**Why per-arm, not per-fit.** The two arms need very different granularities.
+At m=1000, f=0, the lower arm needs N=257 and the upper needs N=514 (at
+`ε = 0.25`). A single denominator serving both would be `max(257, 514)` or,
+if the reference values must be co-representable on a shared grid, their LCM
+— which, at coprime per-arm Ns (e.g. `N_lower = 218, N_upper = 435`,
+LCM = 94,830), inflates the joint state count catastrophically (Decision 8).
+
+**The closed-form bound is sufficient.** `|round(r × N) / N − r| ≤ 1/(2N)`
+always holds (the rounding error is at most half a lattice step). So any `N`
+satisfying `1/(2N) < ε × (p₁ − p₀)`, i.e. `N > 1 / (2ε(p₁ − p₀))`, is
+guaranteed to produce `|r_q − r| < ε × (p₁ − p₀)`. Since
+`ε × (p₁ − p₀) < min(r − p₀, p₁ − r)` holds for `ε < 0.5` (because `r`
+sits near the midpoint of `(p₀, p₁)` — measured at position 0.44–0.54 across
+the legal space), this also guarantees `r_q ∈ (p₀, p₁)` strictly. No scan
+is needed for the mathematical guarantee.
+
+**The implementation uses a scan, starting from `N = 2`, because the
+closed form overshoots.** The bound assumes worst-case rounding; actual
+rounding at a given `N` is often better. Measured at `ε = 0.25`:
+
+```
+m      f   arm     scan N   closed N   ratio
+300    0   lower   78       262        3.4x
+300    0   upper   155      524        3.4x
+1000   0   lower   257      870        3.4x
+1000   0   upper   514      1740       3.4x
+100    10  lower   4        14         3.5x
+```
+
+The scan produces consistently ~3.4x smaller `N`, which translates to ~12x
+fewer joint states. The scan terminates because the closed form guarantees
+a safe `N` exists — ADR-012 amendment §5 proves `p₀ < r < p₁`, and the bound
+above proves any sufficiently large `N` clears the tolerance. The scan's
+worst measured depth is ~1400 iterations (m=5000, f=0, upper arm) — trivial.
+
+**Choice of `ε = 0.25` — measured, not picked.** Detection-ARL penalty
+(per-arm `ARL₁` ratio against a near-continuous reference at `N = 10000`)
+across the legal space, at `target_arl = 370`:
+
+```
+ε        worst detection penalty   states at m=1000 f=0 t=1e6
+0.10     14.7%                     16,275,330
+0.15     14.7%                     16,065,215
+0.20     14.7%                     16,091,712
+0.25     14.7%                     16,377,848
+0.30     57.9%                     17,058,824
+0.40     57.9%                     19,669,120
+```
+
+The 14.7% worst-case penalty is a single lattice-granularity artefact (ADR-012
+§3's documented non-monotone residual): at one specific `(m, f, arm)` the
+quantised `r_q` happens to land on a lattice point that shifts the chart
+design. It is **not cumulative with `ε`** — it is the same 14.7% at
+`ε = 0.10` through `ε = 0.25`, because the same lattice point is hit. The
+jump at `ε ≥ 0.30` is a second, different lattice-point crossing.
+
+State counts at `m = 1000, f = 0, target = 10⁶` are essentially flat from
+`ε = 0.10` to `ε = 0.25` (~16M). **The gain from centring vs edge-placement
+is large (41.5M → 16.4M); the gain from varying `ε` within the centred range
+is small.** `ε = 0.25` is chosen because it produces the smallest per-arm
+`N` without crossing the detection-penalty threshold — lower `N` means fewer
+lattice points per unit of `h`, which reduces state count at low targets
+where the centring effect is less dominant.
+
+**Alternatives considered:**
+
+- **A finer fixed denominator** (e.g. `N = 10,000` everywhere). Rejected:
+  it is wasteful at common configurations (m=100, f=10 needs only `N = 4`)
+  and still eventually fails at extreme corners (very large `m`, `f = 0`,
+  where even `N = 10,000` may not clear the gap). A fixed denominator is
+  the wrong abstraction when the gap width varies over four orders of
+  magnitude.
+- **The smallest-safe-N rule** (smallest `N` satisfying only
+  `r_q ∈ (p₀, p₁)`, without a centring tolerance). Rejected — this is the
+  original draft's proposal, and it places `r_q` at the interval edge
+  (positions 0.96–1.00 / 0.00–0.02), inflating state counts by 2.5–3.5x
+  at high targets. Measured and demonstrated above.
+- **The closed-form `N` directly** (`ceil(1 / (2ε(p₁ − p₀)))`). Rejected
+  for implementation: it overshoots the minimum by ~3.4x consistently,
+  producing ~12x more joint states than necessary. It is used as a
+  termination guarantee for the scan, not as the answer itself.
+- **The Reynolds & Stoumbos scaling** (formulate the statistic so `r ≈ 1/k`
+  for integer `k`, and use `k` as the denominator). Not held: Reynolds &
+  Stoumbos (1999) is not in the vault (only Mousavi & Reynolds 2009, which
+  is about autocorrelation, not this). Named as a candidate for a future
+  simplification once the paper is obtained; the scan with `ε`-tolerance
+  is correct without it.
+
+---
+
+### Decision 8: the joint two-sided solve must use independent per-arm lattices
+
+ADR-014 §6c specifies the joint two-armed Markov-chain solve: state space is
+the Cartesian product of both arms' bounded lattices, a single Bernoulli(p)
+draw updating both accumulators each step.
+
+**The current implementation (`_joint_two_sided_bernoulli_arl0`) converts all
+four values (both reference values, both decision intervals) to a single
+shared denominator via `_lattice_denominator` (LCM).** With per-arm
+denominators that share no common factor, the LCM is their product:
+
+```
+N_lower    N_upper    LCM         blowup
+22         44         44          1×
+66         131        8,646       66×
+109        218        218         1×
+218        435        94,830      218×
+```
+
+At m=1000, f=0, target=370: the LCM-shared lattice turns what should be
+94,176 states into approximately **8.87 billion** — which is why the earlier
+benchmark timed out even on small configurations when passed through the
+current joint solver.
+
+**Decision: the joint solver accepts independent per-arm lattice parameters.**
+Each arm's CUSUM accumulator lives on its own lattice. State `(i, j)` means
+the lower arm is at `i` units of `1/N_lower` and the upper arm is at `j`
+units of `1/N_upper`. A single Bernoulli draw transitions both:
+
+- `X = 1` (failure, probability `p`): lower arm `i → i + (N_lower − r_lower_units)`,
+  upper arm `j → max(0, j − r_upper_units)`.
+- `X = 0` (success, probability `1 − p`): lower arm `i → max(0, i − r_lower_units)`,
+  upper arm `j → j + (N_upper − r_upper_units)`.
+
+Absorption when either accumulator exceeds its own decision interval.
+**State count: `(h_lower_units + 1) × (h_upper_units + 1)`.** Measured with
+this construction, using Decision 7's centred `ε = 0.25` rule:
+
+```
+m      f    target     N_lower  N_upper  h_lower  h_upper  joint states  solve time
+100    0    370        26       52       62       146      9,261          0.01s
+300    0    370        78       155      130      257      33,798         0.03s
+1000   0    370        257      514      256      431      111,024        0.06s
+100    0    10,000     26       52       141      478      68,018         0.11s
+1000   0    10,000     257      514      856      2,246    1,925,679      refused (> 1M cap; ≈ 1.8 GB)
+1000   0    1,000,000  257      514      2,032    8,055    16,377,848     refused (> 1M cap; ≈ 15.5 GB)
+```
+
+Note: the m=1000 f=0 target=10⁶ case gives 16.4M states — above the
+ratified 1M cap (Decision 10b), which refuses it before the solve runs.
+Memory figures in this table's last two rows are extrapolated from Decision
+10b's measured ≈ 950 bytes/state peak RSS, not run. Compare to the edge-positioned min-safe rule's 41.5M at the same
+corner.
+
+**The exact property ADR-012 §4/§5 and ADR-014 §6c require is preserved:**
+each arm's accumulator is on an integer lattice with rational increments, and
+the chain is finite and absorbing, so `(I − Q)m = 1` gives the exact expected
+absorption time. The two arms sharing a single draw is what makes the joint
+solve exact (§6c's stated construction) — they do not need to share a lattice
+denominator for that property to hold, only a single source of randomness,
+which they do.
+
+**This replaces both `_joint_two_sided_bernoulli_arl0`'s shared-N call to
+`_lattice_denominator`, and the current `_one_sided_bernoulli_arl0`'s own
+call to `_lattice_denominator`** (which was only needed because reference
+values and decision intervals were passed as floats and the denominator had
+to be reconstructed; with per-arm integer parameters, reconstruction is
+unnecessary).
+
+**Alternatives considered:**
+
+- **Force related denominators** (e.g. `N_upper = 2 × N_lower`). Rejected:
+  there is no mathematical reason the upper arm's minimum safe denominator
+  should be a multiple of the lower arm's, and forcing the relationship
+  would either over-refine one arm or under-refine the other.
+- **Keep the shared LCM approach but cap it.** Rejected: a shared denominator
+  whose LCM is capped would silently round one arm's reference value to a
+  coarser lattice than it needs, potentially reintroducing the interval
+  violation the per-arm fix exists to prevent.
+
+---
+
+### Decision 9: `target_arl` ceiling at `MAX_MEANINGFUL_ARL = 1,000,000`
+
+**The Bernoulli CUSUM gets the same `target_arl` upper bound the three
+continuous charts already enforce.** `fit_bernoulli_cusum` will reject
+`target_arl > MAX_MEANINGFUL_ARL` with `InvalidParameterError`, mirroring
+`parameter_guards._validate_target_arl_range`'s existing check.
+
+**The ceiling alone does not fix the defect** — confirmed by measurement:
+at `target_arl = 370` (well below 10⁶), the fixed `N = 100` lattice
+already violates the `(p₀, p₁)` invariant at `m ≥ 300, f = 0`. The defect
+is in the lattice denominator (Decision 7), not in the target range. The
+ceiling exists to **bound cost** (Decision 10), not to fix the interval
+violation.
+
+**Rationale for reusing `MAX_MEANINGFUL_ARL` rather than a Bernoulli-specific
+number.** ADR-014 Decision 3 already established that ADR-011's three-tier
+structure (hard floor, advisory, verified range) does not transfer to the
+Bernoulli chart, because the Bernoulli CUSUM's ARL₀ is exact — there is no
+approximation gap for the tiers to gatekeep against. That reasoning holds:
+the ceiling is a **cost bound**, not a verification boundary. An engineer who
+requests `target_arl = 10⁶` on a binary chart gets an exact, honestly-
+computed ARL₀ if the solve can be completed (same as at 370, same Markov
+chain, same linear algebra). The only question is whether the solve *can* be
+completed within the resource budget this library is willing to spend.
+`MAX_MEANINGFUL_ARL = 10⁶` is the value the continuous charts already use for
+a different reason (ADR-011's verification boundary), but it is also a
+reasonable cost boundary: with the per-arm lattice (Decision 7) and
+independent-lattice joint solve (Decision 8), every tested configuration at
+`target_arl = 10⁶` completes in bounded time *except* the extreme corner
+(m ≥ 1000, f = 0), which is caught by the joint state count cap (Decision 10).
+
+**The rejection is `InvalidParameterError`** with
+`context["parameter"] = "target_arl"`, `context["kind"] = "invalid"`,
+`context["max_value"] = MAX_MEANINGFUL_ARL`, `context["max_inclusive"] = True`.
+The value `MAX_MEANINGFUL_ARL` round-trips as an accepted input (BIN-122's
+rule).
+
+**Alternatives considered:**
+
+- **A lower, Bernoulli-specific ceiling** (e.g. 100,000). Rejected: it is
+  not needed at most configurations (m=100, f=10 at target=10⁶ gives only
+  18,160 joint states), and a ceiling that refuses a configuration the
+  library could serve in under 0.01s substitutes the library's caution for
+  the engineer's judgement. The joint state count cap (Decision 10) is the
+  precise control; the target ceiling is a coarse, user-facing one.
+- **No ceiling.** Rejected: the product owner has ruled that a ceiling is
+  needed, and without one there is no upper bound on the per-arm decision
+  interval search.
+
+---
+
+### Decision 10: joint state count cap and search-bound enforcement
+
+Two resource bounds, each with an enforced limit and a clear error path:
+
+**10a. The one-sided calibration search must not return past its bound.**
+
+`_calibrate_one_sided_decision_interval_units` currently returns past
+`_MAX_DECISION_INTERVAL_UNITS` silently — measured at the upper arm of
+m=1000, f=0, per-arm target 2×10⁶: the search returned 2,097,152 (2²¹)
+against a cap of 2,000,000 and the caller never checked.
+
+**Decision: when the exponential search reaches `_MAX_DECISION_INTERVAL_UNITS`
+without finding a solution, the calibration raises `InvalidParameterError`.**
+`context` reports the achievable ARL₀ at the cap: the ARL is monotonically
+non-decreasing in `h`, so the value at `_MAX_DECISION_INTERVAL_UNITS` is the
+largest ARL₀ this arm can deliver. That value round-trips: if the engineer
+reduces `target_arl` to at most that value, the search succeeds (BIN-122's
+rule).
+
+⚠️ **This is not the same as ADR-014 Decision 3's computed attainability
+floor** (which BIN-117 established for the continuous CUSUM). The attainability
+floor is computed at the search bracket's *minimum* `h`; this cap is the
+search bracket's *maximum*. Both are needed: the floor catches targets that
+are too *low*, the cap catches targets that are too *high* (or, more
+precisely, that require a decision interval too large for the search to
+reach). In practice, the cap fires only when the interval invariant is
+violated and the search compensates by inflating `h` without bound — with
+Decision 7 in place, the invariant holds and the cap is a safety net.
+
+**10b. Joint two-sided state count cap.**
+
+**Measurement method and a correction.** The original draft measured memory
+with Python's `tracemalloc`. **Those figures were wrong** for two reasons:
+(1) tracing overhead inflated solve time by roughly 3x, and (2)
+`tracemalloc` tracks only Python-side allocations — `scipy.sparse.linalg.spsolve`
+delegates to SuperLU, which allocates most of its working memory through
+`malloc` outside Python's allocator, so `tracemalloc` undercounted peak
+memory by roughly 4x. The corrected table uses **peak RSS** via
+`resource.getrusage(RUSAGE_SELF).ru_maxrss`, measured in a fresh process
+per row (so each row's RSS is not cumulative), on this machine (macOS,
+Apple Silicon, 16 GB). The independent-lattice joint solver (Decision 8)
+with m=300 f=0 lattice N=(85, 170):
+
+```
+joint states    solve time    peak RSS
+4,141           0.0s          55 MB      (process baseline)
+542,101         0.5s          507 MB
+982,101         1.3s          908 MB
+1,962,801       3.4s          1,923 MB
+2,003,001       2.9s          1,905 MB
+4,504,501       7.5s          4,351 MB
+```
+
+Approximately **950 bytes per state** in peak RSS, consistent across aspect
+ratios. Two rows independently reproduced on the same machine:
+- 974,341 states: 1.2s, 903 MB
+- 1,956,071 states: 2.8s, 1,854 MB
+
+**Decision: `_MAX_JOINT_STATES = 1,000,000`. Ratified by the product
+owner.** The fit raises `InvalidParameterError` when the joint state count
+`(h_lower_units + 1) × (h_upper_units + 1)` exceeds this cap.
+
+**Rationale.** Memory, not time, is the binding constraint. Caliper runs
+inside the engineer's own agent process — a fit peaking near 1.9 GB (the
+2M-state case) can kill a small container or crowd out the agent's own
+working memory. At 1M states, peak RSS is ~908 MB (~1.3s) — under 1 GB,
+safe for a typical CI runner or agent container.
+
+**Cost accepted:** zero-failure baselines at large `m` get lower two-sided
+maxima than the 2M alternative would have allowed. The maximum two-sided
+`target_arl` per baseline at the ratified 1M cap, computed via bisection
+and round-trip verified:
+
+```
+                  cap=1M
+                  ~1.3s / ~908 MB
+m=200  f=0        max_t=975,430
+m=300  f=0        max_t=93,422
+m=500  f=0        max_t=16,642
+m=1000 f=0        max_t=4,035
+m=2000 f=0        max_t=1,768
+m=5000 f=0        max_t=1,085
+m=1000 f=5        max_t=252,368
+m=1000 f=10       max_t=1,000,000
+```
+
+`target_arl = 370` still fits **every** baseline. All baselines with
+`f ≥ 1%` of `m` fit at all targets up to 10⁶. The refusal reports
+`max_two_sided_target_arl` which round-trips as an accepted input (verified
+at five baselines, each within 1 unit of the cap).
+
+Joint state count is monotone in `target_arl` for a fixed baseline
+(verified by measurement across four representative baselines).
+
+**`context` reports the `max_two_sided_target_arl` for this baseline.**
+Because joint state count is monotone in `target_arl` (verified), a
+bisection over `target_arl` in `[1, MAX_MEANINGFUL_ARL]` gives the largest
+two-sided target this baseline supports under the cap. That value is
+reported in `context["max_two_sided_target_arl"]` and **round-trips as an
+accepted input** (BIN-122's rule) — verified at five baselines, each within
+1 unit of the cap.
+
+Additionally, `context` carries `reason = "joint_state_count_exceeded"`,
+the computed state count, and the cap. `recovery_hint` directs the engineer
+to: (a) reduce `target_arl` to at most `max_two_sided_target_arl`, (b)
+increase `detect_rate_multiple` (which widens `p₁ − p₀` and reduces per-arm
+decision intervals), or (c) use `direction = "lower"` or `"upper"`, which
+avoids the joint solve entirely and always succeeds (see below).
+
+**One-sided fits always succeed up to `MAX_MEANINGFUL_ARL`.** Verified: at
+every tested `(m, f)` including the worst corner (m=10,000, f=0), the
+one-sided state count at `target_arl = 10⁶` is at most ~40,000, and no
+arm's calibration search exceeds `_MAX_DECISION_INTERVAL_UNITS`. A
+one-sided solve at 40K states takes < 0.01s. **The recovery path from a
+joint-state-count refusal to a one-sided fit is always available**, not
+contingent on the baseline.
+
+**Interaction with Decision 9's ceiling.** The ceiling (`MAX_MEANINGFUL_ARL`)
+is checked first, before calibration. The joint state cap is checked after
+per-arm calibration, before the joint solve. Both are needed: the ceiling
+prevents the search from running unboundedly long; the joint cap prevents
+the final solve from exceeding the resource budget.
+
+**Alternatives considered:**
+
+- **A time-based cap** (abort after N seconds). Rejected: execution time is
+  hardware-dependent, non-deterministic, and not checkable before starting
+  the solve. A state count cap is a static, measurable property of the
+  configuration that can be checked with no computation.
+- **No cap — rely on the target ceiling alone.** Rejected: `target_arl = 10⁶`
+  at m=1000, f=0 produces 16.4M states under Decision 7's centred lattice;
+  the ceiling passes it, and the solve would peak at ~15.6 GB — far beyond
+  any reasonable process budget.
+- **Cap at 2,000,000** (2M states: ~3.4s, ~1.9 GB peak RSS). Considered
+  and recommended by the original draft. Rejected: Caliper runs inside the
+  engineer's own agent process, so a fit peaking at ~1.9 GB can kill a
+  small container; the additional coverage (m=1000 f=0 two-sided up to
+  ~10,582 instead of ~4,035) does not justify the memory risk.
+- **Cap at 500,000** (~0.5s, ~507 MB — comfortable on any machine).
+  Considered. Rejected: it caps m=5000 f=0 at `max_t = 1,085`, leaving
+  near-zero headroom above `target_arl = 370`, and it refuses m=1000 f=0
+  at `max_t = 1,753`. The 1M cap gives meaningful room at every corner that
+  the 500K cap does not.
+
+---
+
+### Decision 11: verification bar for the fix
+
+**At minimum, the following tests must exist before this amendment is
+considered implemented:**
+
+1. **Property: `r_q ∈ (p₀, p₁)` AND `|r_q − r| ≤ ε × (p₁ − p₀)` for
+   both arms, over the full legal space.** A Hypothesis strategy drawing
+   `(m, f)` from the full legal range — including `f = 0` at `m` up to at
+   least 10,000, and `f = m − 1` at large `m` — must verify that the
+   per-arm adaptive denominator produces a quantised `r_q` satisfying both
+   the interval invariant and the centring tolerance. **The strategy must
+   NOT be bounded to "realistic" ranges** — restricting `f` to `[2, max]`
+   or `m` to `[100, 1000]` is the exact coverage gap that caused this
+   defect. Assert on both conditions explicitly: inside the interval, and
+   within `ε × (p₁ − p₀)` of `r`.
+
+2. **Property: the per-arm denominator finder always terminates.** The
+   closed-form bound `N = ceil(1 / (2ε(p₁ − p₀)))` guarantees a safe `N`
+   exists (§7's derivation). The implementation's scan must have a safety
+   cap (the closed-form value, or a generous constant) to prevent an
+   unbounded loop in the event of a floating-point edge case. The test
+   need only verify the invariant holds at the returned `N`.
+
+3. **Bounded-time test at the worst legal corner.** `fit_bernoulli_cusum`
+   called with `m = 10,000`, `f = 0`, `target_arl = MAX_MEANINGFUL_ARL`,
+   `direction = "two_sided"` must either complete in bounded time or raise
+   `InvalidParameterError` with the joint-state-count context — never hang.
+   This is the single test that would have caught the defect if it had
+   existed.
+
+4. **Regression: the fixed-N=100 violation cases.** Each of the six
+   violated configurations in the table above (m=300/500/1000 f=0 and
+   m=1000 f=5, both arms) must be covered by an explicit test verifying
+   the invariant holds under the fix — not just by the property test, which
+   may not hit those exact coordinates.
+
+5. **The search cap fires.** A test that verifies
+   `_calibrate_one_sided_decision_interval_units` raises (not returns
+   silently) when the target exceeds what the search bracket can deliver.
+
+6. **`max_two_sided_target_arl` round-trips.** When the joint state count
+   cap triggers, the `context["max_two_sided_target_arl"]` value reported
+   in the error must round-trip: calling `fit_bernoulli_cusum` with that
+   value as `target_arl` (same baseline, same `direction = "two_sided"`)
+   must succeed. Test at the baselines in §10b's table where the cap fires.
+
+7. **One-sided fits succeed at `MAX_MEANINGFUL_ARL` for f=0 baselines.**
+   For `m ∈ {100, 500, 1000, 5000, 10000}`, `f = 0`, verify that
+   `fit_bernoulli_cusum(baseline, target_arl=MAX_MEANINGFUL_ARL,
+   direction="lower")` succeeds — confirming the recovery path the error's
+   `recovery_hint` directs the engineer toward.
+
+8. **The bisection for `max_two_sided_target_arl` completes in bounded
+   time.** At the worst corner (m=10,000, f=0, `target_arl =
+   MAX_MEANINGFUL_ARL`, `direction = "two_sided"`), the refusal path —
+   which must compute `max_two_sided_target_arl` via bisection over
+   per-arm calibrations — must itself finish in bounded time, not hang.
+   The bisection performs O(50) iterations of per-arm calibration (each
+   fast — one-sided solves at < 40K states), not a joint solve, so it
+   should complete in under 1 second; the test asserts this.
+
+---
+
+### Consequence for ADR-013's GICP grid
+
+ADR-013 §3's 40-cell measurement grid covers `p₀ ∈ {0.02, 0.03, 0.05,
+0.075, 0.10, 0.15, 0.20, 0.30}`. The defect region starts at
+`p₀ < 0.01` (approximately — the gap `p₁ − p₀ ≈ p₀` falls below `1/N`
+when `p₀ < 0.005` at `N = 100`). **ADR-013's GICP coverage guarantee is a
+property of the Clopper-Pearson construction itself** — it holds for any
+`p₀ ∈ (0, 1)`, not only at the grid points, because the proof is analytic
+(the guarantee fails exactly when the confidence bound undercovers, §3's
+measured correspondence confirms the mechanism). **The grid does not need
+extending below `p₀ = 0.02` for the guarantee to hold there.**
+
+What does need extending is **lattice-quantisation error measurement** at
+low `p₀` — ADR-012 §3's table, which measured the `achieved_arl` vs
+`requested_arl` gap, only covers `p₀ ∈ {0.02, 0.05, 0.10, 0.20}` at
+`N = 100`. With the per-arm adaptive denominator, the quantisation residual
+at low `p₀` is a property of the *adaptively chosen* `N`, not of a fixed
+`N = 100`. The existing "report, don't chase" mechanism
+(`achieved_arl` ≠ `requested_arl`) handles this honestly regardless of
+the denominator, so no new measurement gates this fix — but extending the
+table to the adaptive-N regime is noted as follow-up verification work.
+
+---
+
+### Summary of changes to the ADR body
+
+| ADR-014 decision | status |
+|---|---|
+| Decision 1 (binary score inferred) | **unchanged** |
+| Decision 2 (Phase II input contract) | **unchanged** |
+| Decision 3 (target_arl tiering) | **amended**: gains `MAX_MEANINGFUL_ARL` ceiling (Decision 9) |
+| Decision 4 (detection-disclosure field) | **unchanged** |
+| Decision 5 (α not engineer-facing) | **unchanged** |
+| Decision 6a (not FittedControlLimits) | **unchanged** |
+| Decision 6b (field shape) | **unchanged** |
+| Decision 6c (exact joint solve) | **amended**: gains independent-lattice requirement (Decision 8) |
+| Decision 6d (p_U substitution) | **unchanged** |
+| **NEW Decision 7** | per-arm adaptive lattice denominator |
+| **NEW Decision 8** | independent per-arm lattices in the joint solve |
+| **NEW Decision 9** | `target_arl` ceiling at `MAX_MEANINGFUL_ARL` |
+| **NEW Decision 10** | search-bound enforcement + joint state count cap |
+| **NEW Decision 11** | verification bar |
+
+---
+
+### 🚨 What this amendment deliberately does not decide
+- **Whether the `_LATTICE_DENOMINATOR` constant should have a floor**
+  (e.g. `max(scan_result, 100)` to preserve ADR-013's convergence
+  property). The ARL convergence finding at `N = 100` was for specific
+  `(p₀, m)` cells; whether a floor is needed for the per-arm adaptive
+  denominator's own convergence is an implementation measurement, not an
+  architecture decision.
+- **A `FittingAdvisory` for configurations near the joint state cap.**
+  Considered; same shape as ADR-013 §6b's deferred high-rate advisory. No
+  threshold for "close enough to the cap to warrant a word" has been
+  measured.
