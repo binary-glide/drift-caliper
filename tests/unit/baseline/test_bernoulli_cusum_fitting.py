@@ -25,10 +25,10 @@ import pytest
 from scipy.stats import beta as scipy_beta  # type: ignore[attr-defined]
 
 # 🚨 Neither of these exists in `drift_caliper.baseline` yet -- the expected red.
-from drift_caliper.baseline import (  # type: ignore[attr-defined]
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
-    fit_bernoulli_cusum,  # ty: ignore[unresolved-import]
+    fit_bernoulli_cusum,
 )
 from drift_caliper.baseline.domain.has_provenance import HasProvenance
 from drift_caliper.errors import (
@@ -69,7 +69,7 @@ class TestBaselineTypeValidation:
     def test_raises_invalid_parameter_for_a_non_baseline_argument(self) -> None:
         with pytest.raises(InvalidParameterError) as excinfo:
             fit_bernoulli_cusum(
-                "not a baseline",
+                "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                 target_arl=_VALID_TARGET_ARL,
             )
         assert excinfo.value.context["parameter"] == "baseline"
@@ -485,7 +485,7 @@ class TestImmutability:
         baseline = _mixed_baseline()
         result = fit_bernoulli_cusum(baseline, target_arl=_VALID_TARGET_ARL)
         with pytest.raises(pydantic.ValidationError):
-            result.observed_failure_rate = 0.99
+            result.observed_failure_rate = 0.99  # ty: ignore[invalid-assignment]
 
 
 class TestFittedBernoulliCUSUMProtocolConformance:

@@ -180,12 +180,27 @@ class ProvenanceMismatchError(CaliperError):
 
 
 class InvalidObservationError(CaliperError):
-    """An input to baseline recording is not a complete scoring result.
+    """An observation cannot be accepted for the recording operation attempted.
+
+    Either because it is not a complete ``ScoringResult`` (the original,
+    narrower case this type was introduced for), or because its score is
+    not a value the specific fitted chart it is being checked against can
+    interpret -- e.g. a Phase II observation with a continuous score
+    checked against a ``FittedBernoulliCUSUM``, which can only interpret an
+    exact ``0.0``/``1.0`` pass-or-fail value (ADR-014 Decision 2; BIN-133).
+    Broadened from the original, narrower "incomplete scoring result"
+    description without a category change -- both are the same underlying
+    failure shape ("this thing cannot be recorded here"), just with a
+    different ``reason``.
 
     Required ``context`` keys:
         reason: Why the observation is invalid. Descriptive, not a closed
             discriminator -- see ``InvalidParameterError.kind``.
-        missing_fields: Which fields are missing.
+        missing_fields: Which fields are missing. ``()`` when nothing is
+            missing -- e.g. the binary-score case above, where the value
+            present is simply outside the domain the chart can interpret
+            (ADR-002 section 3's existing conditional-presence precedent on
+            ``InvalidParameterError.provided``).
     """
 
     category = "invalid_observation"

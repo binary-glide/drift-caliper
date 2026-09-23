@@ -15,6 +15,7 @@ from typing import NoReturn
 
 from pydantic import BaseModel, ConfigDict
 
+from drift_caliper.baseline.domain.fitted_bernoulli_cusum import FittedBernoulliCUSUM
 from drift_caliper.baseline.domain.fitted_control_limits import FittedControlLimits
 from drift_caliper.measurement import ScoringResult
 from drift_caliper.monitoring.domain.delivery_failure import DeliveryFailure
@@ -40,9 +41,19 @@ class MonitoringResult(BaseModel):
     not look broken. See ``tests/unit/test_truthiness.py``.
 
     ``arbitrary_types_allowed`` is required because ``fitted_artefact`` is
-    typed as ``FittedControlLimits``, a ``Protocol``, which Pydantic cannot
-    build a validation schema for -- the same reason ``Judge.provider`` needs
-    it (``src/drift_caliper/measurement/domain/judge.py``).
+    typed (in part) as ``FittedControlLimits``, a ``Protocol``, which
+    Pydantic cannot build a validation schema for -- the same reason
+    ``Judge.provider`` needs it (``src/drift_caliper/measurement/domain/judge.py``).
+
+    ``fitted_artefact``'s type widened to include ``FittedBernoulliCUSUM``
+    (BIN-133, ADR-014 section 6a) alongside ``FittedControlLimits`` --
+    ``FittedBernoulliCUSUM`` does not satisfy that protocol (it satisfies
+    only ``HasProvenance``), and ``Monitor.record()`` builds this type from
+    whichever concrete artefact it was constructed with, so the field must
+    accept both. Discovered while extending ``Monitor`` for BIN-133: this
+    field is typed independently of ``Monitor.__init__``'s own artefact
+    parameter and would otherwise reject a ``FittedBernoulliCUSUM`` at
+    construction even after the constructor itself accepted one.
     """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
@@ -61,7 +72,7 @@ class MonitoringResult(BaseModel):
 
     # The same immutable artefact Monitor was constructed from --
     # referenced, never copied. Present on every result, signal or not.
-    fitted_artefact: FittedControlLimits
+    fitted_artefact: FittedControlLimits | FittedBernoulliCUSUM
 
     # One entry per configured receiver that raised during this record()
     # call's delivery step. Empty when every receiver succeeded, none were

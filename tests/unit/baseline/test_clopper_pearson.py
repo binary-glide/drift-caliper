@@ -30,11 +30,11 @@ from __future__ import annotations
 import math
 
 import pytest
-from drift_caliper.baseline.domain.clopper_pearson import (  # type: ignore[import-not-found]  # ty: ignore[unresolved-import]
-    clopper_pearson_upper_bound,
-)
 from scipy.stats import beta  # type: ignore[attr-defined]
 
+from drift_caliper.baseline.domain.clopper_pearson import (
+    clopper_pearson_upper_bound,
+)
 from drift_caliper.errors import InvalidParameterError
 
 _ALPHA = 0.10  # ADR-013's ratified default -- see module docstring.

@@ -68,11 +68,11 @@ from pytest_bdd import given, then, when
 # 🚨 These two names do not exist in `drift_caliper.baseline` yet -- this
 # import is the expected red. See the module docstring's "Interface this file
 # commits domain-implementer to" section.
-from drift_caliper.baseline import (  # type: ignore[attr-defined]
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
-    FittedBernoulliCUSUM,  # ty: ignore[unresolved-import]
-    fit_bernoulli_cusum,  # ty: ignore[unresolved-import]
+    FittedBernoulliCUSUM,
+    fit_bernoulli_cusum,
 )
 from drift_caliper.errors import (
     CaliperError,

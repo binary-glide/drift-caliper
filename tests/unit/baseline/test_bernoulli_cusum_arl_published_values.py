@@ -91,7 +91,7 @@ import pytest
 
 # 🚨 Neither of these exists in `src/` yet -- the expected red. See the
 # module docstring's "Interface this file commits domain-implementer to".
-from drift_caliper.baseline.domain.bernoulli_cusum_fitting import (  # type: ignore[import-not-found]  # ty: ignore[unresolved-import]
+from drift_caliper.baseline.domain.bernoulli_cusum_fitting import (
     _joint_two_sided_bernoulli_arl0,
     _one_sided_bernoulli_arl0,
 )

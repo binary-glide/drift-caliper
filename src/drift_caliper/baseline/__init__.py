@@ -31,6 +31,10 @@ from drift_caliper.baseline.domain.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
 )
+from drift_caliper.baseline.domain.bernoulli_cusum_fitting import (
+    DEFAULT_DETECT_RATE_MULTIPLE,
+    fit_bernoulli_cusum,
+)
 from drift_caliper.baseline.domain.compare_provenance import compare_provenance
 from drift_caliper.baseline.domain.cusum_fitting import (
     DEFAULT_DIRECTION,
@@ -39,6 +43,7 @@ from drift_caliper.baseline.domain.cusum_fitting import (
 )
 from drift_caliper.baseline.domain.data_quality_concern import DataQualityConcern
 from drift_caliper.baseline.domain.ewma_fitting import DEFAULT_SMOOTHING_PARAM, fit_ewma
+from drift_caliper.baseline.domain.fitted_bernoulli_cusum import FittedBernoulliCUSUM
 from drift_caliper.baseline.domain.fitted_control_limits import FittedControlLimits
 from drift_caliper.baseline.domain.fitted_cusum import FittedCUSUM
 from drift_caliper.baseline.domain.fitted_ewma import FittedEWMA
@@ -49,12 +54,14 @@ from drift_caliper.baseline.domain.shewhart_fitting import fit_shewhart
 from drift_caliper.baseline.domain.sufficiency_result import SufficiencyResult
 
 __all__ = [
+    "DEFAULT_DETECT_RATE_MULTIPLE",
     "DEFAULT_DIRECTION",
     "DEFAULT_REFERENCE_VALUE",
     "DEFAULT_SMOOTHING_PARAM",
     "DEFAULT_SUFFICIENCY_THRESHOLD",
     "Baseline",
     "DataQualityConcern",
+    "FittedBernoulliCUSUM",
     "FittedCUSUM",
     "FittedControlLimits",
     "FittedEWMA",
@@ -63,6 +70,7 @@ __all__ = [
     "HasProvenance",
     "SufficiencyResult",
     "compare_provenance",
+    "fit_bernoulli_cusum",
     "fit_cusum",
     "fit_ewma",
     "fit_shewhart",

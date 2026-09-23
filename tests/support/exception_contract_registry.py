@@ -68,12 +68,12 @@ from enum import Enum
 from typing import Any
 
 # 🚨 BIN-133: does not exist in `drift_caliper.baseline` yet -- the expected red.
-from drift_caliper.baseline import (  # type: ignore[attr-defined]
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittingAdvisory,
     compare_provenance,
-    fit_bernoulli_cusum,  # ty: ignore[unresolved-import]
+    fit_bernoulli_cusum,
     fit_cusum,
     fit_ewma,
     fit_shewhart,
@@ -1437,7 +1437,7 @@ _FIT_BERNOULLI_CUSUM_CASES = (
     HostileCase(
         "wrong_type_baseline",
         lambda: fit_bernoulli_cusum(
-            "not a baseline",
+            "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             target_arl=370.0,
         ),
         kind=InputKind.WRONG_TYPE,
@@ -1457,7 +1457,7 @@ _FIT_BERNOULLI_CUSUM_CASES = (
         lambda: fit_bernoulli_cusum(
             _BERNOULLI_BASELINE,
             target_arl=370.0,
-            detect_rate_multiple="not a float",
+            detect_rate_multiple="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
         kind=InputKind.WRONG_TYPE,
     ),
@@ -1474,7 +1474,7 @@ _FIT_BERNOULLI_CUSUM_CASES = (
         lambda: fit_bernoulli_cusum(
             _BERNOULLI_BASELINE,
             target_arl=370.0,
-            direction=123,
+            direction=123,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         ),
         kind=InputKind.WRONG_TYPE,
     ),

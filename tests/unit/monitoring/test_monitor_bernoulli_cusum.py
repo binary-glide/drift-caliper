@@ -37,10 +37,10 @@ from typing import Any
 import pytest
 
 # 🚨 Does not exist in `drift_caliper.baseline` yet -- the expected red.
-from drift_caliper.baseline import (  # type: ignore[attr-defined]
+from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
-    fit_bernoulli_cusum,  # ty: ignore[unresolved-import]
+    fit_bernoulli_cusum,
 )
 from drift_caliper.errors import InvalidObservationError
 from drift_caliper.measurement import Provenance
