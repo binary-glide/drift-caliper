@@ -98,7 +98,11 @@ class TestScoreNotBinaryRejection:
         assert error.context["kind"] == "invalid"
         assert error.context["reason"] == "score_not_binary"
         # "the offending value plus its position are reported" (domain-model.md).
-        assert "invalid_score" in error.context or "provided" in error.context
+        # Exact keys -- not a disjunction (ADR-014 amendment fix).
+        assert "invalid_score" in error.context
+        assert error.context["invalid_score"] == 0.42
+        assert "position" in error.context
+        assert isinstance(error.context["position"], int)
 
     def test_checked_before_sufficiency(self) -> None:
         """Validation order step 2 (score check) precedes step 4 (sufficiency, BIN-64).

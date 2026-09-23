@@ -78,6 +78,7 @@ from drift_caliper.baseline import (
     fit_ewma,
     fit_shewhart,
 )
+from drift_caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL
 from drift_caliper.errors import (
     JudgeRefusalError,
     MalformedResponseError,
@@ -1507,6 +1508,39 @@ _FIT_BERNOULLI_CUSUM_CASES = (
             baseline_from_scores([0.0, 1.0, 0.42] + [0.0, 1.0] * 60), target_arl=370.0
         ),
         kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    # --- ADR-014 amendment Decisions 9/10b: resource-bound refusals ---
+    HostileCase(
+        # Decision 9: target_arl ceiling at MAX_MEANINGFUL_ARL.
+        "target_arl_above_ceiling",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=MAX_MEANINGFUL_ARL + 1.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        # Negative detect_rate_multiple -- not a valid shift lever.
+        "negative_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=-1.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        # Zero detect_rate_multiple -- not a valid shift lever.
+        "zero_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=0.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        # Positive infinity detect_rate_multiple.
+        "inf_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=math.inf
+        ),
+        kind=InputKind.NON_FINITE_FLOAT,
     ),
 )
 
