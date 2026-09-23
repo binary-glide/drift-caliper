@@ -378,16 +378,49 @@ the spike is not a property of the chart.
   lattice of granularity `1/N`; the two coincide only when `r = 1/N`. The
   load-bearing claim — bounded versus unbounded — is unaffected.
 
-### 6. ⚠️ What this amendment does NOT fix
+### 6. The default multiple's regret study, extended — the figure it left standing was narrower than its own text
 
-**The default multiple's regret study still only covers `p₀ ≤ 0.20`**, while
-`detect_rate_multiple = 2.0` is legal up to `p₀ < 0.5`. The review derived a
-real degeneracy in the untested region: with `M` fixed, `r → p₁` as
-`p₀ → 0.5`, so the statistic barely accumulates under the alternative it is
-tuned to detect. Measured relative position of `r` between `p₀` and `p₁`:
-0.447 at `p₀ = 0.05`, 0.467 at 0.20, **0.781 at 0.499**.
+**Discharged 2026-09-23 (ADR-013).** This section previously recorded that
+the regret study only covered `p₀ ≤ 0.20`, named the degeneracy as `p₀ →
+0.5` was approached, and left extending the measurement as outstanding
+work. That work is done.
 
-**`2.0` remains the ratified default** — nothing in the tested range disputes
-it, and it is still the largest multiple legal across the whole domain. But
-"defined for all `p₀`" and "measured for all `p₀`" are different claims, and
-only the first is currently true. Extending the study is outstanding work.
+Worst-case regret for `M = 2.0`, calibrated at the exact `p₀`, across the
+previously-untested region:
+
+```
+p0      0.25   0.30   0.35   0.40   0.45
+regret  1.18   1.25   1.28   1.31   1.49
+```
+
+🚨 **§1 states worst-case regret as 1.17. That figure holds only for
+`p₀ ≤ 0.20`; across the full legal domain (`p₀ < 0.5`) it rises to 1.49.**
+The regret table in §1 is not restated here and its 1.17 figure is left as
+originally published — this note records that it describes a narrower
+range than its surrounding text claims, so a reader meets the correction
+beside the claim it corrects.
+
+The mechanism is confirmed but is a **gradual drift, not the cliff** the
+derivation alone suggested: `r`'s position between `p₀` and `p₁` stays
+near 0.49 out to `p₀ = 0.35`, then moves to 0.533 at `0.40` and 0.580 at
+`0.45` — degrading steadily rather than collapsing at a point. (This
+supersedes the single-point measurement — 0.447 at 0.05, 0.467 at 0.20,
+0.781 at 0.499 — this section previously carried; the new grid is denser
+and was checked against it.)
+
+⚠️ **A lattice artefact, not a chart property:** at `p₀=0.40, M=1.5`, the
+derived `r` lands on exactly `0.5000` at `N=100` (`k=50`), and the
+achieved `ARL₀` overshoots to 516.7 against a request of 370 — the same
+non-monotone quantisation behaviour §3 already documents, at a specific
+coordinate rather than a new phenomenon.
+
+**`2.0` remains the ratified default.** Nothing in the extended range
+disputes it — it is still the largest multiple legal across the whole
+domain, and still performs best at its own design point. What changes is
+only that "defined for all `p₀`" and "measured for all `p₀`" are now both
+true, where before only the first was.
+
+Full detail, including GICP's interaction with this region — a
+Clopper–Pearson design reaches the `p₁ ≥ 1` ceiling before a plug-in
+design does — is in ADR-013 §6, not here; this ADR predates GICP and does
+not depend on it.
