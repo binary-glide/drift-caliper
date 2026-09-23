@@ -147,5 +147,6 @@ nav:
       - 011 Minimum target ARL0: architecture/adr/011-minimum-meaningful-target-arl0.md
       - 012 Bernoulli chart design: architecture/adr/012-bernoulli-chart-design-and-reference-value.md
       - 013 GICP baseline calibration: architecture/adr/013-gicp-supersedes-the-provisional-baseline-floor.md
+      - 014 Bernoulli CUSUM API surface: architecture/adr/014-bernoulli-cusum-api-surface-and-fitted-artefact-shape.md
   - Domain model: domain-model.md
   - Changelog: changelog.md
