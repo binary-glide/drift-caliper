@@ -658,18 +658,18 @@ class TestDetectRateMultipleRejection:
     """Negative, zero, and non-finite detect_rate_multiple must be rejected."""
 
     @pytest.mark.parametrize(
-        "value, label",
+        "value",
         [
-            (-1.0, "negative"),
-            (-0.001, "small_negative"),
-            (0.0, "zero"),
-            (float("inf"), "positive_infinity"),
-            (float("-inf"), "negative_infinity"),
-            (float("nan"), "nan"),
+            -1.0,
+            -0.001,
+            0.0,
+            float("inf"),
+            float("-inf"),
+            float("nan"),
         ],
         ids=["negative", "small_negative", "zero", "pos_inf", "neg_inf", "nan"],
     )
-    def test_raises_invalid_parameter(self, value: float, label: str) -> None:
+    def test_raises_invalid_parameter(self, value: float) -> None:
         baseline = _bernoulli_baseline(
             DEFAULT_SUFFICIENCY_THRESHOLD + 5, num_failures=10
         )

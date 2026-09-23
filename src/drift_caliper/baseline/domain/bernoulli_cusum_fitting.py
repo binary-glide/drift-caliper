@@ -114,6 +114,7 @@ import scipy.sparse.linalg as spla
 from drift_caliper.baseline.domain.baseline import Baseline
 from drift_caliper.baseline.domain.clopper_pearson import clopper_pearson_upper_bound
 from drift_caliper.baseline.domain.cusum_fitting import _validate_direction
+from drift_caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL
 from drift_caliper.baseline.domain.fitted_bernoulli_cusum import FittedBernoulliCUSUM
 from drift_caliper.baseline.domain.parameter_guards import (
     require_real_number,
@@ -140,14 +141,20 @@ _ALPHA = 0.10
 # 1/3 or 1/5 respectively.
 DEFAULT_DETECT_RATE_MULTIPLE = 2.0
 
-# ADR-013 section 1's own reported figures use N=100 throughout, and section
-# 1 records that a specific measurement is "stable from N=100 upward but not
-# at N=50" -- so 100 is not an arbitrary round number here, it is the
-# smallest denominator this ADR family has already checked is safe to trust.
-# The lattice denominator itself remains an implementation choice ADR-012
-# section 3 / ADR-013's own "what this deliberately does not decide" leave
-# open; this is that choice, made once, here.
-_LATTICE_DENOMINATOR = 100
+# ADR-014 amendment Decision 7: per-arm adaptive lattice denominator with
+# centring tolerance.  The fixed _LATTICE_DENOMINATOR = 100 violated the
+# (p0, p1) interval invariant at low failure rates (p_u < 0.01), where the
+# gap p1 - p0 narrowed below one lattice step (1/100).  Replaced by
+# _adaptive_lattice_denominator below, which finds the smallest N per arm
+# such that round(r * N) / N lies strictly inside (p0, p1) AND within
+# epsilon * (p1 - p0) of the unquantised r.
+_EPSILON = 0.25
+
+# ADR-014 amendment Decision 10b: joint two-sided state count cap.
+# Peak RSS is approximately 950 bytes/state; at 1M states that is ~908 MB,
+# safe for a typical CI runner or agent container.  Checked *before* the
+# joint solve runs.
+_MAX_JOINT_STATES = 1_000_000
 
 # Upper bound on the Fraction reconstruction search a caller-supplied
 # (reference_value, decision_interval) pair is matched against in
@@ -350,6 +357,31 @@ def _quantise_reference_value(r: float, n: int) -> int:
     return max(1, min(n - 1, units))
 
 
+def _adaptive_lattice_denominator(r: float, p0: float, p1: float) -> int:
+    """Find the smallest ``N >= 2`` satisfying both invariants.
+
+    ADR-014 amendment Decision 7: ``round(r * N) / N`` must lie strictly
+    inside ``(p0, p1)`` AND within ``epsilon * (p1 - p0)`` of the
+    unquantised ``r``.  The scan starts at ``N = 2`` and is bounded by the
+    closed-form ``ceil(1 / (2 * epsilon * gap))`` which guarantees a
+    solution exists (since ``|round(r * N) / N - r| <= 1 / (2N)`` and
+    ``epsilon * gap < min(r - p0, p1 - r)`` for ``epsilon < 0.5``).
+    """
+    gap = p1 - p0
+    tolerance = _EPSILON * gap
+    # Closed-form upper bound on N -- guarantees a solution exists so the
+    # scan always terminates (ADR-014 amendment Decision 7).
+    max_n = math.ceil(1.0 / (2.0 * _EPSILON * gap)) + 1
+    for n in range(2, max_n + 1):
+        r_units = _quantise_reference_value(r, n)
+        r_q = r_units / n
+        if p0 < r_q < p1 and abs(r_q - r) <= tolerance:
+            return n
+    # Unreachable: the closed-form bound ceil(1/(2*epsilon*gap)) + 1
+    # guarantees a solution exists inside the scan range.
+    return max_n  # pragma: no cover
+
+
 # ===========================================================================
 # Exact ARL0 via a finite Markov chain (ADR-012 section 4, ADR-014 section 6c)
 # ===========================================================================
@@ -525,20 +557,22 @@ def _joint_two_sided_bernoulli_arl0(
         ``_ILL_CONDITIONED_ARL_SENTINEL`` if the underlying linear solve is
         ill-conditioned.
     """
-    n = _lattice_denominator(
-        reference_value_lower,
-        decision_interval_lower,
-        reference_value_upper,
-        decision_interval_upper,
-    )
-    r_lo_units = round(reference_value_lower * n)
-    h_lo_units = round(decision_interval_lower * n)
-    r_up_units = round(reference_value_upper * n)
-    h_up_units = round(decision_interval_upper * n)
+    # ADR-014 amendment Decision 8: per-arm denominators, not a shared LCM.
+    # Each arm's CUSUM accumulator lives on its own lattice -- state (i, j)
+    # means the lower arm is at i units of 1/n_lo and the upper arm at j
+    # units of 1/n_up.  The two arms share a single Bernoulli draw, not a
+    # lattice denominator.
+    n_lo = _lattice_denominator(reference_value_lower, decision_interval_lower)
+    n_up = _lattice_denominator(reference_value_upper, decision_interval_upper)
 
-    up_lower = n - r_lo_units
+    r_lo_units = round(reference_value_lower * n_lo)
+    h_lo_units = round(decision_interval_lower * n_lo)
+    r_up_units = round(reference_value_upper * n_up)
+    h_up_units = round(decision_interval_upper * n_up)
+
+    up_lower = n_lo - r_lo_units
     down_lower = -r_lo_units
-    up_upper = n - r_up_units
+    up_upper = n_up - r_up_units
     down_upper = -r_up_units
 
     n_lower = h_lo_units + 1
@@ -598,10 +632,45 @@ def _calibrate_one_sided_decision_interval_units(
     if achieved_at(h_units) >= target:
         return h_units
 
+    # Exponential search for an upper bound on h_units.
     while achieved_at(h_units) < target:
         h_units *= 2
         if h_units > _MAX_DECISION_INTERVAL_UNITS:
-            return h_units
+            # ADR-014 amendment Decision 10a.  Check whether the cap itself
+            # achieves the target -- the exponential search overshoots, so
+            # the answer may lie between the last power-of-two and the cap.
+            cap_arl = achieved_at(_MAX_DECISION_INTERVAL_UNITS)
+            if cap_arl >= target:
+                # Bisect between the last safe power-of-two and the cap.
+                lo = h_units // 2
+                hi = _MAX_DECISION_INTERVAL_UNITS
+                while hi - lo > 1:
+                    mid = (lo + hi) // 2
+                    if achieved_at(mid) >= target:
+                        hi = mid
+                    else:
+                        lo = mid
+                return hi
+            # The cap cannot deliver the target -- raise with the largest
+            # ARL this arm can achieve, which round-trips (BIN-122).
+            raise InvalidParameterError(
+                "the one-sided calibration search exceeded its decision "
+                "interval cap without reaching the requested ARL0",
+                context={
+                    "parameter": "target_arl",
+                    "kind": "invalid",
+                    "max_attainable_arl": float(cap_arl),
+                    "constraint": (
+                        "the target ARL0 must be achievable within the "
+                        "decision interval search range"
+                    ),
+                },
+                recovery_hint=(
+                    f"Reduce target_arl to at most {cap_arl}, which is the "
+                    "largest ARL0 this arm can deliver at this lattice "
+                    "configuration."
+                ),
+            )
 
     lo, hi = h_units // 2, h_units
     while hi - lo > 1:
@@ -611,6 +680,91 @@ def _calibrate_one_sided_decision_interval_units(
         else:
             lo = mid
     return hi
+
+
+# ===========================================================================
+# Joint state count bisection (ADR-014 amendment Decision 10b)
+# ===========================================================================
+
+
+def _joint_state_count_at_target(
+    target_arl: float,
+    r_lower_units: int,
+    n_lower: int,
+    p_lower: float,
+    r_upper_units: int,
+    n_upper: int,
+    p_upper: float,
+) -> int:
+    """Joint state count a two-sided fit at ``target_arl`` would produce.
+
+    Each arm's decision interval is calibrated independently, and the joint
+    state count is the product of the two transient-state counts.  Monotone
+    in ``target_arl`` for a fixed baseline (verified by ADR-014's
+    measurement).
+    """
+    per_arm_target = target_arl * 2.0
+    h_lo = _calibrate_one_sided_decision_interval_units(
+        r_lower_units, n_lower, p_lower, per_arm_target
+    )
+    h_up = _calibrate_one_sided_decision_interval_units(
+        r_upper_units, n_upper, p_upper, per_arm_target
+    )
+    return (h_lo + 1) * (h_up + 1)
+
+
+def _find_max_two_sided_target_arl(
+    r_lower_units: int,
+    n_lower: int,
+    p_lower: float,
+    r_upper_units: int,
+    n_upper: int,
+    p_upper: float,
+) -> float:
+    """Bisect for the largest ``target_arl`` within the joint state cap.
+
+    The joint state count is monotonically non-decreasing in ``target_arl``
+    (ADR-014 amendment Decision 10b, verified by measurement), so a standard
+    bisection over ``[1, MAX_MEANINGFUL_ARL]`` gives the answer.  The
+    returned value **round-trips** as an accepted ``target_arl`` (BIN-122's
+    rule).
+    """
+    lo = _MIN_COHERENT_ARL
+    hi = MAX_MEANINGFUL_ARL
+
+    # Quick check: if even the ceiling fits, return it.
+    try:
+        count_at_hi = _joint_state_count_at_target(
+            hi, r_lower_units, n_lower, p_lower, r_upper_units, n_upper, p_upper
+        )
+    except InvalidParameterError:
+        count_at_hi = _MAX_JOINT_STATES + 1
+    if count_at_hi <= _MAX_JOINT_STATES:
+        # Unreachable in practice: if the ceiling fits within the cap, the
+        # caller's own target_arl (which is <= the ceiling) also fits, so
+        # the raise path that leads here is never taken.
+        return hi  # pragma: no cover
+
+    # Bisect to find the boundary.
+    for _ in range(100):  # ~50 iterations needed for 1e6 range at 1.0 precision
+        if hi - lo < 1.0:
+            break
+        mid = (lo + hi) / 2.0
+        try:
+            count = _joint_state_count_at_target(
+                mid, r_lower_units, n_lower, p_lower, r_upper_units, n_upper, p_upper
+            )
+        except InvalidParameterError:
+            count = _MAX_JOINT_STATES + 1
+        if count <= _MAX_JOINT_STATES:
+            lo = mid
+        else:
+            hi = mid
+
+    # Return the floor to guarantee the round-trip: math.floor ensures the
+    # returned value, when re-submitted, produces a state count at most
+    # equal to the one at `lo` (which is <= _MAX_JOINT_STATES).
+    return math.floor(lo)
 
 
 # ===========================================================================
@@ -703,6 +857,24 @@ def fit_bernoulli_cusum(
     _require_binary_scores(scores)
 
     validated_target_arl = _require_bernoulli_target_arl(target_arl)
+    # Decision 9: ceiling at MAX_MEANINGFUL_ARL (same bound the continuous
+    # charts enforce, reused here as a cost bound).
+    if validated_target_arl > MAX_MEANINGFUL_ARL:
+        raise InvalidParameterError(
+            "target_arl exceeds the supported ceiling",
+            context={
+                "parameter": "target_arl",
+                "kind": "invalid",
+                "provided": validated_target_arl,
+                "max_value": MAX_MEANINGFUL_ARL,
+                "max_inclusive": True,
+            },
+            recovery_hint=(
+                f"Choose a target_arl of at most {MAX_MEANINGFUL_ARL}. "
+                "This ceiling bounds the cost of the calibration search; "
+                "the Bernoulli CUSUM's ARL0 is exact at every value below it."
+            ),
+        )
     validated_multiple = _validate_detect_rate_multiple(detect_rate_multiple)
     effective_direction = _validate_direction(direction)
 
@@ -778,11 +950,15 @@ def fit_bernoulli_cusum(
     q1_upper = 1.0 - p_u / validated_multiple
     r_upper_real = _bernoulli_reference_value(q0_upper, q1_upper)
 
-    n = _LATTICE_DENOMINATOR
-    r_lower_units = _quantise_reference_value(r_lower_real, n)
-    r_upper_units = _quantise_reference_value(r_upper_real, n)
-    r_lower = r_lower_units / n
-    r_upper = r_upper_units / n
+    # Decision 7: per-arm adaptive lattice denominators with centring
+    # tolerance, replacing the fixed _LATTICE_DENOMINATOR = 100.
+    n_lower = _adaptive_lattice_denominator(r_lower_real, p_u, p1_lower)
+    n_upper = _adaptive_lattice_denominator(r_upper_real, q0_upper, q1_upper)
+
+    r_lower_units = _quantise_reference_value(r_lower_real, n_lower)
+    r_upper_units = _quantise_reference_value(r_upper_real, n_upper)
+    r_lower = r_lower_units / n_lower
+    r_upper = r_upper_units / n_upper
 
     per_arm_target = (
         validated_target_arl * 2.0
@@ -791,13 +967,48 @@ def fit_bernoulli_cusum(
     )
 
     h_lower_units = _calibrate_one_sided_decision_interval_units(
-        r_lower_units, n, p_u, per_arm_target
+        r_lower_units, n_lower, p_u, per_arm_target
     )
     h_upper_units = _calibrate_one_sided_decision_interval_units(
-        r_upper_units, n, q0_upper, per_arm_target
+        r_upper_units, n_upper, q0_upper, per_arm_target
     )
-    h_lower = h_lower_units / n
-    h_upper = h_upper_units / n
+
+    # Decision 10b: joint state count cap -- checked BEFORE building the
+    # joint system, so memory is never allocated for an infeasible solve.
+    if effective_direction == "two_sided":
+        joint_states = (h_lower_units + 1) * (h_upper_units + 1)
+        if joint_states > _MAX_JOINT_STATES:
+            max_two_sided_target = _find_max_two_sided_target_arl(
+                r_lower_units,
+                n_lower,
+                p_u,
+                r_upper_units,
+                n_upper,
+                q0_upper,
+            )
+            raise InvalidParameterError(
+                "the two-sided fit exceeds the joint state count cap",
+                context={
+                    "parameter": "target_arl",
+                    "kind": "invalid",
+                    "provided": validated_target_arl,
+                    "reason": "joint_state_count_exceeded",
+                    "joint_state_count": joint_states,
+                    "max_joint_states": _MAX_JOINT_STATES,
+                    "max_two_sided_target_arl": max_two_sided_target,
+                },
+                recovery_hint=(
+                    f"Reduce target_arl to at most "
+                    f"{max_two_sided_target} for a two-sided fit at this "
+                    f"baseline, increase detect_rate_multiple (which widens "
+                    f"the gap and reduces per-arm decision intervals), or "
+                    f"use direction='lower' or direction='upper' to avoid "
+                    f"the joint solve entirely."
+                ),
+            )
+
+    h_lower = h_lower_units / n_lower
+    h_upper = h_upper_units / n_upper
 
     p_alt = (p_hat if f > 0 else p_u) * validated_multiple
     p_alt = min(p_alt, 1.0 - _DESIGN_POINT_SAFETY_MARGIN)
