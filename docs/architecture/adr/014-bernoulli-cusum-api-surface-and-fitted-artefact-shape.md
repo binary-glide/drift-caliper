@@ -529,7 +529,7 @@ establishes "both sums always updated regardless of `direction`" as the
 existing convention; the equivalent here is "both arms always designed and
 reported regardless of `direction`," for the same auditability reason: an
 engineer inspecting the artefact can see what a direction change *would*
-produce without refitting).
+produce without refitting). ⚠️ *Corrected by Amendment 2's corrigendum, below (C3), ratified 2026-09-24: an artefact carries only the arms its `direction` checks.*
 
 No `target_value`/`sigma_estimate`/`sigma_estimation_method`/
 `baseline_spread` fields — deliberately absent (6a); there is no raw-scale
@@ -593,7 +593,7 @@ within this release's timeline.** If it does, `fit_bernoulli_cusum` may
 fall back to the harmonic-combination approximation (identical to the
 continuous chart's method) **only if** the fitted artefact's
 `calibration_method` says so explicitly —
-`"gicp_markov_chain_harmonic_combination"` rather than
+`"gicp_markov_chain_harmonic_combination"` rather than ⚠️ *corrected by the corrigendum, below (C5).*
 `"gicp_markov_chain"` — so the artefact never silently claims an exactness
 property it does not have. This is not a decision to ship the fallback; it
 is a decision that *if* it ships, it must be named honestly. Preferred:
@@ -1765,7 +1765,7 @@ This matches Decision 10b's ≈950 bytes per state.
    `MAX_MEANINGFUL_ARL` and two-sided at 370, and the adaptive-`N` scan costs
    0.37 s at its largest. A bound on `m` would refuse the healthiest agents
    precisely because they are healthy. Integer width is not a concern, since
-   Python `int` is unbounded and N stays under 2×10⁶ in this range.
+   Python `int` is unbounded and N stays under 2×10⁶ in this range. ⚠️ *corrected by the corrigendum, below (C9).*
 3. **The one-sided chain gets the same memory budget as the joint chain.**
    - `_MAX_DECISION_INTERVAL_UNITS` becomes `_MAX_JOINT_STATES − 1`
      (999,999), so no single solve, one-sided or joint, exceeds 1,000,000
@@ -1851,7 +1851,7 @@ This matches Decision 10b's ≈950 bytes per state.
      also fine; the choice is the implementer's.
    - `__bool__` raises, as it does on every other domain type (BIN-110).
 2. **`FittedBernoulliCUSUM` gains `lattice_lower: BernoulliArmLattice` and
-   `lattice_upper: BernoulliArmLattice`.** These amend §6b's field table. They
+   `lattice_upper: BernoulliArmLattice`.** These amend §6b's field table. They ⚠️ *corrected by the corrigendum (C3): each is `BernoulliArmLattice | None`, `None` exactly when that arm is not checked.*
    are **the stored, authoritative definition of the chart.**
 3. **The four public float fields stay, and so does their meaning, but they
    become derived.** `reference_value_lower`, `decision_interval_lower`,
@@ -1944,7 +1944,7 @@ remains unconditional and first-class (Decision 4).
 | `direction` | evaluated at failure rate | f = 0 fallback |
 |---|---|---|
 | `"lower"` | `p̂ × M` (unchanged) | `p_U × M` (unchanged) |
-| `"two_sided"` | `p̂ × M` via the joint chain (unchanged; a doubling is the headline question for the default chart) | `p_U × M` (unchanged) |
+| `"two_sided"` | `p̂ × M` via the joint chain (unchanged; a doubling is the headline question for the default chart) | `p_U × M` (unchanged) ⚠️ *corrected by the corrigendum, below (C8)* |
 | `"upper"` | **`p̂ / M`**, the mirror of ADR-013 §4 and the upper arm's own design direction (ADR-012 amendment §2) | **`p_U / M`**, mirroring ADR-013 §4's fallback: at f=0, "an improvement from zero" is undefined, as "a rise from zero" is for the lower arm |
 
 **Why this and not the alternatives.**
@@ -1974,7 +1974,7 @@ direction-aware definition. That is domain-modeller's step.
 
 **✅ Ratified 2026-09-24.**
 
-**Reachability, measured, not assumed.** Under today's cap of 2,000,000 units
+**Reachability, measured, not assumed.** Under today's cap of 2,000,000 units ⚠️ *corrected by the corrigendum, below (C1).*
 no two-sided configuration measured reaches the per-arm search cap. The
 largest per-arm `h` is 1,211,962 units, at m=3,000,000 f=0 T=10⁶
 (`a2_large.out`). **Under Decision 13's cap of 999,999 units that same
@@ -2033,14 +2033,14 @@ key listed is required. "New" marks a row this amendment adds or changes.
 | F4 | `target_arl` not a real number, or a `bool` | `InvalidParameterError` | `parameter`, `constraint`, `kind="invalid"`, `provided` (existing `require_real_number`) |
 | F5 | **new, merged:** `target_arl` non-finite, `< 1.0` or `> MAX_MEANINGFUL_ARL` | `InvalidParameterError` | `parameter="target_arl"`, `constraint` (e.g. `"must be a finite float in [1.0, 1000000.0]"`), `kind="invalid"`, `provided`, `min_value=1.0`, `max_value=MAX_MEANINGFUL_ARL`, `min_inclusive=True`, `max_inclusive=True`. Replaces today's two separate raises, one of which had no `constraint`. This is the key set `parameter_guards.classify_target_arl` already emits, so it should come from a shared, bounds-parameterised helper and not be hand-rolled (the reviewer's point: hand-rolling is how `constraint` was lost). |
 | F6 | `detect_rate_multiple` not a real number | `InvalidParameterError` | `parameter`, `constraint`, `kind="invalid"`, `provided` |
-| F7 | `detect_rate_multiple` non-finite or ≤ 0 | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `min_value=0.0`, `min_inclusive=False` (existing) |
-| F8 | `direction` not recognised, or not an exact `str` | `InvalidParameterError` | `parameter="direction"`, `constraint`, `kind="invalid"`, `provided` (existing `_validate_direction`/`require_exact_str`) |
+| F7 | `detect_rate_multiple` non-finite or ≤ 0 | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `min_value=0.0`, `min_inclusive=False` (existing) ⚠️ *corrected by the corrigendum, below (C2)* |
+| F8 | `direction` not recognised, or not an exact `str` | `InvalidParameterError` | `parameter="direction"`, `constraint`, `kind="invalid"`, `provided` (existing `_validate_direction`/`require_exact_str`) ⚠️ *corrected by the corrigendum, below (C6)* |
 | F9 | fewer than 100 observations | `InsufficientBaselineError` | `have`, `need` |
 | F10 | every judgement failed | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `reason="all_baseline_judgements_failed"`; **no** `max_detect_rate_multiple` |
 | F11 | `p_U × M ≥ 1` | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `max_detect_rate_multiple` (round-trips; key name ratified, unchanged) |
 | F12 | one-sided search reaches `_MAX_DECISION_INTERVAL_UNITS` (`"lower"`/`"upper"` only, Decision 16) | `InvalidParameterError` | `parameter="target_arl"`, `constraint`, `kind="invalid"`, **`provided`** (new: the caller's `target_arl`, not the per-arm figure), `max_attainable_arl` (round-trips as a one-sided target), `direction` |
 | F13 | two-sided joint states over `_MAX_JOINT_STATES`, **or** a per-arm search-cap hit in two-sided mode (Decision 16) | `InvalidParameterError` | `parameter="target_arl"`, **`constraint`** (new: e.g. `"the two-sided joint state count must not exceed max_joint_states"`), `kind="invalid"`, `provided`, `reason="joint_state_count_exceeded"`, `joint_state_count`, `max_joint_states`, `max_two_sided_target_arl` (round-trips). When a per-arm hit triggered it, `joint_state_count` is the lower bound `(h_lo+1)(h_up+1)` at the capped arm, still over the cap. |
-| F14 | **new:** a reported ARL fails its postcondition (Decision 13.4) | `DegenerateBaselineError` | `reason="arl_not_computable"`, `chart_type="bernoulli_cusum"`, `figure` (`"achieved_arl"` or `"expected_detection_arl"`) |
+| F14 | **new:** a reported ARL fails its postcondition (Decision 13.4) | `DegenerateBaselineError` | `reason="arl_not_computable"`, `chart_type="bernoulli_cusum"`, `figure` (`"achieved_arl"` or `"expected_detection_arl"`) ⚠️ *corrected by the corrigendum, below (C10)* |
 
 **Not a refusal: the disclosure (Decision 12).** It is
 `FittingAdvisory(kind="lower_arm_signals_on_first_failure", description, boundary)`,
@@ -2052,7 +2052,7 @@ ARL₀ at `h_units = 1`.
 | # | condition | type | required `context` |
 |---|---|---|---|
 | M1 | Phase II score not exactly 0.0/1.0 | `InvalidObservationError` | `reason="score_not_binary"`, `missing_fields=()` (existing, Decision 2) |
-| M2 | **new:** a lattice on a caller-supplied `FittedBernoulliCUSUM` has an integer that is not exact, or is out of bounds (Decision 14.5) | `InvalidParameterError` | `parameter="artefact"`, `constraint`, `kind="invalid"`, `provided`, `field` (e.g. `"lattice_upper.reference_units"`) |
+| M2 | **new:** a lattice on a caller-supplied `FittedBernoulliCUSUM` has an integer that is not exact, or is out of bounds (Decision 14.5) | `InvalidParameterError` | `parameter="artefact"`, `constraint`, `kind="invalid"`, `provided`, `field` (e.g. `"lattice_upper.reference_units"`) ⚠️ *corrected by the corrigendum, below (C4, C6)* |
 | M3 | artefact `direction` not an exact `str` | `InvalidParameterError` | existing `require_exact_str` keys (BIN-143) |
 
 **Enforcement, so this cannot be missed a third time.**
@@ -2108,7 +2108,7 @@ marked 🚨 are the ones that would each have caught a shipped defect.
    `"upper"` the float bias was 375.6 against 370.7 ± 8.7, inside any honest
    tolerance. Item 1 is the precise check; this one guards the calibration
    end to end.
-3. 🚨 **Large baselines, every direction.**
+3. 🚨 **Large baselines, every direction.** ⚠️ *corrected by the corrigendum, below (C1).*
    - Scope: m ∈ {300,000; 1,000,000}, f=0, with T ∈ {370, `MAX_MEANINGFUL_ARL`}.
      Build each baseline with one shared `ScoringResult`, which takes about
      0.05 s at 200,000.
@@ -2130,7 +2130,7 @@ marked 🚨 are the ones that would each have caught a shipped defect.
    before anything else), spy on the solver's `n_states`, and assert it equals
    `(h_lower_units + 1) × (h_upper_units + 1)`. This kills mutation M2, which
    today is caught only by pytest-timeout.
-5. 🚨 **Decision 12, the floor and the disclosure.**
+5. 🚨 **Decision 12, the floor and the disclosure.** ⚠️ *corrected by the corrigendum, below (C1).*
    - For m ∈ {852, 1,000, 5,000, 300,000}, f=0, `"lower"` at T=370, and for
      m=300 f=3 `"lower"` at T=50: `achieved_arl == 1/p_U` to rel 1e-9. The
      advisory `lower_arm_signals_on_first_failure` is present, with
@@ -2149,11 +2149,11 @@ marked 🚨 are the ones that would each have caught a shipped defect.
 7. **No float reconstruction in production.** A structural test (AST or grep)
    asserts that `bernoulli_cusum_fitting.py` contains no `limit_denominator`
    and no `Fraction` reconstruction.
-8. **Decision 15.** `"upper"`'s `expected_detection_arl` equals the reference
+8. **Decision 15.** `"upper"`'s `expected_detection_arl` equals the reference ⚠️ *corrected by the corrigendum, below (C1).*
    solver at failure rate `p̂/M`: 32.8 at m=150 f=40, and 61.3 at m=200 f=20.
    At f=0 it uses `p_U/M`: 314.1 at m=1,000. `"lower"` and `"two_sided"` are
    unchanged.
-9. **Decision 16.** Monkeypatch `_MAX_DECISION_INTERVAL_UNITS` small enough
+9. **Decision 16.** Monkeypatch `_MAX_DECISION_INTERVAL_UNITS` small enough ⚠️ *corrected by the corrigendum, below (C1).*
    that one arm hits it in `"two_sided"`. The fit must raise F13, not F12, and
    `max_two_sided_target_arl` must round-trip.
 10. **Decision 17.** The registry-driven test asserts every row's full key set,
@@ -2162,7 +2162,7 @@ marked 🚨 are the ones that would each have caught a shipped defect.
     `FittedBernoulliCUSUM.model_validate(chart.model_dump())` equals `chart`,
     and drives `Monitor` identically under item 1's stepper. Each float field
     equals `units / denominator` exactly.
-12. **Refusal-path budget.** The F13 refusal at m=300,000 f=0 `"two_sided"` at
+12. **Refusal-path budget.** The F13 refusal at m=300,000 f=0 `"two_sided"` at ⚠️ *corrected by the corrigendum, below (C1; budget replaced in C11).*
     T=`MAX_MEANINGFUL_ARL` completes in **≤ 5 s locally**; today it takes
     44.8 s. This is an engineering budget, not a statistical constant.
     Decision 11 item 8's "under 1 second" is withdrawn as unmeasured. Tests
@@ -2269,7 +2269,7 @@ undefined there.
     improvement arm can be designed.
   - `lattice_upper` is `None` for this artefact. `reference_value_upper` and
     `decision_interval_upper` are therefore `float | None`, which changes the
-    ratified shape of 6b/14 **only at f = 0**.
+    ratified shape of 6b/14 **only at f = 0**. ⚠️ *corrected by the corrigendum (C3): `lattice_X` is `None` exactly when arm X is not checked, for any f and any requested direction.*
   - Why fit rather than refuse: the ratified default must not refuse the
     healthiest baselines. Decision 12 established that reasoning for this same
     population.
@@ -2492,7 +2492,7 @@ including D's `h_up`. Its `B` matched to within floating-point rounding
 
 - **§6b/Decision 14 shape:**
   - add **`p_l: float`**, reported beside `p_u`;
-  - `lattice_upper` is `None` only when f = 0 forced `direction = "lower"`
+  - `lattice_upper` is `None` only when f = 0 forced `direction = "lower"` ⚠️ *corrected by the corrigendum (C3): `None` exactly when the upper arm is not checked; see also C4.*
     (19.2).
 - **Decision 15:** the `"upper"` row keeps `p̂/M`. Its f = 0 fallback is
   withdrawn (19.2).
@@ -2619,7 +2619,7 @@ sooner than it would false-alarm.
 | Decision 11 (verification bar) | **extended** by Decision 18; item 8's "< 1 s" is withdrawn |
 | **NEW Decisions 12–18** | as above, **ratified 2026-09-24** |
 | Decision 6d (`p_U` for both arms) | **superseded** by Decision 19: the upper arm is designed at `p_L`. Open Question 23 is **settled** |
-| Decision 6b / 14 (shape) | **amended** by Decision 19: adds `p_l` and `expected_improvement_detection_arl` (19.6). At f = 0 two-sided, `lattice_upper` is `None` and the three upper-arm fields are optional |
+| Decision 6b / 14 (shape) | **amended** by Decision 19: adds `p_l` and `expected_improvement_detection_arl` (19.6). At f = 0 two-sided, `lattice_upper` is `None` and the three upper-arm fields are optional ⚠️ *corrected by the corrigendum (C3): `None` whenever the arm is not checked* |
 | Decision 6c (two-sided `achieved_arl`) | **amended** by Decision 19: the coupled bound `B`, calibrated per option D |
 | Decision 15 | f = 0 upper fallback **withdrawn** by Decision 19 |
 | **NEW Decision 19** | **ratified 2026-09-24**: upper arm at `p_L`, f = 0 rules, two-sided `B` with calibration D, and `expected_improvement_detection_arl` |
@@ -2691,3 +2691,624 @@ superseded by that ruling.
   Recommendations 1–2, 6). These are implementation, not architecture. Item 12
   above sets the one budget that belongs here.
 - **`docs/domain-model.md`.** Domain-modeller's step, not performed here.
+- **An iterative solver** (bicgstab or gmres) in place of the direct sparse
+  solves, to cut per-solve time and memory. Raised separately as its own ticket
+  (see the corrigendum's C11).
+
+---
+
+### Amendment 2 corrigendum (2026-09-24)
+
+**Why this exists.** domain-modeller, modelling the committed Amendment 2
+(`e828a06`), found that it contradicts itself in places. It recorded these as
+Open Questions 29–36 in `docs/domain-model.md`. The coordinator also
+reproduced three failures of `detect_rate_multiple` on PR #29. Ratified text
+above is **not** edited. Each line that is now wrong carries a visible
+"⚠️ corrected by the corrigendum, below (Cn)" pointer.
+
+**Status:** ✅ **ACCEPTED 2026-09-24.** C12 corrects it within the ratified
+decisions, and reports one new defect (C12.4).
+- **C1, C4–C10** are specification corrections. They follow from decisions
+  already ratified.
+- **C2's lower bound:** ruled by the product owner as C-Q1, option (A).
+- **C3:** ruled as C-Q2.
+- **C11:** ruled as C-Q3. The direction is an equal-split conservative bound.
+  Its premise was measured to hold in all 302 designs checked, and a one-solve
+  guard makes correctness independent of that premise.
+
+All measurements use the scripts in `scratchpad/amend2/`: `h1`–`h6`, and for
+C11 `k1b_premise.py`, `k2_es_bound.py` and `k3_refusal_time.py`. Every
+figure is **re-measured under the ratified behaviour**:
+- upper arm at `p_L`;
+- f = 0 two-sided becomes lower-only; `"upper"` at f = 0 raises F15;
+- calibration D, with `B` as the two-sided `achieved_arl`;
+- caps of 999,999 units per arm and 1,000,000 joint states.
+
+The implementation is the fully independent one from `g5`, extended with the
+caps. It imports nothing from `drift_caliper`. **No figure computed under
+superseded behaviour is reused.**
+
+#### C1. Decision 18's f = 0 cells, re-based (Open Question 36)
+
+`h1_d18_cells.py`, output `h1.out`.
+
+| item | cell | required outcome, re-measured |
+|---|---|---|
+| 5 | m ∈ {852, 1000, 5000, 300000}, f=0, `"lower"`, T=370 | `h_units = 1`, `achieved_arl = 1/p_U` = 370.5191, 434.7947, 2171.9724, 130288.8446. `lower_arm_signals_on_first_failure` present, with `boundary == achieved_arl` |
+| 5 | m=300 f=3 `"lower"` **T=40** | floored: 45.1815, advisory present. ⚠️ **The original cell, T=50, was wrong even before Decision 19.** 50 falls in the *gap* above the floor, giving `h_units = 26`, `achieved_arl` 147.5931, and **no** advisory. T=50 is kept as the gap case, asserting the advisory is **absent** |
+| 5 | m=5000 f=0 **`"two_sided"`** T=370 | returns **`direction = "lower"`**, `achieved_arl` 2171.9724, with **both** advisories (`lower_arm_signals_on_first_failure`, `upper_arm_not_designable`) and `lattice_upper is None`. It replaces "fits at 552.2" |
+| 5 | advisory absent | m=300 f=0 `"lower"` T=370: `h_units = 77`, 423.8900 |
+| 5 | F15 | m=1000 f=0 `"upper"` → F15 with its full key set |
+| 3 | m=300,000 **f=1**, `"lower"` | T=370: floored, 77126.7422. T=10⁶: `h = 101,595`, 1000018.2953 |
+| 3 | m=300,000 f=1, `"upper"` | T=370: `N = 3,364,300`, `h = 369`, 370.0241. T=10⁶: `h = 857,041`, 1000001.1949 (fits; **not** F12) |
+| 3 | m=300,000 f=1, `"two_sided"` | T=370: `h = (1, 370)`, 742 states, `B` 370.1115, `expected_detection_arl` 370.5428, `expected_improvement_detection_arl` 370.8856. T=10⁶: **F13**, because the upper arm's per-arm target of 2·10⁶ exceeds the 999,999-unit cap (Decision 16's route) |
+| 3 | m=300,000 **f=30** | `"upper"` T=370: 370.2214. `"upper"` T=10⁶: `h = 81,621`, 1000026.7807. `"two_sided"` T=370: `h = (1, 379)`, 760 states, `B` 370.9495 |
+| 8 | `"upper"` `expected_detection_arl` at `p̂/M`, upper arm at `p_L` | m=150 f=40: 72.1128. m=200 f=20: 157.6429. m=1000 f=1: 398.1379. ⚠️ **The original 32.8 and 61.3 were computed with the upper arm at `p_U`**, and 314.1 is the withdrawn f = 0 fallback. All three are withdrawn |
+| 12 | F13 refusal-path budget | re-based to f ≥ 1. m=300,000 f=1 `"two_sided"` T=10⁶ refuses. Under the D bisection, `max_two_sided_target_arl` was 38,562, took 17.8 s, and was over the 5 s budget. **Resolved by C11:** the equal-split bound reports 38,563 in 2.2 s end to end, and the budget is replaced |
+
+**Decision 16's reachability, re-measured at f ≥ 1.** The per-arm search cap is
+reached in two-sided mode at m=300,000 f=1 T=10⁶ (the upper arm at 2·10⁶ hits
+the cap) and routes to F13, as Decision 16 decides. Its original measurement
+cell (m=3,000,000 **f=0**) no longer describes a two-sided fit. The route is
+still reachable, at f ≥ 1.
+
+#### C2. `detect_rate_multiple`: a legal range, and an O(log N) lattice finder
+
+**Reproduced on PR #29 by the coordinator** (m=200 f=20 T=370):
+- `M=1.0` leaks `ZeroDivisionError`;
+- `M=0.5` leaks `ValueError`;
+- `M=1.0000001` **hangs**.
+
+**The hang is Decision 7's linear scan, not the chain.** The scan walks `N`
+upward and is bounded only by `⌈1/(2ε·gap)⌉`. As M → 1⁺ the gap shrinks to 0.
+Closed-form bounds, `h2_m_range.py`:
+
+| baseline | M | lower-arm bound | upper-arm bound |
+|---|---|---|---|
+| m=10,000 f=1 | 1.05 | 102,851 | 3,986,335 |
+| m=10,000 f=1 | 1.0001 | 51,425,011 | 1,898,444,142 |
+| m=200 f=20 | 1.0000001 | ≈1.5×10⁸ | ≈3.4×10⁸ |
+
+**C2 part 1: specification correction, not a PO item.** Replace the scan with
+the **smallest-denominator rational in the closed interval
+`[r − ε·gap, r + ε·gap]`**. That is the classic continued-fraction
+(Stern–Brocot) construction, done in exact `Fraction` arithmetic. Then take
+`k = round(r·N)` at that `N` and verify both Decision 7 invariants exactly.
+- It is the same decision rule as the scan, with the same output.
+- **Measured identical to the scan on 797 of 797 real design points** ⚠️ *corrected by the corrigendum (C12.4): M ≤ 3 only, and the finder was wrong at large M. It is replaced by the exact finder, identical on 6,994 points including M > 3.*
+  (`h3_m_near_one.py`, both arms, M ∈ [1.01, 3], m ≤ 3,000, all 1 ≤ f ≤ m/4).
+- It takes 0.1–0.2 ms per design **even at M − 1 = 10⁻⁷**, where the scan would
+  walk hundreds of millions of steps.
+- Once the finder is logarithmic, Decision 13.3's caps bound everything else.
+
+  | m=200 f=20, M | lower | upper | two-sided | time |
+  |---|---|---|---|---|
+  | 1.1 | fits, `h` 127 | fits, `h` 61 | fits | 0.07 s |
+  | 1.001 | fits, `h` 879 | fits, `h` 825 | F13 | 8.7 s |
+  | 1.0000001 | fits, `h` 54,736 | fits, `h` 66,483 | F13 | 3.1 s |
+
+  The times exclude `max_two_sided_target_arl`, which C11 resolves (16.4 s
+  end to end at M = 1.001).
+
+**The legal range.**
+- **M ≤ 1 is refused (specification correction).** `M = 1` detects no shift,
+  since `p₁ = p₀`. `M < 1` would design the "degradation" arm to detect an
+  *improvement*, mislabelled, and would put the upper arm's design point
+  `p_L/M` above `p_L`. ADR-012's reference value needs `p₀ < p₁`, so no
+  design exists for either.
+- **Just above 1, double precision runs out.** `h4_resolution.py` swept
+  M − 1 = 10⁻¹ … 10⁻¹⁵ over 11 baselines (m from 100 to 300,000, f from 0 to
+  60). Every baseline is constructible down to M − 1 = 10⁻⁷, and every one
+  fails at 10⁻⁸ or 10⁻⁹. None succeeds below its first failure, so the failure
+  is monotone. This matches the error analysis:
+  - the float error in `r` is about `p₀·ε_mach/(M − 1)`;
+  - the tolerance it must sit inside is `ε·p₀·(M − 1)`;
+  - so the design becomes unverifiable when `(M − 1)² ~ ε_mach`, that is at
+    M − 1 ≈ 1.5×10⁻⁸.
+
+✅ **Ratified 2026-09-24 (C-Q1): option (A).** The lower bound is computed per
+fit. Every option refused through one new row, F16, and they differed only in
+`min_value`; (B) and (C) are recorded as rejected.
+
+- **(A) Ratified: computed per fit.** `min_value` is the smallest M, found
+  by bisection on `log(M − 1)` over (0, 1] with ≤ 64 probes of the finder, for
+  which both arms' design is constructible and verified in double precision. ⚠️ *corrected by the corrigendum (C12.1): "every arm the fit designs"; `min_value` is the nearest constructible multiple at or above the request.*
+  - It **round-trips by construction**, because the bisection returns a
+    verified value.
+  - No constant is invented.
+  - It admits any M the maths can represent, which is ADR-011's principle of
+    *informed choice over refusal*. Such an M may still be refused later by
+    F12/F13, each with its own round-tripping bound.
+- **(B) Rejected: fixed `MIN_DETECT_RATE_MULTIPLE = 1.25`.** This is the smallest multiple
+  ADR-012 §1's regret study measured, so it is sourced. But it refuses designs
+  that are exact and cheap: M = 1.1 and 1.01 fit in under 0.3 s at m=200 f=20.
+  That substitutes the library's caution for the engineer's judgement, which
+  ADR-011 rejects.
+- **(C) A fixed "safe margin" such as 1 + 10⁻⁶.** Rejected as an invented
+  number.
+
+**F16**, which applies whichever option is ruled:
+
+| # | condition | type | required `context` |
+|---|---|---|---|
+| F16 | `detect_rate_multiple` ≤ 1, or below the smallest multiple the design can resolve | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `reason` (`"no_shift_to_detect"` for M ≤ 1; `"shift_below_numerical_resolution"` for 1 < M < `min_value`), `min_value` (the computed bound under (A)), `min_inclusive=True` |
+
+**F7 narrows** to a non-finite `detect_rate_multiple`, with `parameter`,
+`constraint`, `kind="invalid"` and `provided`. Its `min_value=0.0` and
+`min_inclusive=False` are withdrawn, because F16 now owns every lower bound.
+F11's upper bound is unchanged.
+
+**If `min_value` exceeds F11's `max_detect_rate_multiple`, no M works.** That
+happens only when `p_U` is close to 1/2. F16 then raises with
+`reason="no_valid_multiple"` and **no** `min_value`, mirroring F10. Measuring
+where it fires is verification item 20.
+
+#### C3. ✅ Ratified 2026-09-24 (C-Q2): which arms a fit carries (Open Questions 29 and 31)
+
+**Measured first** (`h6_unchecked_arm.py`). In a one-sided `"lower"` fit, the
+unchecked upper arm's calibration **never hit the cap**, up to m=3,000,000 f=1
+at T=10⁶ (`h` 857,041, 950,750 and 982,840).
+
+There is a proof for the f ≥ 1 upper arm, whose `up = 1`. It needs at least
+`h + 1` consecutive successes to signal, so `ARL(h) ≥ h + 1`, and hence the
+smallest adequate `h` is at most `T − 1 ≤ 999,999`. So Open Question 31's feared
+spurious F12 is **not reachable** on this arm. It still costs most of the
+fit's time at large T: 4.4–6.0 s.
+
+**Rule (ratified):** `lattice_X is None` **exactly when the artefact's
+`direction` does not check arm X**. This answers Open Question 29 for a
+directly requested `"lower"` at f = 0 (`lattice_upper is None`), and it
+replaces 19.5's "only when f = 0 forced lower" with one rule that can always
+hold.
+- A one-sided fit designs and calibrates **only** the arm it checks.
+- F12's `direction` key names that arm.
+- `Monitor` accumulates only the checked arms.
+- **It reverses 6b's** "both arms always designed and reported regardless of
+  `direction`". What is lost: an engineer can no longer read off what a
+  direction change would produce without refitting. A refit is cheap, and the
+  artefact's `direction` is frozen anyway.
+- **Rejected alternative:** keep 6b. Then OQ-29 is answered as "the upper lattice is
+  `None` at f = 0 whatever was requested". The `upper_arm_not_designable`
+  advisory attaches to a requested `"lower"` at f = 0 as well, and the
+  unchecked arm keeps costing time.
+
+#### C4. `Monitor` with an upper-checking artefact that has no upper lattice (Open Question 30)
+
+Specification correction. It extends M2. If `direction` checks an arm whose
+lattice is `None`, the result is `InvalidParameterError` with:
+- `parameter="artefact"`;
+- `constraint` (e.g. `"must be a BernoulliArmLattice when direction checks this arm"`);
+- `kind="invalid"`;
+- `field="lattice_upper"` or `"lattice_lower"`;
+- `provided_type="NoneType"` (see C6).
+
+The check runs in `Monitor.record()` before any state changes, beside
+Decision 14.5's integer checks. It must never leak `AttributeError` or
+`TypeError` (BIN-121).
+
+#### C5. `calibration_method` (Open Question 33)
+
+Specification correction.
+- `"gicp_markov_chain"` for one-sided fits: exact, at the arm's own
+  conservative bound. Unchanged in meaning.
+- **`"gicp_markov_chain_coupled_bound"`** for two-sided fits: `achieved_arl`
+  is the coupled floor `B` under calibration D.
+- The string changes, so an auditor can tell a pre-Amendment-2 two-sided
+  figure from a post-Amendment-2 one.
+- **§6c's `"gicp_markov_chain_harmonic_combination"` fallback is withdrawn.**
+  The exact coupled solve is ratified and implemented in both independent
+  checks, so no approximate path may ship.
+
+#### C6. `provided` vs `provided_type` (Open Question 35)
+
+Specification correction, following the existing guard (BIN-143). The rule
+applies to every row in Decision 17: ⚠️ *corrected by the corrigendum (C12.2): only the `require_exact_str` family (F8, M2, C4, M3); F1, F4 and F6 keep `provided`.*
+- **A type failure reports `provided_type`, never the value.** A hostile
+  object's `repr` can raise inside the error path, so the value is not touched.
+- **A value failure on an already exact-typed value reports `provided`,**
+  which is safe to carry.
+
+So:
+- F8's not-a-`str` path emits `provided_type`, and its unknown-string path
+  emits `provided`.
+- M2 and C4 emit `provided_type` for a non-exact `int` or a `None` lattice,
+  and `provided` for an exact `int` that is out of bounds.
+- M3 emits `provided_type`, as it already does.
+
+This is the documented exception to ADR-002 §3's "`provided` whenever `kind ==
+"invalid"`" that BIN-143 already practises. **The registry test (Decision 17)
+asserts exactly one of `provided` / `provided_type` per invalid-kind row, as
+this rule assigns.**
+
+#### C7. BIN-142's finite-float backstop (Open Question 34)
+
+Specification correction.
+- The validator must cover fields annotated `float` **and** `float | None`,
+  skipping `None`.
+- The computed float properties (Decision 14.3) need no check. Each is `units
+  / denominator` over validated `int`s with `denominator ≥ 2`, so it is always
+  finite.
+- Test (verification item 21): direct construction with a `NaN` or `inf`
+  `expected_improvement_detection_arl` raises the existing BIN-142
+  `InvalidParameterError`.
+
+#### C8. Decision 15's table
+
+Specification correction. The `"two_sided"` row's f = 0 fallback (`p_U × M`)
+is **unreachable**, because at f = 0 a two-sided request becomes `"lower"`
+(19.2) and takes the `"lower"` row. The `"lower"` row's f = 0 fallback
+(`p_U × M`) stands.
+
+#### C9. Decision 13.2's "N stays under 2×10⁶"
+
+Specification correction. **The claim is false:** `N_upper` = 3,364,300 at
+m=300,000 f=1 (C1), and `N` is unbounded in principle as M → 1⁺ (C2).
+**Nothing depends on it.** Python `int` is unbounded; state counts depend on
+`h_units`, not on `N`; and C2's finder is logarithmic in `N`. The sentence is
+withdrawn, and Decision 13.2's conclusion (no bound on `N`) stands.
+
+#### C10. F14's `figure` values
+
+Specification correction. F14's `figure` is one of **`"achieved_arl"`,
+`"expected_detection_arl"`, `"expected_improvement_detection_arl"`**, the third
+added by 19.6. The registry test enumerates all three.
+
+#### C11. ✅ Ratified 2026-09-24 (C-Q3): `max_two_sided_target_arl` comes from the equal-split state count, in lattice space, with a one-solve guard
+
+**The ruling.** The product owner rejected the 17.8–137 s refusal and ruled to
+build the cheaper conservative bound first, with its premise verified. This
+section is that bound, and the evidence behind it.
+
+**Definition.** When F13 fires, the reported `max_two_sided_target_arl` is
+`floor(T_ES)`, capped at `MAX_MEANINGFUL_ARL`, where
+
+```
+T_ES = max over a >= 1 of  min( A_lo(a), A_up(H(a)) ) / 2,     H(a) = floor(1,000,000 / (a + 1)) - 1
+```
+
+- `A_lo(a)` is the one-sided in-control ARL of the lower arm at `h_units = a`,
+  at `p_U`.
+- `A_up(b)` is the same for the upper arm at `h_units = b`, at `1 − p_L`.
+- `T_ES` is the largest two-sided target whose **equal-split** design fits the
+  joint cap.
+
+**Why this is the equal-split maximum, and why a bisection finds it**
+(derived, not measured):
+
+1. **ES state count is non-decreasing in T.** The calibrated interval
+   `h_arm(2T)` is the smallest `h` with `A_arm(h) ≥ 2T`. `A_arm` is
+   non-decreasing in `h`: by coupling, a wider interval delays the stopping
+   time on every path. So each `h_arm(2T)` is non-decreasing in T, and so is
+   the product `(h_lo + 1)(h_up + 1)`. The coordinator's monotonicity question
+   is answered by proof.
+2. **The ES design fits at T exactly when the formula above allows it.** It
+   fits iff some `a` satisfies both `A_lo(a) ≥ 2T` and `A_up(H(a)) ≥ 2T`.
+   That is because `(x + 1)(y + 1) ≤ 1,000,000` iff `y ≤ H(x)`, and
+   `h_arm(2T) ≤ c` iff `A_arm(c) ≥ 2T`. Hence `2·T_ES` is the maximum over `a`
+   of the minimum.
+3. **So a bisection on `a` finds the maximum.** `A_lo(a)` is non-decreasing
+   in `a`, and `A_up(H(a))` is non-increasing. The maximum of their minimum
+   sits at the crossing. The bisection makes about 19 probes, each two
+   one-sided solves, **with no joint solve**.
+4. **Ill-conditioned solves.** A one-sided solve whose postcondition fails
+   (its ARL is beyond double resolution) steers the search as "+∞" under
+   BIN-140's rule, and is never reported. The reported value is the minimum
+   over two finite sides. Without this rule, three of the measured cells
+   crashed during the search.
+
+**The premise: calibration D never needs more states than ES.** D keeps
+`h_lo = h_lo_ES` and takes the smallest `h_up` with `B ≥ T`, and `B` is
+non-decreasing in `h_up`. So
+
+```
+states_D(T) <= states_ES(T)   <=>   B(h_lo_ES, h_up_ES) >= T.
+```
+
+- **It is not provable from the construction.** It amounts to "the expected
+  minimum of two *dependent* stopping times, each with mean ≥ 2T, is ≥ T".
+  That does not hold for arbitrary dependence. I could not derive it for
+  this coupling, and I do not claim it.
+- **Measured** (`k1b_premise.py`, fully independent code), across:
+  - m ∈ {100, 200, 300, 1000, 10000, 300000};
+  - f ∈ {1, 2, 5, m/10, 3m/10};
+  - M ∈ {3, 2, 1.1, 1.001, and 1 + 2·(M_min − 1)}, where M_min is C2's
+    computed floor;
+  - T ∈ {10, 370, 10⁴, 10⁶};
+  - every ES design under the cap: **302 designs**.
+- **Result: zero failures. The smallest margin is `B_ES/T = 1.0025`**
+  (m=100 f=30 M=1.1 T=10⁴). The margin is thin, at a quarter of a percent.
+- **Coverage gap, stated.** Some of the T=10⁶, M=1.1, large-f cells at
+  m ∈ {1000, 10000, 300000} did not complete: each single cell ran over 20
+  minutes under 14-way contention, and I stopped them. Those cells are
+  unmeasured, not passed.
+
+**Because the premise is empirical and its margin thin, correctness does not
+rest on it.** At the reported value, the refusal path computes the ES design
+and **one** coupled solve. If `B_ES ≥ T` and the ES states are ≤ 1,000,000,
+then D provably fits at that value, so the value round-trips by construction.
+If the guard ever fails, the refusal falls back to the exact D maximum (h5's
+bisection): slow but correct, and **never observed**. The report is never an
+unverified number.
+
+**Measured end-to-end refusal times, one process, no contention**
+(`k3_refusal_time.py`):
+
+| cell | D feasibility check at the request* | ES bound | guard | total | reported | guard `B_ES/T` |
+|---|---|---|---|---|---|---|
+| m=300,000 f=1 M=2 T=10⁶ (was 17.8 s) | 1.5 s | 0.4 s | 0.3 s | **2.2 s** | 38,563 | 1.2544 |
+| m=1000 f=5 M=2 T=10⁶ (was 137.3 s) | 10.2 s | 4.0 s | 5.7 s | **19.9 s** | 21,634 | 1.0230 |
+| m=200 f=20 M=1.001 T=370 (was 70.9 s) | 8.6 s | 1.5 s | 6.3 s | **16.4 s** | 249 | 1.0435 |
+| m=3,000,000 f=1 M=2 T=10⁶ | 2.3 s | 0.2 s | 2.3 s | 4.8 s | 252,207 | 1.4589 |
+| m=1000 f=1 M=2 T=10⁶ | 18.4 s | 0.9 s | 24.9 s | 44.3 s | 1,700 | 1.2429 |
+| m=300,000 f=30 M=2 T=10⁶ | 2.6 s | 0.7 s | 0.0 s | 3.3 s | 3,914 | 1.0850 |
+| m=1000 f=5 **M=1.01** T=10⁵ (worst corner found) | 95.5 s | 3.0 s | 5.7 s | 104.2 s | 1,471 | 1.1005 |
+
+\* The first column is the same two per-arm calibrations and capped coupled
+check that **any** two-sided fit at that T performs to decide whether it
+fits. It is the fit's own cost, not the refusal's. What the refusal adds is
+the ES bound plus the guard: **0.7–25.8 s**, against 17.8–137.3 s for the D
+bisection it replaces. The guard's remaining cost is its own two
+calibrations. Bracketing them by `a*` and `H(a*)` from the ES search is a
+cheaper implementation, and it is not measured here.
+
+**How conservative it is, and whether it round-trips** (`k2_es_bound.py`
+`--dmax`, run against the true D maximum from h5's bisection, which is exact
+to ±1):
+
+| cell | ES bound | true D max | ratio | round-trips under ES and D |
+|---|---|---|---|---|
+| m=300,000 f=1 M=2 T=10⁶ | 38,563 | 38,562 | 1.0000† | yes |
+| m=300,000 f=30 M=2 T=10⁶ | 3,914 | 3,914 | 1.0000 | yes |
+| m=10,000 f=1 M=2 T=10⁶ | 1,285 | 1,285 | 1.0000 | yes |
+| m=1000 f=5 M=2 T=10⁶ | 21,634 | 22,196 | 0.9747 | yes |
+| m=200 f=20 M=1.001 T=370 | 249 | 259 | 0.9614 | yes |
+| m=1000 f=5 M=1.01 T=10⁵ | 1,471 | 1,614 | 0.9114 | yes |
+| m=1000 f=1 M=2 T=10⁶ | 1,700 | 2,168 | 0.7841 | yes |
+| m=3,000,000 f=1 M=2 T=10⁶ | 252,207 | 367,937 | **0.6855** | yes |
+
+† One above the ±1 bisection's floor, which is within its tolerance.
+
+**Summary: it is conservative by 0–31%, and it round-trips in every measured
+cell.** The largest shortfall is where the lower arm is floored
+(`a* = 1`, m=3,000,000 f=1). There, D's upper arm gains most over equal split.
+
+**Decision (ratified 2026-09-24):**
+- `max_two_sided_target_arl` is `floor(T_ES)` (capped at
+  `MAX_MEANINGFUL_ARL`), with the guard and the fallback described above.
+- F13's other keys are unchanged.
+- The lattice-space *D* search (one joint solve per `a` probe) is **not
+  adopted**. D's feasible region is not shown to be unimodal in `a`, so a
+  bisection there would be unjustified. The ES search is fast enough without
+  it.
+
+**Decision 18 item 12 is replaced** (the 5 s figure was never met). The
+refusal path's overhead, meaning the ES bound plus the guard, beyond the fit's
+own feasibility check, must be **≤ 30 s locally** at every refusal cell in the
+table above. The measured maximum is 25.8 s.
+- This is an engineering budget set from measurement, not a statistical
+  constant.
+- The fit's own feasibility check is **not** budgeted here. Its cost is the
+  per-solve cost of one-sided chains near the 999,999-unit cap (95.5 s at the
+  M=1.01 corner). That belongs to the iterative-solver question, which is out
+  of scope below.
+
+**What this corrigendum does not decide.** Whether the direct sparse solves
+(`spsolve`/`splu`) should give way to an iterative solver (bicgstab, gmres) to
+cut per-solve time and memory. That is raised separately as its own ticket.
+
+#### Verification bar additions (Decision 18, continued)
+
+20. **C2.**
+    - The finder equals the linear scan on every design point where the scan
+      is feasible: Hypothesis over the full legal space, both arms.
+    - `M=1.0` and `M=0.5` raise F16 (`"no_shift_to_detect"`), with no
+      `ZeroDivisionError` or `ValueError`.
+    - `M=1.0000001` at m=200 f=20 completes within the F12/F13 caps.
+    - Under (A): `min_value` round-trips, and `min_value` minus one float step
+      raises F16 (`"shift_below_numerical_resolution"`).
+    - Measure whether the `"no_valid_multiple"` case is reachable, and pin it
+      if it is.
+21. **C7.** The finite-float backstop covers `float | None`.
+22. **C3/C4.** The `lattice_*` presence rule holds for every direction and f.
+    `Monitor` raises C4's row for an upper-checking artefact with no upper
+    lattice.
+23. **C5/C6/C10.** The `calibration_method` strings are correct. The registry
+    test asserts the `provided`/`provided_type` assignment and all three F14
+    `figure` values.
+24. **C11.**
+    - `max_two_sided_target_arl` equals `floor(T_ES)` computed by an
+      independent reference on the refusal cells in C11's table (38,563;
+      21,634; 249; 1,471; 1,700; 3,914).
+    - Passing it back fits, under both ES and D.
+    - The ES state count is monotone in T (Hypothesis).
+    - The guard's fallback path is exercised by monkeypatching `B` below T.
+    - The overhead budget of item 12, as replaced, holds.
+
+#### C12. Corrections found while folding the corrigendum into the domain model (2026-09-24)
+
+These are specification corrections within ratified decisions, so the
+corrigendum keeps its ACCEPTED status. C12.4 also reports a **new defect** in
+the shipped code, found while measuring C12.1, and a correction to this
+corrigendum's own C2 evidence.
+
+##### C12.1 `min_value` is computed over the arms the fit designs (Open Question 37)
+
+**Correction.** C2's "both arms' design" becomes **"every arm the fit
+designs" (C3)**:
+- `"lower"` designs the lower arm only;
+- `"upper"` designs the upper arm only;
+- `"two_sided"` designs both arms at f ≥ 1, and the lower arm only at f = 0,
+  because 19.2 turns it into `"lower"`.
+
+**Measured** (`k4_min_value.py`, the exact finder of C12.4, bisection on
+`log(M − 1)`, nothing from `drift_caliper`). Each cell gives M_min − 1:
+
+```
+baseline          "lower"       "upper"       "two_sided"
+m=200    f=20     1.8210e-08    1.6616e-08    1.8228e-08
+m=100    f=60     3.5337e-09    3.5423e-09    7.3520e-09
+m=1000   f=5      2.2723e-08    3.1459e-08    2.3211e-08
+m=300000 f=1      3.6177e-08    3.9954e-08    3.7746e-08
+m=1000   f=0      2.2956e-08    F15           2.2956e-08 (→ "lower")
+m=300000 f=0      3.3664e-08    F15           3.3664e-08 (→ "lower")
+```
+
+- **Every value round-trips.** The design is constructible at it, and not at
+  the next float below it.
+- **`min_value` differs by direction on the same baseline.**
+- **The two-sided value is its own computation, not the larger of the two
+  per-arm values.** At m=100 f=60 it is 7.35e-9, against 3.53e-9 and 3.54e-9.
+- **At f = 0, a two-sided request's `min_value` equals `"lower"`'s exactly**,
+  because it designs the same single arm.
+
+**Constructibility is not monotone just above 1, so C2's "smallest M" needs a
+precise meaning.** `k5_monotone.py` swept a dense 4,000-point log grid of M − 1
+from 10⁻⁹ to 0.999·(M_max − 1), per baseline and per arm set, with the exact
+finder. The findings:
+- Non-constructible multiples lie **above** the first constructible one.
+- **All of them fall below M − 1 = 5.41×10⁻⁸** (worst: m=300,000 f=1).
+- **None falls anywhere else**, up to 0.999·M_max.
+
+A bisection therefore returns *a* boundary inside that band. A caller's M
+above it could still be refused.
+
+**Definition, corrected.**
+- **F16 fires exactly when** M ≤ 1, **or** the designed arms are not
+  constructible at the M the caller passed. This is checked directly, not
+  inferred from a threshold.
+- **`min_value` is the nearest constructible multiple at or above the one
+  requested.** It is found by the same bisection on `log(M − 1)`, bracketed
+  between the requested M (or 1, when M ≤ 1) and a constructible anchor
+  (M = 2, or halfway to F11's `max_detect_rate_multiple` when that is below 2;
+  the anchor is itself verified).
+  - It round-trips by construction.
+  - Taking it changes the engineer's request by the least amount the
+    arithmetic allows.
+- **Unchanged:** `min_inclusive=True`. If no anchor is constructible, F16
+  raises with `reason="no_valid_multiple"` and no `min_value`, as C2 already
+  specifies.
+- **The ratified intent of C-Q1's option (A)** (computed per fit,
+  round-tripping, no invented constant) is kept. What changes is that the key
+  no longer claims every larger M works, because that claim is false inside
+  the band.
+
+##### C12.2 C6's `provided_type` rule covers only the `require_exact_str` family (Open Question 38)
+
+**Correction.** C6's "applies to every row" is wrong. The rule, *a type
+failure reports `provided_type`*, applies **only** to these rows:
+- **F8's not-a-`str` path, and M3.** Both use `require_exact_str` (BIN-143).
+- **M2 and C4's extension.** Both are new `Monitor` lattice guards, written in
+  the same style.
+
+**F1, F4 and F6 keep `provided`, carrying the value.**
+- They are type failures, but they use the **shared** guards `require_type`
+  and `require_real_number`.
+- Those guards emit `provided` for every chart in the library.
+- The BIN-121 exception-contract registry already audits them.
+- This ticket does not change shared-guard behaviour.
+
+The registry test (Decision 17, C6) asserts `provided_type` on the
+`require_exact_str` rows and `provided` on F1/F4/F6.
+
+**Follow-up, recommended and not done here.** The hazard that motivated
+BIN-143 applies equally to the shared guards: a hostile object's `repr` can
+raise inside the error path, and `provided` holds the object itself. Whether
+`require_type` and `require_real_number` should move to `provided_type`
+library-wide belongs in a ticket of its own. It would change every chart's
+`context`.
+
+##### C12.3 Stale `lattice_upper` lines
+
+Visible "⚠️ corrected by the corrigendum (C3)" pointers are now beside:
+- 19.2's f = 0 bullet;
+- 19.5's shape bullet;
+- Decision 14's field declaration;
+- the Amendment 2 summary-table row.
+
+Each says `lattice_X` is `None` **exactly when arm X is not checked**, for any
+f and any requested direction.
+
+##### C12.4 🚨 New defect found while measuring: the lattice finder's centring guarantee fails at large `detect_rate_multiple`
+
+**What Amendment 1 assumed.** Decision 7's closed-form termination bound
+assumed `ε·(p₁ − p₀) < min(r − p₀, p₁ − r)`. That holds if `r` sits near the
+middle of `(p₀, p₁)`, which was measured at 0.44–0.54 **at M = 2**.
+
+**At large M it does not hold.** `r` drifts toward one end, measured at
+0.14–0.23 of the way along `(p₀, p₁)` for M = 55–1000 on the lower arm. Two
+consequences follow:
+
+1. **The shipped scan (`feat` at `5b7e3a1`) returns lattices that violate
+   Decision 7's own invariants.**
+   - Its range stops at the closed-form bound, and then it returns that bound
+     unchecked (the `# pragma: no cover` "unreachable" line).
+   - **Measured** (random legal lower-arm designs, M from 1.001 to M_max, m
+     from 100 to 300,000): **761 of 4,000 returned a lattice outside the
+     centring tolerance.** The worst was m=300,000 f=0 M≈26,556: `r_q = 1/11`
+     against `r ≈ 0.022`, with a tolerance of 0.051.
+   - **Where it starts** (`k9_threshold.py`, `k8_shipped_finder.py`): the
+     upper arm's premise fails above M* ≈ 36–40, and its first observed
+     violation is at M ≈ 56–102 (m=100 f=10, m=200 f=20, m=1000 f=5). The
+     lower arm's first violation is at M ≈ 55–63 on large, clean baselines
+     (m=10,000 f=1; m=300,000 f=1).
+   - **No test reached it**, because every test used M ≤ 5. It is the same
+     "realistic grid" blind spot as Amendment 1's original defect.
+2. **This corrigendum's own C2 finder was wrong in the same region.** Its
+   "797 of 797 identical to the scan" check sampled M ≤ 3 only. At large M it
+   searched the interval `[r − ε·gap, r + ε·gap]`, which there reaches past
+   `p₀`, and returned `N = 2`, which fails verification.
+
+**Correction: the exact, fast finder** (`fast_finder3.py`).
+1. Let `J = [r − ε·gap, r + ε·gap] ∩ (p₀, p₁)`, closed at the tolerance ends
+   and open at `p₀` and `p₁`.
+2. `N_any` is the denominator of the simplest rational in `J`, found by
+   continued fractions in exact `Fraction` arithmetic. No smaller `N` has any
+   `k/N` in `J`.
+3. From `N_any`, walk forward applying Decision 7's ratified test exactly:
+   `k = round(r·N)`, strictly inside `(p₀, p₁)`, within `ε·gap`.
+4. The walk is bounded by `N_sym`, the simplest denominator in the symmetric
+   interval of radius `min(ε·gap, r − p₀, p₁ − r)`. There the nearest
+   numerator always passes, so an answer exists in exact arithmetic.
+5. If floating point cannot realise one, which happens only in C12.1's band
+   near M = 1, the design is non-constructible and F16 fires.
+
+**Measured** (`k7_equivalence.py`): identical to the ratified linear rule on
+**6,994 of 6,994** design points. These span both arms, f from 0 to m − 1, M
+across (1, M_max), m from 100 to 3,000,000, and **2,642 of them have M > 3**.
+The forward walk from `N_any` was at most **1** step over 10,846 designs.
+
+**Decision 7's rule itself is unchanged.** Only the claim that `N ≤
+⌈1/(2ε·gap)⌉` always suffices is withdrawn, together with the unchecked
+`return max_n`. A ⚠️ pointer is added at C2's evidence line. Amendment 1's
+Decision 7 text is left as ratified and corrected here.
+
+**Verification additions (Decision 18, continued).**
+
+25. **C12.4.**
+    - A Hypothesis property over the **full** legal M range, both arms,
+      f = 0 … m − 1, asserts the finder returns a lattice satisfying both
+      Decision 7 invariants.
+    - It equals the unbounded linear rule wherever that is feasible.
+    - Pinned regressions: m=300,000 f=0 M≈26,556, and m=300,000 f=1 M=55,
+      lower arm.
+26. **C12.1.**
+    - F16 fires iff the designed arms are not constructible at the requested M
+      (or M ≤ 1).
+    - `min_value` is ≥ the request, round-trips, and differs by direction on
+      the table's baselines.
+    - At f = 0, a two-sided request's `min_value` equals `"lower"`'s.
+27. **C12.2.** The registry asserts `provided` on F1/F4/F6, and
+    `provided_type` on the type-failure paths of F8, M2, M3 and C4.
+
+#### Product-owner rulings on the corrigendum (2026-09-24)
+
+- **C-Q1 (C2): ✅ ratified, option (A).** `detect_rate_multiple ≤ 1` is
+  refused by F16. The lower bound is computed per fit and round-trips by
+  construction. (B), fixed at 1.25, and (C), a fixed margin, are rejected.
+- **C-Q2 (C3): ✅ ratified.** An artefact carries only the arms its
+  `direction` checks. This reverses 6b's "both arms always reported".
+- **C-Q3 (C11): ✅ ratified.** The product owner rejected both the 20-probe
+  structural bound and dropping the key. `max_two_sided_target_arl` is the
+  equal-split conservative bound `floor(T_ES)`, computed in lattice space,
+  with a one-solve guard that falls back to the exact D maximum. Decision 18
+  item 12's budget is replaced by C11's measured ≤ 30 s overhead budget.
