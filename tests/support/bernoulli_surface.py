@@ -21,3 +21,21 @@ def triplet(lattice: BernoulliArmLattice | None) -> tuple[int, int, int] | None:
         lattice.reference_units,
         lattice.decision_interval_units,
     )
+
+
+def expected_detection_arl(chart: object) -> float | None:
+    """``chart.expected_detection_arl``, typed as corrigendum C13 makes it.
+
+    C13 turns the field into ``float | None`` (``None`` when the shifted rate
+    lies at or inside the design rate). Until the artefact's annotation says
+    so, reading it directly types as ``float`` and a ``None`` check is flagged
+    unreachable by mypy.
+
+    TODO (domain-implementer): inline as ``chart.expected_detection_arl`` once
+    the annotation is ``float | None``.
+    """
+    value: float | None = getattr(chart, _EXPECTED_DETECTION_ARL)
+    return value
+
+
+_EXPECTED_DETECTION_ARL = "expected_detection_arl"

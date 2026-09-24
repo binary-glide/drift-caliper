@@ -319,6 +319,11 @@ def reference_fit(
     difference in a confidence-bound evaluation cannot move a lattice.
     Returns a :class:`ReferenceFit` whose ``refusal`` is ``"F12"``,
     ``"F13"`` or ``"F15"`` when the fit must refuse.
+
+    Corrigendum C13: a disclosure figure whose shifted rate lies at or inside
+    the arm's design rate describes no shift and is ``None``, decided before
+    any solve (:func:`degradation_within_design_rate`,
+    :func:`improvement_within_design_rate`).
     """
     p_u = cp_upper(f, m) if p_u is None else p_u
     p_l = cp_lower(f, m) if p_l is None else p_l
@@ -339,7 +344,9 @@ def reference_fit(
             direction="lower",
             lattice_lower=(nl, kl, h),
             achieved_arl=one_sided_arl(nl, kl, h, p_u),
-            expected_detection_arl=one_sided_arl(nl, kl, h, detection_rate),
+            expected_detection_arl=None
+            if degradation_within_design_rate(f, p_hat, multiple, p_u)
+            else one_sided_arl(nl, kl, h, detection_rate),
         )
     upper = exact_lattice(*upper_arm_design_pair(p_l, multiple))
     assert upper is not None
@@ -352,7 +359,9 @@ def reference_fit(
             direction="upper",
             lattice_upper=(nu, ku, h),
             achieved_arl=one_sided_arl(nu, ku, h, 1.0 - p_l),
-            expected_detection_arl=one_sided_arl(nu, ku, h, 1.0 - p_hat / multiple),
+            expected_detection_arl=None
+            if improvement_within_design_rate(p_hat, multiple, p_l)
+            else one_sided_arl(nu, ku, h, 1.0 - p_hat / multiple),
         )
     lower = exact_lattice(*lower_arm_design_pair(p_u, multiple))
     assert lower is not None
@@ -382,13 +391,29 @@ def reference_fit(
         lattice_lower=lower_lattice,
         lattice_upper=upper_lattice,
         achieved_arl=bound(hi),
-        expected_detection_arl=coupled_arl(
+        expected_detection_arl=None
+        if degradation_within_design_rate(f, p_hat, multiple, p_u)
+        else coupled_arl(
             lower_lattice, upper_lattice, p_hat * multiple, p_hat * multiple
         ),
-        expected_improvement_detection_arl=coupled_arl(
+        expected_improvement_detection_arl=None
+        if improvement_within_design_rate(p_hat, multiple, p_l)
+        else coupled_arl(
             lower_lattice, upper_lattice, p_hat / multiple, p_hat / multiple
         ),
     )
+
+
+def degradation_within_design_rate(
+    f: int, p_hat: float, multiple: float, p_u: float
+) -> bool:
+    """Corrigendum C13: f >= 1 and ``p_hat * M <= p_U`` (boundary included)."""
+    return f >= 1 and p_hat * multiple <= p_u
+
+
+def improvement_within_design_rate(p_hat: float, multiple: float, p_l: float) -> bool:
+    """Corrigendum C13: ``p_hat / M >= p_L`` (boundary included)."""
+    return p_hat / multiple >= p_l
 
 
 def es_bound(

@@ -73,7 +73,7 @@ import numpy.typing as npt
 import pydantic
 import pytest
 import scipy.sparse.linalg
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 from scipy.stats import beta as scipy_beta  # type: ignore[attr-defined]
 from scipy.stats import binom  # type: ignore[attr-defined]
@@ -85,9 +85,13 @@ from drift_caliper.baseline import (
     fit_bernoulli_cusum,
 )
 from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting_module
-from drift_caliper.errors import DegenerateBaselineError, InvalidParameterError
+from drift_caliper.errors import (
+    CaliperError,
+    DegenerateBaselineError,
+    InvalidParameterError,
+)
 from tests.support import bernoulli_reference as ref
-from tests.support.bernoulli_surface import triplet
+from tests.support.bernoulli_surface import expected_detection_arl, triplet
 from tests.support.binary_baselines import binary_baseline
 from tests.support.isolated_bernoulli_fit import fit_in_child
 
@@ -495,6 +499,15 @@ class TestLowerArmFloorIsDisclosedNotRefused:
         direction=st.sampled_from(["lower", "upper"]),
         multiple_position=st.floats(min_value=0.0, max_value=1.0),
     )
+    # The counterexample this property found on 3bd013d (corrigendum C13):
+    # m=100 f=25 "lower" T=10^5 M=1.01 raised F14 on expected_detection_arl.
+    @example(
+        m=100,
+        f_fraction=0.25,
+        log10_target=5.0,
+        direction="lower",
+        multiple_position=0.0,
+    )
     def test_one_sided_achieved_arl_is_never_below_the_request(
         self,
         m: int,
@@ -509,7 +522,14 @@ class TestLowerArmFloorIsDisclosedNotRefused:
 
         ``f`` spans ``0..m-1``; the multiple spans ``(1.01, 0.99 x F11's
         max_detect_rate_multiple)`` on a log scale, so large multiples are drawn,
-        not only M <= 5 (C12.4's blind spot)."""
+        not only M <= 5 (C12.4's blind spot).
+
+        Corrigendum C13: the fit never refuses on a disclosure figure. The
+        detection figure is ``None`` exactly when its shifted rate lies at or
+        inside the checked arm's design rate, and is otherwise reported. This
+        property previously asserted only ``achieved >= requested``, and failed
+        with F14 on the pinned example above; it now asserts C13's contract
+        for the figure as well."""
         f = min(m - 1, int(f_fraction * m))
         assume(not (direction == "upper" and f == 0))  # F15, its own test
         p_u = ref.cp_upper(f, m)
@@ -523,6 +543,13 @@ class TestLowerArmFloorIsDisclosedNotRefused:
         chart = _fit(m, f, target_arl=target, direction=direction, multiple=multiple)
 
         assert chart.achieved_arl >= chart.requested_arl
+        p_hat = f / m
+        inside = (
+            ref.improvement_within_design_rate(p_hat, multiple, chart.p_l)
+            if direction == "upper"
+            else ref.degradation_within_design_rate(f, p_hat, multiple, chart.p_u)
+        )
+        assert (expected_detection_arl(chart) is None) is inside
 
 
 # ===========================================================================
@@ -552,6 +579,7 @@ def _assert_matches_reference(
     assert outcome["direction"] == expected.direction
     assert _as_triplet(outcome["lattice_lower"]) == expected.lattice_lower
     assert _as_triplet(outcome["lattice_upper"]) == expected.lattice_upper
+    advisories = dict(outcome["advisories"])
     for figure in (
         "achieved_arl",
         "expected_detection_arl",
@@ -560,6 +588,12 @@ def _assert_matches_reference(
         reported, reference = outcome[figure], getattr(expected, figure)
         if reference is None:
             assert reported is None, figure
+            advisory = _c13_advisory_for(figure, expected.direction)
+            if advisory is not None:
+                assert advisories[advisory] == pytest.approx(
+                    _c13_boundary(advisory, f / m, outcome["p_u"], outcome["p_l"]),
+                    rel=1e-12,
+                ), figure
             continue
         assert isinstance(reported, float), f"{figure} is {reported!r}"
         assert math.isfinite(reported)
@@ -567,6 +601,38 @@ def _assert_matches_reference(
         assert reported != fitting_module._ILL_CONDITIONED_ARL_SENTINEL
         assert reported == pytest.approx(reference, rel=1e-9), figure
     return expected
+
+
+_DEGRADATION_ADVISORY = "detection_shift_within_design_rate"
+_IMPROVEMENT_ADVISORY = "improvement_shift_within_design_rate"
+
+
+def _c13_advisory_for(figure: str, direction: str | None) -> str | None:
+    """Corrigendum C13: the advisory a ``None`` disclosure figure carries.
+
+    ``None`` for a figure that is absent because its arm is not checked (C3),
+    not because of C13 -- e.g. the improvement figure on a one-sided chart.
+    """
+    if figure == "expected_detection_arl":
+        return _IMPROVEMENT_ADVISORY if direction == "upper" else _DEGRADATION_ADVISORY
+    if figure == "expected_improvement_detection_arl" and direction == "two_sided":
+        return _IMPROVEMENT_ADVISORY
+    return None
+
+
+def _c13_boundary(advisory: str, p_hat: float, p_u: float, p_l: float) -> float:
+    """C13 point 3: ``p_U / p_hat`` (degradation) or ``p_hat / p_L`` (improvement)."""
+    return p_u / p_hat if advisory == _DEGRADATION_ADVISORY else p_hat / p_l
+
+
+def _assert_c13_none(chart: FittedBernoulliCUSUM, figure: str, m: int, f: int) -> None:
+    """A figure C13 turns ``None`` carries its advisory with the exact boundary."""
+    advisory = _c13_advisory_for(figure, chart.direction)
+    assert advisory is not None
+    boundaries = {a.kind: a.boundary for a in chart.advisories}
+    assert boundaries[advisory] == pytest.approx(
+        _c13_boundary(advisory, f / m, chart.p_u, chart.p_l), rel=1e-12
+    )
 
 
 def _as_triplet(value: list[int] | None) -> tuple[int, int, int] | None:
@@ -610,18 +676,34 @@ class TestLargeBaselines:
                 "two_sided",
                 {
                     "achieved_arl": 370.1115,
-                    "expected_detection_arl": 370.5428,
-                    "expected_improvement_detection_arl": 370.8856,
+                    # C13 (re-based; ADR figure predates C13) -- C15.1: both
+                    # shifted rates lie inside [p_L, p_U] (6.667e-6 <= 1.297e-5;
+                    # 1.667e-6 >= 3.512e-7), so both figures are None, each with
+                    # its advisory. C1 published 370.5428 / 370.8856.
+                    "expected_detection_arl": None,
+                    "expected_improvement_detection_arl": None,
                     "joint_states": 742,
                 },
             ),
-            (300_000, 30, _T, "upper", {"achieved_arl": 370.2214}),
+            # C15.1's replacement cells outside C13's condition (item 3).
+            (
+                300_000,
+                30,
+                _T,
+                "upper",
+                {"achieved_arl": 370.2214, "expected_detection_arl": 368.3603},
+            ),
             (
                 300_000,
                 30,
                 _T,
                 "two_sided",
-                {"achieved_arl": 370.9495, "joint_states": 760},
+                {
+                    "achieved_arl": 370.9495,
+                    "expected_detection_arl": 365.9542,
+                    "expected_improvement_detection_arl": 376.4221,
+                    "joint_states": 760,
+                },
             ),
             # Decision 18 item 3's own f=0 lower cell, unchanged by Decision 19.
             (300_000, 0, 1e6, "lower", {"achieved_arl": 1000020.0999}),
@@ -676,6 +758,8 @@ class TestLargeBaselines:
                 ) == value
             elif key.startswith("lattice"):
                 assert _as_triplet(outcome[key]) == value
+            elif value is None:
+                assert outcome[key] is None, key
             else:
                 assert outcome[key] == pytest.approx(value, abs=5e-5)
 
@@ -826,10 +910,14 @@ class TestReportedArlPostcondition:
             ("lower", "achieved_arl", ref.cp_upper(3, 300)),
             # achieved for two-sided is B, whose chain moves w.p. p_L.
             ("two_sided", "achieved_arl", ref.cp_lower(3, 300)),
-            ("lower", "expected_detection_arl", 0.01 * 2.0),
-            ("two_sided", "expected_detection_arl", 0.01 * 2.0),
-            ("upper", "expected_detection_arl", 0.01 / 2.0),
-            ("two_sided", "expected_improvement_detection_arl", 0.01 / 2.0),
+            # Corrigendum C13: a disclosure figure keeps F14 only OUTSIDE its
+            # structural condition, so these cells use M = 3 (p_hat x 3 = 0.03
+            # > p_U ~ 0.0221; p_hat / 3 ~ 0.00333 < p_L ~ 0.00368). At M = 2
+            # (this test's former cells) both figures are None under C13.
+            ("lower", "expected_detection_arl", 0.01 * 3.0),
+            ("two_sided", "expected_detection_arl", 0.01 * 3.0),
+            ("upper", "expected_detection_arl", 0.01 / 3.0),
+            ("two_sided", "expected_improvement_detection_arl", 0.01 / 3.0),
         ],
         ids=[
             "lower_achieved",
@@ -854,12 +942,80 @@ class TestReportedArlPostcondition:
         _poison_solves_touching(monkeypatch, rate, _POISONS[poison])
 
         with pytest.raises(DegenerateBaselineError) as excinfo:
-            fit_bernoulli_cusum(baseline, target_arl=_T, direction=direction)
+            fit_bernoulli_cusum(
+                baseline,
+                target_arl=_T,
+                direction=direction,
+                detect_rate_multiple=3.0,
+            )
 
         context = excinfo.value.context
         assert context["reason"] == "arl_not_computable"
         assert context["chart_type"] == "bernoulli_cusum"
         assert context["figure"] == figure
+
+
+class TestOnlyNumericalFailuresBecomeArlNotComputable:
+    """F14 means "these inputs are legal but the number is not representable"
+    (Decision 13.4). A solver *numerical* failure is that; running out of memory
+    is not.
+
+    **Defect** (found through system-architect's measurement harness, C13 point
+    5's "false alarm"): ``_solve_absorbing_chain`` catches ``except
+    Exception`` and returns the ill-conditioning sentinel, so a ``MemoryError``
+    -- or any non-numerical exception raised inside the solve -- reaches the
+    caller as F14, a statement about the baseline that is false. Nothing in
+    ADR-002 or ADR-014 classifies resource exhaustion as a ``CaliperError``;
+    ADR-002's "errors raise, the caller decides" and BIN-121's audit are about
+    Caliper's own failure modes, and a ``MemoryError`` must reach the caller as
+    itself.
+
+    Seam: ``scipy.sparse.linalg.spsolve``, looked up at call time.
+    """
+
+    @staticmethod
+    def _raising(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+        def spsolve(*_args: Any, **_kwargs: Any) -> Any:
+            raise error
+
+        monkeypatch.setattr(scipy.sparse.linalg, "spsolve", spsolve)
+
+    def test_memory_error_propagates_as_itself(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Today: ``DegenerateBaselineError(reason="arl_not_computable")``."""
+        self._raising(monkeypatch, MemoryError("cannot allocate the factorisation"))
+        baseline, _ = binary_baseline(200, 20)
+
+        with pytest.raises(MemoryError) as excinfo:
+            fit_bernoulli_cusum(baseline, target_arl=_T, direction="lower")
+
+        assert not isinstance(excinfo.value, CaliperError)
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            np.linalg.LinAlgError("singular matrix"),
+            scipy.sparse.linalg.MatrixRankWarning("Matrix is exactly singular"),
+            RuntimeError("Factor is exactly singular"),
+        ],
+        ids=["LinAlgError", "MatrixRankWarning_as_error", "SuperLU_RuntimeError"],
+    )
+    def test_numerical_failures_still_become_f14(
+        self, monkeypatch: pytest.MonkeyPatch, error: Exception
+    ) -> None:
+        """A singular or rank-deficient system is ill-conditioning: F14 on
+        ``achieved_arl``. (``MatrixRankWarning`` is what ``spsolve`` raises when
+        warnings are promoted to errors; SuperLU reports exact singularity as a
+        ``RuntimeError``.) Passes today."""
+        self._raising(monkeypatch, error)
+        baseline, _ = binary_baseline(200, 20)
+
+        with pytest.raises(DegenerateBaselineError) as excinfo:
+            fit_bernoulli_cusum(baseline, target_arl=_T, direction="lower")
+
+        assert excinfo.value.context["reason"] == "arl_not_computable"
+        assert excinfo.value.context["figure"] == "achieved_arl"
 
 
 # ===========================================================================
@@ -907,23 +1063,32 @@ class TestDetectionFigureIsAtTheTunedShift:
 
     @pytest.mark.parametrize(
         ("m", "f", "expected"),
-        [(150, 40, 72.1128), (200, 20, 157.6429), (1000, 1, 398.1379)],
+        [(150, 40, 72.1128), (200, 20, 157.6429), (1000, 1, None)],
     )
     def test_upper_only_chart_is_evaluated_at_the_improvement(
-        self, m: int, f: int, expected: float
+        self, m: int, f: int, expected: float | None
     ) -> None:
         """C1 item 8: at ``p_hat / M`` with the upper arm at ``p_L`` -- 72.1128,
         157.6429, 398.1379. Amendment 2's 32.8/61.3 (upper arm at ``p_U``) and
         the 314.1 f = 0 fallback are withdrawn. The shipped code reports
-        357,451.6 at m=150 f=40 (evaluated at a degradation)."""
+        357,451.6 at m=150 f=40 (evaluated at a degradation).
+
+        Corrigendum C13 supersedes C1's 398.1379 at m=1000 f=1: there
+        ``p_hat / 2 = 5e-4 >= p_L ~ 1.05e-4``, so the improvement rate lies inside
+        the upper arm's design rate and the figure is ``None``."""
         chart = _fit(m, f, direction="upper")
         expected_fit = _reference_for(chart, m=m, f=f, direction="upper")
+        reported = expected_detection_arl(chart)
 
+        if expected is None:
+            # C13 (re-based; ADR figure predates C13) -- C15.1.
+            assert expected_fit.expected_detection_arl is None
+            assert reported is None
+            _assert_c13_none(chart, "expected_detection_arl", m, f)
+            return
         assert expected_fit.expected_detection_arl is not None
-        assert chart.expected_detection_arl == pytest.approx(
-            expected_fit.expected_detection_arl, rel=1e-9
-        )
-        assert chart.expected_detection_arl == pytest.approx(expected, abs=5e-5)
+        assert reported == pytest.approx(expected_fit.expected_detection_arl, rel=1e-9)
+        assert reported == pytest.approx(expected, abs=5e-5)
 
     @pytest.mark.parametrize(
         ("m", "f", "direction"),
@@ -935,14 +1100,20 @@ class TestDetectionFigureIsAtTheTunedShift:
     ) -> None:
         """Decision 15's table: lower at ``p_hat x M`` (``p_U x M`` at f = 0);
         two-sided via the joint chain at ``p_hat x M`` (C8: its f = 0 row is
-        unreachable)."""
+        unreachable). Corrigendum C13: at m=300 f=3 two-sided the degradation
+        rate ``p_hat x 2 = 0.02`` lies inside ``p_U ~ 0.0221``, so the reference
+        (and the artefact) report ``None`` there; the comparison is exact
+        either way."""
         chart = _fit(m, f, direction=direction)
         expected_fit = _reference_for(chart, m=m, f=f, direction=direction)
+        reported = expected_detection_arl(chart)
 
-        assert expected_fit.expected_detection_arl is not None
-        assert chart.expected_detection_arl == pytest.approx(
-            expected_fit.expected_detection_arl, rel=1e-9
-        )
+        if expected_fit.expected_detection_arl is None:
+            assert reported is None
+        else:
+            assert reported == pytest.approx(
+                expected_fit.expected_detection_arl, rel=1e-9
+            )
 
 
 # ===========================================================================
@@ -1037,29 +1208,56 @@ class TestImprovementDetectionFigure:
     """Decision 19.6 / Decision 18 item 19."""
 
     @pytest.mark.parametrize(
-        ("m", "f", "b", "improvement"),
+        ("m", "f", "b", "detection", "improvement"),
         [
-            (100, 1, 370.4, 1416.5),
-            (1000, 1, 370.1, 504.7),
-            (1000, 5, 370.3, 580.9),
-            (300, 3, 370.4, 780.3),
-            (200, 20, 371.1, 220.1),
-            (100, 10, 373.5, 334.5),
-            (150, 40, 382.6, 85.5),
+            # Corrigendum C13: at these four baselines p_hat / 2 >= p_L (the
+            # improvement rate lies inside the upper arm's design rate), so
+            # 19.6's 1416.5 / 504.7 / 580.9 / 780.3 become None.
+            # C13 (re-based; ADR figures predate C13) -- C15.1's table.
+            (100, 1, 370.4, None, None),
+            (1000, 1, 370.1, None, None),
+            (1000, 5, 370.3, 558.0511, None),
+            (300, 3, 370.4, None, None),
+            # C15.1's replacement cells, outside both conditions.
+            (200, 20, 371.1, 115.7655, 220.0559),
+            (100, 10, 373.5, 188.0735, 334.5367),
+            (150, 40, 382.6, 41.2331, 85.5018),
         ],
     )
     # Budget: reference fits 0.02-0.53 s locally (m=100 f=1: 19,182 joint
     # states); x3 = 1.6 s.
     @pytest.mark.timeout(60)
     def test_equals_the_joint_chain_at_p_hat_over_m(
-        self, m: int, f: int, b: float, improvement: float
+        self,
+        m: int,
+        f: int,
+        b: float,
+        detection: float | None,
+        improvement: float | None,
     ) -> None:
         """19.6's measured table (g6_improvement_field.py): equal to an independent
-        joint solver at ``p_hat / M`` to rel 1e-9, finite and >= 1."""
+        joint solver at ``p_hat / M`` to rel 1e-9, finite and >= 1 -- or ``None``
+        where corrigendum C13's condition holds."""
         chart = _fit(m, f)
         expected_fit = _reference_for(chart, m=m, f=f, direction="two_sided")
         reported = chart.expected_improvement_detection_arl
+        assert chart.achieved_arl == pytest.approx(b, abs=0.05)
+        reported_detection = expected_detection_arl(chart)
+        if detection is None:
+            assert reported_detection is None
+            _assert_c13_none(chart, "expected_detection_arl", m, f)
+        else:
+            assert expected_fit.expected_detection_arl is not None
+            assert reported_detection == pytest.approx(
+                expected_fit.expected_detection_arl, rel=1e-9
+            )
+            assert reported_detection == pytest.approx(detection, rel=1e-6)
 
+        if improvement is None:
+            assert expected_fit.expected_improvement_detection_arl is None
+            assert reported is None
+            _assert_c13_none(chart, "expected_improvement_detection_arl", m, f)
+            return
         assert reported is not None
         assert expected_fit.expected_improvement_detection_arl is not None
         assert math.isfinite(reported)
@@ -1067,7 +1265,7 @@ class TestImprovementDetectionFigure:
         assert reported == pytest.approx(
             expected_fit.expected_improvement_detection_arl, rel=1e-9
         )
-        assert reported == pytest.approx(improvement, abs=0.05)
+        assert reported == pytest.approx(improvement, rel=1e-6)
         assert chart.achieved_arl == pytest.approx(b, abs=0.05)
 
     @pytest.mark.parametrize(

@@ -1987,6 +1987,33 @@ def _with_lattice(field_name: str, attribute: str | None, value: object) -> obje
     return _FITTED_BERNOULLI_CUSUM.model_copy(update={field_name: replacement})
 
 
+def _upper_ceiling_fit(multiple: float) -> object:
+    return fit_bernoulli_cusum(
+        _binary(200, 20),
+        target_arl=1.0,
+        direction="upper",
+        detect_rate_multiple=multiple,
+    )
+
+
+def _upper_ceiling() -> float:
+    """Corrigendum C15.2's ``U = p_L x 2**53`` at m=200 f=20."""
+    chart = _upper_ceiling_fit(2.0)
+    p_l: float = getattr(chart, "p_l")  # noqa: B009 -- a typed read of a float
+    return p_l * 2.0**53
+
+
+def _with_refusing_finder(action: Callable[[], object]) -> object:
+    """Run ``action`` with every arm unconstructible (C15.2 item 34's seam:
+    ``bernoulli_cusum_fitting._arm_lattice``)."""
+    from unittest import mock
+
+    from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting
+
+    with mock.patch.object(fitting, "_arm_lattice", lambda _p0, _p1: None):
+        return action()
+
+
 _P_HAT_M300_F3 = 0.01  # p_hat at m=300 f=3, the F14 cells
 _P_U_M300_F3 = 0.022132940895274917  # p_U at m=300 f=3 (ADR-013's bound)
 
@@ -2076,7 +2103,10 @@ def _f14_row(figure: str, direction: str, rate: float) -> RefusalContractRow:
         lambda: _with_poisoned_solves(
             rate,
             lambda: fit_bernoulli_cusum(
-                _binary(300, 3), target_arl=370.0, direction=direction
+                _binary(300, 3),
+                target_arl=370.0,
+                direction=direction,
+                detect_rate_multiple=3.0,
             ),
         ),
         DegenerateBaselineError,
@@ -2274,6 +2304,24 @@ BERNOULLI_REFUSAL_CONTRACT: tuple[RefusalContractRow, ...] = (
         absent=frozenset({"provided_type"}),
         round_trip=lambda context: _fit_multiple(context["max_detect_rate_multiple"]),
     ),
+    RefusalContractRow(
+        # Corrigendum C15.2: F11 extended to the upper arm, whose ceiling is
+        # U = p_L x 2**53 (the upper design point 1 - p_L/M must be < 1).
+        "F11_upper_ceiling",
+        lambda: _upper_ceiling_fit(4.0 * _upper_ceiling()),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": PRESENT,
+            "max_detect_rate_multiple": PRESENT,
+        },
+        absent=frozenset({"reason", "provided_type"}),
+        round_trip=lambda context: _upper_ceiling_fit(
+            context["max_detect_rate_multiple"]
+        ),
+    ),
     _f12_row("lower"),
     _f12_row("upper"),
     RefusalContractRow(
@@ -2294,8 +2342,12 @@ BERNOULLI_REFUSAL_CONTRACT: tuple[RefusalContractRow, ...] = (
         round_trip=lambda context: _f13_fit(float(context["max_two_sided_target_arl"])),
     ),
     _f14_row("achieved_arl", "lower", _P_U_M300_F3),
-    _f14_row("expected_detection_arl", "lower", _P_HAT_M300_F3 * 2.0),
-    _f14_row("expected_improvement_detection_arl", "two_sided", _P_HAT_M300_F3 / 2.0),
+    # Corrigendum C13 (point 6): a disclosure figure is F14 only as a defect
+    # guard OUTSIDE its structural condition, so these rows use M = 3
+    # (p_hat x 3 > p_U; p_hat / 3 < p_L at m=300 f=3). At M = 2 both figures
+    # are None and nothing is solved.
+    _f14_row("expected_detection_arl", "lower", _P_HAT_M300_F3 * 3.0),
+    _f14_row("expected_improvement_detection_arl", "two_sided", _P_HAT_M300_F3 / 3.0),
     RefusalContractRow(
         "F15",
         lambda: fit_bernoulli_cusum(
@@ -2315,6 +2367,26 @@ BERNOULLI_REFUSAL_CONTRACT: tuple[RefusalContractRow, ...] = (
     ),
     _f16_row("no_shift_to_detect", 1.0),
     _f16_row("shift_below_numerical_resolution", 1.0 + 1e-10),
+    RefusalContractRow(
+        # Corrigendum C15.2: nothing constructible in (request, C] -- measured
+        # unreachable, so reached through an always-refusing finder. No
+        # min_value and no round-trip key (mirrors F10).
+        "F16_no_valid_multiple",
+        lambda: _with_refusing_finder(
+            lambda: fit_bernoulli_cusum(
+                _binary(200, 20), target_arl=1.0, detect_rate_multiple=1.5
+            )
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": 1.5,
+            "reason": "no_valid_multiple",
+        },
+        absent=frozenset({"min_value", "min_inclusive", "provided_type"}),
+    ),
     RefusalContractRow(
         "M1",
         lambda: _bernoulli_monitor_record(_FITTED_BERNOULLI_CUSUM, 0.42),
@@ -2368,10 +2440,14 @@ BERNOULLI_REFUSAL_CONTRACT: tuple[RefusalContractRow, ...] = (
     ),
     RefusalContractRow(
         "M3",
+        # A non-``str`` direction, reaching Monitor through
+        # ``model_copy(update=...)``, which skips validation. Not a ``str``
+        # subclass: ``require_exact_str`` deliberately *accepts* those,
+        # normalising type not content (BIN-139/143;
+        # ``test_legitimate_str_subclass_is_accepted``) -- this row previously
+        # used ``_HashRaisingStr`` and so demanded the tempting wrong fix.
         lambda: _bernoulli_monitor_record(
-            _FITTED_BERNOULLI_CUSUM.model_copy(
-                update={"direction": _HashRaisingStr("two_sided")}
-            ),
+            _FITTED_BERNOULLI_CUSUM.model_copy(update={"direction": 123}),
             1.0,
         ),
         InvalidParameterError,
@@ -2379,7 +2455,7 @@ BERNOULLI_REFUSAL_CONTRACT: tuple[RefusalContractRow, ...] = (
             "parameter": "direction",
             "constraint": PRESENT,
             "kind": "invalid",
-            "provided_type": "_HashRaisingStr",
+            "provided_type": "int",
         },
         absent=frozenset({"provided"}),
     ),

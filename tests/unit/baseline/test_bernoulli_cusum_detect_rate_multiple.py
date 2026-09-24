@@ -29,12 +29,13 @@ survives the finder being rewritten (which C2/C12.4 require).
 from __future__ import annotations
 
 import math
+from functools import cache
 
 import pytest
 from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 
-from drift_caliper.baseline import FittedBernoulliCUSUM, fit_bernoulli_cusum
+from drift_caliper.baseline import Baseline, FittedBernoulliCUSUM, fit_bernoulli_cusum
 from drift_caliper.errors import InvalidParameterError
 from tests.support import bernoulli_reference as ref
 from tests.support.bernoulli_surface import triplet
@@ -335,3 +336,263 @@ class TestLatticeFinderAtLargeMultiples:
         chart = _fit(m, f, multiple, direction=arm)
 
         _assert_lattice_is_the_ratified_one(chart, arm, multiple)
+
+
+# ===========================================================================
+# C14 -- the upper arm can be unconstructible at ordinary multiples
+# ===========================================================================
+
+# Found by domain-implementer's search at 3bd013d (test_bernoulli_cusum_
+# defensive_paths.py) and confirmed by the independent reference: "upper" at
+# m=3,000,000 f=1 is not constructible at this ordinary multiple.
+_ORDINARY_UNCONSTRUCTIBLE_MULTIPLE = 4.195702165980544
+# C14 item 29's population: baselines whose p_L < 1e-7 (p_L = 3.5e-8, 1.1e-8,
+# 5.3e-8 respectively).
+_TINY_P_L_BASELINES = ((3_000_000, 1), (10_000_000, 1), (10_000_000, 2))
+
+
+@cache
+def _baseline(m: int, f: int) -> Baseline:
+    baseline, _ = binary_baseline(m, f)
+    return baseline
+
+
+@cache
+def _refused_multiples_at_or_above_two(m: int, f: int) -> tuple[float, ...]:
+    """C14's own sweep, via the independent reference: the multiples >= 2 on a
+    3,000-point log grid of ``M - 1`` in ``[1e-6, 1e3]`` at which the upper arm
+    is not constructible (m=3,000,000 f=1: 10 of them; m=10,000,000 f=1: 100+;
+    f=2: 1)."""
+    p_lower = ref.cp_lower(f, m)
+    grid = (1.0 + 10.0 ** (-6.0 + 9.0 * i / 2999) for i in range(3000))
+    return tuple(
+        multiple
+        for multiple in grid
+        if multiple >= 2.0
+        and ref.exact_lattice(*ref.upper_arm_design_pair(p_lower, multiple)) is None
+    )
+
+
+def _upper_f16(m: int, f: int, multiple: float) -> dict[str, object]:
+    with pytest.raises(InvalidParameterError) as excinfo:
+        fit_bernoulli_cusum(
+            _baseline(m, f),
+            target_arl=_CHEAP_TARGET,
+            direction="upper",
+            detect_rate_multiple=multiple,
+        )
+    return dict(excinfo.value.context)
+
+
+def _assert_min_value_is_the_nearest_constructible(
+    m: int, f: int, requested: float
+) -> float:
+    context = _upper_f16(m, f, requested)
+    assert context["reason"] == _BELOW_RESOLUTION
+    minimum = context["min_value"]
+    assert isinstance(minimum, float)
+    assert minimum >= requested
+    chart = fit_bernoulli_cusum(
+        _baseline(m, f),
+        target_arl=_CHEAP_TARGET,
+        direction="upper",
+        detect_rate_multiple=minimum,
+    )
+    assert chart.detect_rate_multiple == minimum
+    below = math.nextafter(minimum, 0.0)
+    if below >= requested:
+        assert _upper_f16(m, f, below)["reason"] == _BELOW_RESOLUTION
+    return minimum
+
+
+class TestUnconstructibleUpperArmAtOrdinaryMultiples:
+    """Corrigendum C14 / Decision 18 items 28 and 29. The ``min_value`` search now
+    runs upward from the request (C14's specification, replacing C12.1's fixed
+    anchor at 2) -- already what 3bd013d does, so these pass today; they pin
+    the ratified behaviour."""
+
+    # Budget: a 3,000,000-observation baseline (~0.8 s, measured) and three
+    # target-1 fits; ~1.5 s locally, x3 = 4.5 s.
+    @pytest.mark.timeout(60)
+    def test_pinned_regression_at_m_3_million(self) -> None:
+        """Item 28: ``"upper"`` at m=3,000,000 f=1, ``M ~ 4.1957`` raises F16
+        (``"shift_below_numerical_resolution"``); ``min_value`` is above the
+        request, round-trips, and moves it by less than 1e-6 relative (C14
+        measured 6.35e-8 at this baseline)."""
+        p_lower = ref.cp_lower(1, 3_000_000)
+        assert (
+            ref.exact_lattice(
+                *ref.upper_arm_design_pair(p_lower, _ORDINARY_UNCONSTRUCTIBLE_MULTIPLE)
+            )
+            is None
+        ), "premise: the independent reference cannot realise it either"
+
+        minimum = _assert_min_value_is_the_nearest_constructible(
+            3_000_000, 1, _ORDINARY_UNCONSTRUCTIBLE_MULTIPLE
+        )
+
+        assert minimum > _ORDINARY_UNCONSTRUCTIBLE_MULTIPLE
+        relative_move = (
+            minimum - _ORDINARY_UNCONSTRUCTIBLE_MULTIPLE
+        ) / _ORDINARY_UNCONSTRUCTIBLE_MULTIPLE
+        assert relative_move < 1e-6
+
+    # Budget: measured 0.6 s per target-1 fit on the 3,000,000-observation
+    # baseline (its score scan dominates), three fits per draw: 3 draws ~6 s
+    # locally (29.7 s for 5 draws in the full covered run), x3 = 18 s.
+    @pytest.mark.timeout(90)
+    @settings(
+        max_examples=3,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(position=st.floats(min_value=0.0, max_value=1.0, exclude_max=True))
+    def test_refused_multiples_above_two_at_m_3_million(self, position: float) -> None:
+        """Item 29 on the cheapest qualifying baseline (m=3,000,000 f=1, p_L =
+        3.5e-8): for a refused ``M >= 2``, ``min_value >= M``, is constructible,
+        and the float below it is not."""
+        refused = _refused_multiples_at_or_above_two(3_000_000, 1)
+        assert refused
+        requested = refused[int(position * len(refused))]
+
+        _assert_min_value_is_the_nearest_constructible(3_000_000, 1, requested)
+
+    @pytest.mark.slow
+    # Budget: measured 2.0 s per target-1 fit at m=10,000,000 (0.6 s at
+    # 3,000,000) plus ~2.7 s to build each 10M baseline once; 20 draws x 3
+    # fits -> ~2 min locally, x3 = 6 min.
+    @pytest.mark.timeout(600)
+    @settings(
+        max_examples=20,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(
+        which=st.sampled_from(_TINY_P_L_BASELINES),
+        position=st.floats(min_value=0.0, max_value=1.0, exclude_max=True),
+    )
+    def test_every_refused_multiple_above_two_gets_the_nearest_constructible_minimum(
+        self, which: tuple[int, int], position: float
+    ) -> None:
+        """Item 29: for any refused ``M >= 2`` on a baseline with ``p_L < 1e-7``,
+        ``min_value >= M``, is constructible, and the float below it is not."""
+        m, f = which
+        refused = _refused_multiples_at_or_above_two(m, f)
+        assert refused, f"no refused multiple >= 2 at m={m} f={f}"
+        requested = refused[int(position * len(refused))]
+
+        _assert_min_value_is_the_nearest_constructible(m, f, requested)
+
+
+# ===========================================================================
+# C15.2 -- the multiple's ceiling covers the upper arm, and the search ends
+# ===========================================================================
+
+# The spacing of doubles just below 1: the upper design point 1 - p_L/M is
+# representable strictly below 1 exactly when p_L / M >= 2**-53 (C15.2).
+_TWO_TO_THE_53 = 2.0**53
+
+
+class TestUpperArmCeiling:
+    """Corrigendum C15.2 / Decision 18 item 34 at m=200 f=20 (``p_L ~ 0.0735``,
+    so ``U = p_L x 2**53 ~ 6.6e14``)."""
+
+    def test_upper_at_the_ceiling_fits(self) -> None:
+        """``M = C = U`` is constructible (C15.2 measured it at every baseline).
+        Passes today (the upper arm happens to be constructible there)."""
+        p_lower = _fit(200, 20, 2.0, direction="upper").p_l
+        ceiling = p_lower * _TWO_TO_THE_53
+
+        chart = _fit(200, 20, ceiling, direction="upper")
+
+        assert chart.detect_rate_multiple == ceiling
+
+    @pytest.mark.parametrize("factor", [4.0, 1e3], ids=["4U", "1000U"])
+    # Budget: one refusal; today it runs C14's upward search to float overflow
+    # (~1,100 doublings, measured well under 1 s). 30 s bounds a hang.
+    @pytest.mark.timeout(30)
+    def test_above_the_ceiling_is_f11_with_a_round_tripping_maximum(
+        self, factor: float
+    ) -> None:
+        """A request above ``C`` is F11, extended to the upper arm, with
+        ``max_detect_rate_multiple = C`` (= ``U`` for ``"upper"``). Today: F16
+        ``"no_valid_multiple"`` (the search's ceiling is ``math.inf``)."""
+        p_lower = _fit(200, 20, 2.0, direction="upper").p_l
+        ceiling = p_lower * _TWO_TO_THE_53
+
+        with pytest.raises(InvalidParameterError) as excinfo:
+            _fit(200, 20, ceiling * factor, direction="upper")
+
+        context = excinfo.value.context
+        assert context["parameter"] == "detect_rate_multiple"
+        assert context["kind"] == "invalid"
+        assert context["provided"] == ceiling * factor
+        assert "constraint" in context
+        assert "reason" not in context
+        assert context["max_detect_rate_multiple"] == ceiling
+        maximum = context["max_detect_rate_multiple"]
+        assert _fit(200, 20, maximum, direction="upper").detect_rate_multiple == (
+            maximum
+        )
+
+    def test_two_sided_ceiling_is_the_smaller_of_the_two(self) -> None:
+        """``C = min(F11's (1 - 1e-9)/p_U, U)``; for two-sided at m=200 f=20 F11's
+        bound is the smaller. Passes today."""
+        chart = _fit(200, 20, 2.0, direction="two_sided")
+        f11 = (1.0 - 1e-9) / chart.p_u
+        assert f11 < chart.p_l * _TWO_TO_THE_53
+
+        with pytest.raises(InvalidParameterError) as excinfo:
+            _fit(200, 20, f11 * 2.0, direction="two_sided")
+
+        assert excinfo.value.context["max_detect_rate_multiple"] == pytest.approx(
+            f11, rel=1e-15
+        )
+
+
+class TestSearchEndsInNoValidMultiple:
+    """Corrigendum C15.2 / Decision 18 item 34: driven by a monkeypatched
+    always-refusing lattice finder (seam: ``bernoulli_cusum_fitting._arm_lattice``,
+    the finder every designed arm goes through), the upward search ends in
+    ``reason="no_valid_multiple"`` within a bounded number of probes. C15.2's
+    bound: at most ~1,100 doublings and ~1,100 halvings."""
+
+    _PROBE_BOUND = 2_500
+
+    @pytest.mark.parametrize("direction", ["lower", "upper", "two_sided"])
+    # Budget: <= 2,500 probes of a patched (constant-time) finder; well under
+    # 1 s. 30 s bounds a hang.
+    @pytest.mark.timeout(30)
+    def test_no_constructible_multiple_is_reported_without_a_minimum(
+        self, monkeypatch: pytest.MonkeyPatch, direction: str
+    ) -> None:
+        """Keys per C15.2: parameter, constraint, kind, provided, reason -- no
+        ``min_value`` (mirrors F10). Passes today: the search already terminates
+        (for ``"upper"`` only by overflowing to ``inf``, which C15.2 replaces
+        with the ceiling ``U``)."""
+        import drift_caliper.baseline.domain.bernoulli_cusum_fitting as fitting
+
+        baseline, _ = binary_baseline(200, 20)
+        probes: list[float] = []
+
+        def refuse(p0: float, p1: float) -> None:
+            probes.append(p1)
+
+        monkeypatch.setattr(fitting, "_arm_lattice", refuse)
+
+        with pytest.raises(InvalidParameterError) as excinfo:
+            fit_bernoulli_cusum(
+                baseline,
+                target_arl=_CHEAP_TARGET,
+                detect_rate_multiple=1.5,
+                direction=direction,
+            )
+
+        context = excinfo.value.context
+        assert context["reason"] == "no_valid_multiple"
+        assert context["parameter"] == "detect_rate_multiple"
+        assert context["kind"] == "invalid"
+        assert context["provided"] == 1.5
+        assert "constraint" in context
+        assert "min_value" not in context
+        assert 0 < len(probes) <= self._PROBE_BOUND

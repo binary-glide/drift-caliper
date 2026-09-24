@@ -120,8 +120,11 @@ class TestReferenceValueIntervalInvariant:
     """Property: quantised r_q lies strictly inside (p0, p1) AND within
     epsilon * (p1 - p0) of the unquantised r, for both arms."""
 
-    # Budget: measured 86.8 s locally (200 examples, pre-amendment code);
-    # x3 = 260 s.
+    # Budget: measured 86.8 s locally (200 examples, pre-amendment code) and
+    # 32.1 s on 3bd013d under coverage; x3 = 96 s. Marked slow for the per-PR
+    # run: its lattices are covered there by the C12.4 finder tests and the
+    # Decision 11 regression cells below.
+    @pytest.mark.slow
     @pytest.mark.timeout(300)
     @given(
         m=st.integers(min_value=DEFAULT_SUFFICIENCY_THRESHOLD, max_value=10_000),
