@@ -16,9 +16,21 @@ on:
   push:
     branches: [trunk]
   pull_request:
+  # The full suite, including tests marked `slow`, nightly. Pull requests and
+  # pushes run `-m "not slow"` only: the slow tests are the Bernoulli CUSUM's
+  # large-baseline and near-cap cells, ~12 minutes locally and roughly twice
+  # that on a runner, per Python version. The not-slow run is required to keep
+  # every changed source line covered on its own, so Codecov's patch check
+  # stays meaningful on pull requests. A scheduled run executes on the default
+  # branch only, and GitHub notifies the account that last edited this cron
+  # line when it fails -- check the Actions tab if that is not you.
+  schedule:
+    - cron: "17 3 * * *"
 
+# Keyed by event as well as ref: otherwise a push to trunk while the nightly
+# full run is going would cancel it, and the slow tests would never finish.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Least privilege at the top level, inherited by every job that does not
@@ -135,7 +147,14 @@ jobs:
       # `--cov-report=xml` is added here rather than in pyproject's addopts:
       # locally the terminal report is what anyone reads, and writing a
       # coverage.xml into the working tree on every `uv run pytest` is noise.
-      - run: uv run pytest --cov-report=xml
+      # Pull requests and trunk pushes skip `slow`; the nightly schedule and a
+      # manual dispatch run everything. Two steps with `if:` rather than one
+      # step splicing an expression into the command line, which is the shape
+      # zizmor's template-injection audit exists to catch.
+      - if: github.event_name == 'pull_request' || github.event_name == 'push'
+        run: uv run pytest -m "not slow" --cov-report=xml
+      - if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: uv run pytest --cov-report=xml
       # Uploaded from one matrix leg only. All three run the same suite over
       # the same source, so three uploads would be three identical reports
       # racing to be the one Codecov reports on.
