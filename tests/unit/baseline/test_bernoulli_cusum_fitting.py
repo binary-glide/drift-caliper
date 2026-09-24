@@ -38,6 +38,7 @@ from drift_caliper.errors import (
 )
 from drift_caliper.measurement import Provenance
 from tests.factories import ProvenanceFactory, ScoringResultFactory
+from tests.support.bernoulli_surface import optional_arm_float
 
 _VALID_TARGET_ARL = 370.0
 
@@ -174,7 +175,14 @@ class TestSufficiencyFloorUnchanged:
 
 
 class TestNeverRaisesDegenerateBaseline:
-    """GICP folds both former degenerate cases into other, more specific paths."""
+    """GICP folds both former degenerate cases into other, more specific paths.
+
+    ADR-014 Decision 13.4 reverses the blanket "never raises
+    ``DegenerateBaselineError``" for exactly one reason,
+    ``arl_not_computable`` (a postcondition guard no measured input reaches;
+    see ``test_bernoulli_cusum_amendment2.py``). The two baselines below are
+    still never degenerate.
+    """
 
     def test_zero_failure_baseline_does_not_raise_degenerate_baseline_error(
         self,
@@ -224,6 +232,10 @@ class TestZeroFailureBaselineDisclosesDetectionWeakness:
 
         # Half 1: the fit succeeded (reaching here at all is part of the proof).
         assert result.observed_failure_rate == 0.0
+        # ADR-014 Decision 19.2: with no failures there is no improvement arm to
+        # design, so the default two-sided request fits the lower arm only and
+        # says so.
+        assert result.direction == "lower"
 
         # Half 2: the detection-performance disclosure is present and is a
         # real, finite number -- not merely a default/placeholder.
@@ -354,18 +366,19 @@ class TestDirection:
             )
         assert excinfo.value.context["parameter"] == "direction"
 
-    def test_both_arms_always_reported_regardless_of_direction(self) -> None:
-        """ADR-014 section 6b: both arms' fields present regardless of `direction`.
-
-        Mirrors `Monitor._check_cusum`'s "both sums always updated
-        regardless of direction" convention.
-        """
+    def test_only_the_checked_arm_is_reported(self) -> None:
+        """ADR-014 corrigendum C3 (ratified C-Q2), reversing section 6b's "both
+        arms' fields present regardless of ``direction``": an artefact carries
+        only the arms its ``direction`` checks, so a ``"lower"`` fit reports no
+        upper arm. (This test previously asserted the reversed rule.)"""
         baseline = _mixed_baseline()
         result = fit_bernoulli_cusum(
             baseline, target_arl=_VALID_TARGET_ARL, direction="lower"
         )
-        assert isinstance(result.reference_value_upper, float)
-        assert isinstance(result.decision_interval_upper, float)
+        assert isinstance(result.reference_value_lower, float)
+        assert isinstance(result.decision_interval_lower, float)
+        assert optional_arm_float(result, "reference_value_upper") is None
+        assert optional_arm_float(result, "decision_interval_upper") is None
 
 
 # ===========================================================================
@@ -439,15 +452,17 @@ class TestExpectedDetectionArl:
 
 
 class TestCalibrationMethodNaming:
-    def test_two_sided_reports_a_named_calibration_method(self) -> None:
+    def test_two_sided_reports_the_coupled_bound_method(self) -> None:
+        """ADR-014 corrigendum C5: a two-sided ``achieved_arl`` is the coupled
+        floor ``B`` under calibration D, named ``"gicp_markov_chain_coupled_bound"``
+        so an auditor can tell it from a pre-Amendment-2 figure. Section 6c's
+        ``"gicp_markov_chain_harmonic_combination"`` fallback is withdrawn, so
+        this test no longer accepts it (it previously accepted either string)."""
         baseline = _mixed_baseline()
         result = fit_bernoulli_cusum(
             baseline, target_arl=_VALID_TARGET_ARL, direction="two_sided"
         )
-        assert result.calibration_method in (
-            "gicp_markov_chain",
-            "gicp_markov_chain_harmonic_combination",
-        )
+        assert result.calibration_method == "gicp_markov_chain_coupled_bound"
 
     def test_one_sided_reports_the_exact_method(self) -> None:
         """ADR-012 section 4/5: one-sided configurations are unaffected by Open Question
@@ -547,35 +562,3 @@ class TestDeterminism:
         assert first.p_u == second.p_u
         assert first.reference_value_lower == second.reference_value_lower
         assert first.decision_interval_lower == second.decision_interval_lower
-
-
-# ===========================================================================
-# Open Question #23 -- upper-arm coverage is UNVERIFIED, not asserted either way
-# ===========================================================================
-
-
-@pytest.mark.skip(
-    reason=(
-        "Open Question #23 (docs/domain-model.md; ADR-014 section 6d): whether "
-        "p_U preserves the 1-alpha false-alarm coverage guarantee for the "
-        "UPPER (improvement-detecting) arm is unverified -- Heidema et al.'s "
-        "GICP proof covers detecting a parameter INCREASE, the direction an "
-        "upper confidence bound is conservative for; the upper arm here "
-        "detects a DECREASE, a related but distinct question nobody has "
-        "measured or derived on this ticket. Asserting the guarantee holds "
-        "would go green while claiming something unproven -- the exact "
-        "vacuity shape this project has repeatedly caught (CLAUDE.md's "
-        "'Vacuity is this project's blind spot' note). This test is a "
-        "deliberate placeholder recording the gap, not a probe for it: "
-        "closing it requires a mirrored study of ADR-013 section 3's 40-cell "
-        "grid at the upper arm's own design point, which is out of scope for "
-        "this ticket and explicitly deferred to a future amendment."
-    )
-)
-def test_upper_arm_false_alarm_coverage_is_unverified_open_question_23() -> None:
-    raise NotImplementedError(
-        "intentionally not implemented -- see the skip reason above; do not "
-        "fill this in with an assertion that the guarantee holds or does not "
-        "hold without first performing the measurement ADR-013 section 7 "
-        "requires"
-    )

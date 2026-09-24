@@ -29,6 +29,7 @@ import time
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from scipy.stats import beta as scipy_beta  # type: ignore[attr-defined]
 
 from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
@@ -46,6 +47,7 @@ from drift_caliper.errors import InvalidParameterError
 from drift_caliper.measurement import Provenance
 from drift_caliper.monitoring import Monitor
 from tests.factories import ProvenanceFactory, ScoringResultFactory
+from tests.support.bernoulli_surface import optional_arm_float
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -69,19 +71,24 @@ def _bernoulli_baseline(
 def _compute_arm_design(m: int, f: int, multiple: float = 2.0) -> dict[str, float]:
     """Compute the design-point parameters for both arms.
 
-    Mirrors the fitting logic.
+    Mirrors the fitting logic. ADR-014 Decision 19.1 moved the upper arm's
+    design point from ``p_U`` to ``p_L``, the Clopper-Pearson *lower* bound
+    (the alpha quantile of Beta(f, m - f + 1)); this helper previously
+    designed it at ``p_U``. At f = 0 there is no upper arm (Decision 19.2), so
+    its entries are only meaningful for f >= 1.
     """
     p_u = clopper_pearson_upper_bound(failures=f, observations=m, alpha=_ALPHA)
+    p_l = 0.0 if f == 0 else float(scipy_beta.ppf(_ALPHA, f, m - f + 1))
 
     # Lower arm: detect degradation (failure rate increase)
     p0_lower = p_u
     p1_lower = p_u * multiple
     r_lower = _bernoulli_reference_value(p0_lower, p1_lower)
 
-    # Upper arm: detect improvement (failure rate decrease)
-    q0_upper = 1.0 - p_u
-    q1_upper = 1.0 - p_u / multiple
-    r_upper = _bernoulli_reference_value(q0_upper, q1_upper)
+    # Upper arm: detect improvement (failure rate decrease), at p_L
+    q0_upper = 1.0 - p_l
+    q1_upper = 1.0 - p_l / multiple
+    r_upper = _bernoulli_reference_value(q0_upper, q1_upper) if f > 0 else float("nan")
 
     return {
         "p_u": p_u,
@@ -114,7 +121,9 @@ class TestReferenceValueIntervalInvariant:
     """Property: quantised r_q lies strictly inside (p0, p1) AND within
     epsilon * (p1 - p0) of the unquantised r, for both arms."""
 
-    @pytest.mark.timeout(120)
+    # Budget: measured 86.8 s locally (200 examples, pre-amendment code);
+    # x3 = 260 s.
+    @pytest.mark.timeout(300)
     @given(
         m=st.integers(min_value=DEFAULT_SUFFICIENCY_THRESHOLD, max_value=10_000),
         f_frac=st.floats(min_value=0.0, max_value=1.0),
@@ -143,6 +152,7 @@ class TestReferenceValueIntervalInvariant:
 
         # Lower arm: r_q must be in (p0_lower, p1_lower) strictly
         r_q_lower = result.reference_value_lower
+        assert r_q_lower is not None
         p0_lower = design["p0_lower"]
         p1_lower = design["p1_lower"]
         r_lower = design["r_lower"]
@@ -156,8 +166,13 @@ class TestReferenceValueIntervalInvariant:
             f"eps * gap = {_EPSILON * (p1_lower - p0_lower)} at m={m}, f={f}"
         )
 
-        # Upper arm: r_q must be in (q0_upper, q1_upper) strictly
-        r_q_upper = result.reference_value_upper
+        # Upper arm: r_q must be in (q0_upper, q1_upper) strictly. ADR-014
+        # Decision 19.2: at f = 0 a two-sided request fits the lower arm only.
+        r_q_upper = optional_arm_float(result, "reference_value_upper")
+        if f == 0:
+            assert r_q_upper is None
+            return
+        assert r_q_upper is not None
         q0_upper = design["q0_upper"]
         q1_upper = design["q1_upper"]
         r_upper = design["r_upper"]
@@ -213,18 +228,28 @@ class TestFixedN100RegressionCases:
     def test_invariant_holds_at_previously_violated_configuration(
         self, m: int, f: int, arm: str
     ) -> None:
+        """The f = 0 upper-arm rows now assert the arm is not built at all:
+        ADR-014 Decision 19.2 has no upper arm at f = 0 (``p_L = 0``, nothing to
+        design), so the configuration that violated the invariant no longer
+        exists. The f = 5 upper row checks the arm at its ratified design point,
+        ``p_L`` (Decision 19.1)."""
         baseline = _bernoulli_baseline(m, num_failures=f)
         result = fit_bernoulli_cusum(baseline, target_arl=370.0)
         design = _compute_arm_design(m, f)
 
+        if arm == "upper" and f == 0:
+            assert result.direction == "lower"
+            assert optional_arm_float(result, "reference_value_upper") is None
+            return
         if arm == "lower":
-            r_q = result.reference_value_lower
+            r_q = optional_arm_float(result, "reference_value_lower")
             p0, p1 = design["p0_lower"], design["p1_lower"]
             r_real = design["r_lower"]
         else:
-            r_q = result.reference_value_upper
+            r_q = optional_arm_float(result, "reference_value_upper")
             p0, p1 = design["q0_upper"], design["q1_upper"]
             r_real = design["r_upper"]
+        assert r_q is not None
 
         assert p0 < r_q < p1, (
             f"{arm} arm at m={m}, f={f}: r_q={r_q} not in ({p0}, {p1})"
@@ -263,6 +288,7 @@ class TestDenominatorSearchTermination:
 
         # Lower arm invariant (the one that matters for direction="lower")
         r_q = result.reference_value_lower
+        assert r_q is not None
         p0, p1 = design["p0_lower"], design["p1_lower"]
         assert p0 < r_q < p1
 
@@ -325,6 +351,11 @@ class TestSearchCapEnforcement:
         assert math.isfinite(max_arl)
         assert max_arl >= 1.0
 
+    # Budget: measured 90.4 s locally against the pre-amendment code (it
+    # drives a zero-drift chain to the real cap); x3 = 271 s. Decision 18 item
+    # 12 asks for the cap to be monkeypatched instead -- left to the
+    # implementer, since this test pins a private helper's behaviour.
+    @pytest.mark.timeout(300)
     def test_max_attainable_arl_round_trips(self) -> None:
         """BIN-122 rule: the reported max_attainable_arl must itself be
         accepted when passed back as the target."""
@@ -451,13 +482,19 @@ class TestTargetArlCeiling:
 
 class TestJointStateCountCap:
     """Decision 10b: a configuration exceeding 1,000,000 joint states is
-    refused with the correct context."""
+    refused with the correct context.
 
-    @pytest.mark.timeout(30)
+    Cell moved from m=1000 f=0 to m=300,000 f=30 at T=10^6: ADR-014 Decision
+    19.2 turns a zero-failure two-sided request into a lower-only fit, so
+    m=1000 f=0 no longer reaches the joint cap at all. m=300,000 f=30 refuses
+    with ``max_two_sided_target_arl = 3,914`` (corrigendum C11's table).
+    Budget: C11 measured 3.3 s end to end for the refusal (k3_refusal_time.py);
+    the round-trip fit adds the D feasibility check again (2.6 s). x3 = 18 s.
+    """
+
+    @pytest.mark.timeout(60)
     def test_raises_with_joint_state_count_exceeded_context(self) -> None:
-        """m=1000, f=0, target=1e6, two_sided — produces ~16M states
-        (Decision 8's table), well above the 1M cap."""
-        baseline = _bernoulli_baseline(1000, num_failures=0)
+        baseline = _bernoulli_baseline(300_000, num_failures=30)
         with pytest.raises(InvalidParameterError) as excinfo:
             fit_bernoulli_cusum(
                 baseline,
@@ -472,10 +509,10 @@ class TestJointStateCountCap:
         assert isinstance(max_t, (int, float))
         assert max_t >= 1.0
 
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(60)
     def test_max_two_sided_target_arl_round_trips(self) -> None:
         """BIN-122 rule: passing the reported max back must succeed."""
-        baseline = _bernoulli_baseline(1000, num_failures=0)
+        baseline = _bernoulli_baseline(300_000, num_failures=30)
         with pytest.raises(InvalidParameterError) as excinfo:
             fit_bernoulli_cusum(
                 baseline,
@@ -494,94 +531,38 @@ class TestJointStateCountCap:
         assert result.requested_arl == float(max_t)
 
     @pytest.mark.timeout(30)
-    def test_target_370_fits_every_baseline(self) -> None:
-        """Decision 10b's measurement: target_arl=370 fits every baseline,
-        even the worst corner for the joint state count."""
+    def test_target_370_at_zero_failures_fits_the_lower_arm_only(self) -> None:
+        """Decision 10b's "``target_arl = 370`` still fits every baseline" held
+        only because the floor it would have collided with was never built
+        (ADR-014 Amendment 2 section 0; Decision 12). Under the ratified
+        behaviour a zero-failure two-sided request fits lower-only (Decision
+        19.2), reports ``direction = "lower"``, and never refuses: its
+        ``achieved_arl`` is at least the request (Decision 12.1)."""
         for m, f in [(200, 0), (500, 0), (1000, 0), (5000, 0)]:
             baseline = _bernoulli_baseline(m, num_failures=f)
             result = fit_bernoulli_cusum(
                 baseline, target_arl=370.0, direction="two_sided"
             )
+            assert result.direction == "lower", f"m={m}, f={f}"
             assert math.isfinite(result.achieved_arl), (
                 f"m={m}, f={f}: achieved_arl not finite"
             )
+            assert result.achieved_arl >= 370.0
 
 
 # ---------------------------------------------------------------------------
-# Item 6b: Coverage -- the except-InvalidParameterError path in
-#          _find_max_two_sided_target_arl (lines 740-741 and 757-758)
+# Item 6b (removed): ``_find_max_two_sided_target_arl``'s per-arm exception path
 #
-# When one arm's per-arm calibration raises (because the per-arm target
-# exceeds its max_attainable_arl), the bisection must catch it and treat
-# the configuration as "over the cap".  The cap on _MAX_DECISION_INTERVAL_UNITS
-# is monkeypatched to 100 so each Markov-chain solve is trivially fast
-# and the exception fires from the real calibration search, not a mock.
+# Two tests drove that private bisection directly. ADR-014 corrigendum C11
+# replaces it: ``max_two_sided_target_arl`` is now the equal-split bound
+# ``floor(T_ES)``, computed in lattice space with a one-solve guard, so the
+# function they called is superseded and its signature does not survive.
+# What they protected -- a per-arm cap hit inside the two-sided search is
+# treated as "over the cap" and the reported bound still round-trips -- is
+# Decision 16's rule, now tested through the public API in
+# ``test_bernoulli_cusum_two_sided_refusal.py``
+# (``TestPerArmCapHitInTwoSidedModeIsTheJointRefusal``) and registry row F13.
 # ---------------------------------------------------------------------------
-
-
-class TestBisectionHandlesPerArmCalibrationException:
-    """_find_max_two_sided_target_arl catches InvalidParameterError from
-    per-arm calibration and still returns a finite, round-tripping value."""
-
-    @pytest.mark.timeout(30)
-    def test_returns_finite_value_when_one_arm_raises(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Monkepatching _MAX_DECISION_INTERVAL_UNITS to 100 makes the
-        positive-drift arm's cap_arl small enough that the bisection's
-        per-arm targets (up to 2 * MAX_MEANINGFUL_ARL) exceed it, triggering
-        the except path.  The negative-drift arm calibrates instantly at
-        any target (ARL at h=1 already exceeds any per-arm target the
-        bisection would try)."""
-        import drift_caliper.baseline.domain.bernoulli_cusum_fitting as mod
-
-        monkeypatch.setattr(mod, "_MAX_DECISION_INTERVAL_UNITS", 100)
-
-        # Arm 1: n=100, r_units=1, p=0.6 -- positive drift, cap_arl small
-        # at h=100 (~166), so per-arm targets > 166 raise.
-        # Arm 2: n=100, r_units=1, p=0.01 -- negative drift, ARL enormous
-        # at h=1, calibration always returns immediately.
-        max_t = mod._find_max_two_sided_target_arl(
-            r_lower_units=1,
-            n_lower=100,
-            p_lower=0.6,
-            r_upper_units=1,
-            n_upper=100,
-            p_upper=0.01,
-        )
-
-        assert isinstance(max_t, (int, float))
-        assert math.isfinite(max_t)
-        assert max_t >= 1.0
-
-    @pytest.mark.timeout(30)
-    def test_returned_value_round_trips(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The value _find_max_two_sided_target_arl returns must be accepted
-        by _joint_state_count_at_target at the same arm parameters."""
-        import drift_caliper.baseline.domain.bernoulli_cusum_fitting as mod
-
-        monkeypatch.setattr(mod, "_MAX_DECISION_INTERVAL_UNITS", 100)
-
-        max_t = mod._find_max_two_sided_target_arl(
-            r_lower_units=1,
-            n_lower=100,
-            p_lower=0.6,
-            r_upper_units=1,
-            n_upper=100,
-            p_upper=0.01,
-        )
-
-        # Must not raise -- the value round-trips.
-        count = mod._joint_state_count_at_target(
-            max_t,
-            r_lower_units=1,
-            n_lower=100,
-            p_lower=0.6,
-            r_upper_units=1,
-            n_upper=100,
-            p_upper=0.01,
-        )
-        assert count <= mod._MAX_JOINT_STATES
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +628,11 @@ class TestBoundedTimeWorstCorner:
         Silicon (the bisection for max_two_sided_target_arl is O(50)
         iterations of per-arm calibration, each at < 40K states). CI runners
         are typically 3-5x slower; 30s gives 30x headroom.
+
+        ⚠️ Since ADR-014 Amendment 2 this is no longer the worst corner: the
+        "< 1 s" claim is withdrawn as unmeasured (Decision 18 item 12), and a
+        zero-failure two-sided request now fits the lower arm only (Decision
+        19.2). The test is kept as a bounded-time check on that path.
         """
         baseline = _bernoulli_baseline(10_000, num_failures=0)
 

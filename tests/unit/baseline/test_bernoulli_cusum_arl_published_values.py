@@ -65,36 +65,58 @@ design point would instead depend on the *specific* irrational-then-quantised
 
 ## Interface this file commits `domain-implementer` to
 
-Neither function below exists in ``src/`` yet:
+ADR-014 Amendment 2 Decision 13.1: "The integers are the chart." Production
+passes each arm's ``(N, r_units, h_units)`` straight into its solvers, and the
+float-accepting wrappers (``_one_sided_bernoulli_arl0``/
+``_joint_two_sided_bernoulli_arl0``, which rebuilt a lattice from floats with
+``Fraction.limit_denominator``) are removed from production -- they "survive
+only as test helpers. The published-value oracles (``sand2016-7395c``) state
+``r`` and ``h`` as exact decimals, so the test builds its integers from exact
+``Fraction`` values." That is what ``_lattice_from_decimals`` below does, and
+Parts 2 and 3 now pin production's **integer** solvers:
 
-    _one_sided_bernoulli_arl0(reference_value, decision_interval, p) -> float
-    _joint_two_sided_bernoulli_arl0(
-        reference_value_lower, decision_interval_lower,
-        reference_value_upper, decision_interval_upper, p,
-    ) -> float
+    _one_sided_arl0_in_units(up, down, n_transient, p) -> float
+    _joint_two_sided_arl0_in_units(lower, upper, p) -> float
 
-in ``drift_caliper.baseline.domain.bernoulli_cusum_fitting``, mirroring
-``cusum_fitting._cusum_arl0``/``_combine_two_sided_arl0``'s existing
-"private helper, tested directly" convention -- and covered by the same
-no-duplicate-private-helper meta-test that convention earns elsewhere in
-this codebase. `domain-implementer` may rename either function, provided
-this file is updated to match; the *numeric proof* is the contract, not
-the name.
+in ``drift_caliper.baseline.domain.bernoulli_cusum_fitting``, where ``lower``
+and ``upper`` are ``(N, r_units, h_units)`` triplets and ``p`` is the single
+shared failure rate. The first exists today; the second is new. They are
+looked up when each test runs, not at import, so a missing name fails those
+tests and leaves Part 1's reference checks running. `domain-implementer` may
+rename either, provided this file is updated to match; the *numeric proof* is
+the contract, not the name.
 """
 
 from __future__ import annotations
 
+import math
 import random
+from fractions import Fraction
+from typing import Any
 
 import numpy as np
 import pytest
 
-# 🚨 Neither of these exists in `src/` yet -- the expected red. See the
-# module docstring's "Interface this file commits domain-implementer to".
-from drift_caliper.baseline.domain.bernoulli_cusum_fitting import (
-    _joint_two_sided_bernoulli_arl0,
-    _one_sided_bernoulli_arl0,
-)
+from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting_module
+
+
+def _production_solver(name: str) -> Any:
+    """Look up a production integer solver by name at test time (see the module
+    docstring's interface note)."""
+    return getattr(fitting_module, name)
+
+
+def _lattice_from_decimals(value: float, *others: float) -> tuple[int, list[int]]:
+    """Exact integers for decimal design points (ADR-014 Decision 13.1).
+
+    Each decimal is read as the exact decimal it denotes
+    (``Fraction(str(value))``, never the binary float), and the common
+    denominator is their least common multiple.
+    """
+    fractions = [Fraction(str(v)) for v in (value, *others)]
+    denominator = math.lcm(*(f.denominator for f in fractions))
+    return denominator, [int(f * denominator) for f in fractions]
+
 
 # ===========================================================================
 # From-scratch reference implementations -- independent of src/, used only to
@@ -354,7 +376,7 @@ class TestReferenceSolverMatchesMonteCarloForTheJointTwoArmedCase:
 
 
 class TestOneSidedBernoulliARL0MatchesTheReferenceSolver:
-    """Pins `_one_sided_bernoulli_arl0` (src/) against this file's own solver.
+    """Pins `_one_sided_arl0_in_units` (src/) against this file's own solver.
 
     Uses Caliper's own strict-inequality boundary convention throughout
     (``alarm_at_or_above=False``) -- the project-wide rule, not SAND2016's
@@ -375,7 +397,9 @@ class TestOneSidedBernoulliARL0MatchesTheReferenceSolver:
         expected = _one_sided_bernoulli_arl0_reference(
             r, h, p, lattice_denominator=1000, alarm_at_or_above=False
         )
-        actual = _one_sided_bernoulli_arl0(r, h, p)
+        n, (r_units, h_units) = _lattice_from_decimals(r, h)
+        solve = _production_solver("_one_sided_arl0_in_units")
+        actual = solve(n - r_units, -r_units, h_units + 1, p)
         assert actual == pytest.approx(expected, rel=1e-6)
 
 
@@ -385,7 +409,7 @@ class TestOneSidedBernoulliARL0MatchesTheReferenceSolver:
 
 
 class TestJointTwoSidedBernoulliARL0MatchesTheReferenceSolver:
-    """Pins `_joint_two_sided_bernoulli_arl0` (src/) against this file's own solver.
+    """Pins `_joint_two_sided_arl0_in_units` (src/) against this file's own solver.
 
     🚨 **This is the test that must fail against a harmonic-combination
     shortcut.** `TestHarmonicCombinationIsAMeasurablyDifferentWrongAnswer`
@@ -414,25 +438,30 @@ class TestJointTwoSidedBernoulliARL0MatchesTheReferenceSolver:
             self._P,
             lattice_denominator=20,
         )
-        actual = _joint_two_sided_bernoulli_arl0(
-            self._R_LOWER, self._H_LOWER, self._R_UPPER, self._H_UPPER, self._P
-        )
+        actual = self._production_joint_arl()
         assert actual == pytest.approx(expected, rel=1e-6)
 
     def test_matches_the_precise_figure_established_during_test_authoring(self) -> None:
         """Belt-and-braces: the literal figure, cited so a reader need not re-run the
         solver."""
-        actual = _joint_two_sided_bernoulli_arl0(
-            self._R_LOWER, self._H_LOWER, self._R_UPPER, self._H_UPPER, self._P
-        )
+        actual = self._production_joint_arl()
         assert actual == pytest.approx(7.64643872267305, rel=1e-6)
+
+    def _production_joint_arl(self) -> float:
+        """Per-arm integer lattices (Decision 8), each from its own exact
+        decimals (Decision 13.1)."""
+        n_lo, (r_lo, h_lo) = _lattice_from_decimals(self._R_LOWER, self._H_LOWER)
+        n_up, (r_up, h_up) = _lattice_from_decimals(self._R_UPPER, self._H_UPPER)
+        solve = _production_solver("_joint_two_sided_arl0_in_units")
+        value: float = solve((n_lo, r_lo, h_lo), (n_up, r_up, h_up), self._P)
+        return value
 
 
 class TestHarmonicCombinationIsAMeasurablyDifferentWrongAnswer:
     """Proves the harmonic-combination shortcut is NOT a substitute for the exact solve.
 
     This is the power check ADR-014 section 6c requires: if
-    `_joint_two_sided_bernoulli_arl0` were implemented by combining two
+    `_joint_two_sided_arl0_in_units` were implemented by combining two
     one-sided ARLs via Montgomery's Eq. 9.7 (the continuous CUSUM's method,
     ``cusum_fitting._combine_two_sided_arl0`` -- explicitly the wrong choice
     per ADR-014 section 6c), it would report a number 12% away from the
