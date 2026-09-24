@@ -258,6 +258,15 @@ applied to `fit_bernoulli_cusum`.**
    `_min_attainable_arl0`/`_require_attainable_target_arl` exactly, not a
    new mechanism.
 
+   ⚠️ **Superseded 2026-09-24 by Amendment 2, Decision 12** — the item above
+   was never implemented, and on measurement the Bernoulli lower arm's floor
+   is exactly `1/p_U` whatever the lattice, with a 2.8–3.3× gap to the next
+   attainable value. Refusing below it would leave large zero-failure
+   baselines unfittable two-sided at any target. The ratified replacement:
+   **fit, report `achieved_arl` honestly, and disclose** via
+   `FittingAdvisory(kind="lower_arm_signals_on_first_failure")`. The text
+   above is kept as the original decision.
+
 **What does not transfer, and why — stated precisely, not just asserted:**
 
 ADR-011's hard floor and advisory band exist for one specific reason: *"the
@@ -803,6 +812,8 @@ This is `domain-modeller`'s step, not performed here.
 ## Amendment 2026-09-23 — lattice correctness defect and cost-bounding
 
 **Status:** ✅ **ACCEPTED — ratified by the product owner 2026-09-23**, with the joint state cap set at 1,000,000 (Decision 10b).
+
+⚠️ **Partly corrected and extended by Amendment 2 (2026-09-24), below.** Its §0 records three claims in this amendment that measurement disproved — one-sided fits "never exceed ~40,000 states", the refusal bisection "completes in under 1 s", and "`target_arl = 370` fits every baseline" — and Decisions 13–14 replace this amendment's float lattice handling with integers carried end to end. Read Amendment 2 before relying on any figure here.
 
 **Refs:** BIN-133 PR #29 code review, ADR-011, ADR-012 §3, ADR-013 §1/§7.
 
@@ -1402,3 +1413,1281 @@ table to the adaptive-N regime is noted as follow-up verification work.
   Considered; same shape as ADR-013 §6b's deferred high-rate advisory. No
   threshold for "close enough to the cap to warrant a word" has been
   measured.
+
+---
+
+## Amendment 2 (2026-09-24): the reported numbers and the running chart must be the same chain
+
+**Status:** ✅ **ACCEPTED — Decisions 12–19 ratified in full by the product owner
+2026-09-24.**
+
+Rulings:
+- **Q1:** Decision 12 accepted.
+- **Q2:** settled with Q8; calibration D.
+- **Q3:** Decision 13.3's 999,999-unit one-sided cap accepted.
+- **Q4:** `DegenerateBaselineError(reason="arl_not_computable")` accepted.
+- **Q5:** the public `BernoulliArmLattice` shape accepted, with the floats as
+  computed properties.
+- **Q6:** the upper-only `expected_detection_arl` at `p̂/M` accepted. Its f=0
+  fallback is withdrawn by Decision 19.
+- **Q7:** the recommendation to defer was overruled; the upper arm is fixed now,
+  inside BIN-133.
+- **Q8:** Decision 19's numbers ratified. These are `p_L` at α = 0.10, the
+  two-sided `achieved_arl` as the guaranteed floor `B`, and calibration D, on
+  the evidence of 19.3 and the independent check in 19.4.
+- **Q9:** the improvement-detection figure is a number, not a warning (19.6).
+- **Q10:** the f = 0 two-sided artefact shape accepted.
+
+Open Question 23 is **settled by Decision 19**.
+
+**Refs:** BIN-133 PR #29 re-review (head `5b7e3a1`), ADR-002 §3/§4, ADR-009 §5,
+ADR-011, ADR-012 §3/§4, ADR-013 §4/§7, BIN-112, BIN-117, BIN-122, BIN-134,
+BIN-140.
+
+### 0. What shipped, what was missed, and why
+
+The re-review of PR #29 found six blockers. Every measurement below was
+**reproduced independently for this amendment** against the implementation at
+`5b7e3a1`, using scripts kept in the session scratchpad under `amend2/`
+(`a1`–`a10`, named where used). None of these numbers comes from the review
+text alone.
+
+| # | defect, as shipped | reproduced? |
+|---|---|---|
+| 1 | Decision 3 item 2's attainability floor was **ratified but never built**. `_calibrate_one_sided_decision_interval_units` returns `h_units = 1` whenever that already meets the target. The docstring cites `_require_attainable_target_arl` "below", and no such function exists. | **Yes.** m=1000 f=0: lower at 100 and at 370 both give 434.8; two-sided at 370 gives 485.8; m=2000 lower at 370 gives 869.1; m=5000 two-sided at 370 gives 552.2; m=300 f=3 lower at 50 gives 147.6 (`probe_floor.py`) |
+| 2 | Achieved ARLs are computed by **rebuilding each lattice from floats** (`Fraction.limit_denominator(100_000)`). This breaks once the upper arm's N passes 100,000. | **Yes, including the segfault.** At m=200,000 f=0: `upper` returns `achieved_arl = expected_detection_arl = 1e15` (the sentinel) after 24.2 s. `two_sided` dies with `Fatal Python error: Segmentation fault` in `scipy.sparse.linalg.spsolve`, reached from `_joint_two_sided_bernoulli_arl0` via `_solve_absorbing_chain`. The process exits with code 139 (`probe_e2e.py` run under `-X faulthandler`, in a subprocess). **Cause** (`a3_segfault_cause.py`): the true upper lattice is N=102,629 with h=736 units, and the rebuilt one is N=2,297,300,000 with h=16,475,000 units. So a 1,474-state problem was handed to SuperLU as a 16.5-million-state one, **without passing the 1,000,000 joint cap**, because the cap is checked on the true integers and the solve runs on the rebuilt ones. At m=300,000 the rebuilt N is 9,065,300,000. |
+| 3 | `Monitor` accumulates `max(0, S + x − r)` in binary floating point, so it does **not run the integer chain whose ARL₀ was calibrated**. | **Yes.** On the reviewer's sequence at m=105 f=10 (upper lattice N=9, r=8, h=40 units), Monitor signals `upper` at observation 139 with `S = 4.444444444444446`, while the exact statistic is 40 units = h, which is in control (`a4_monitor_float.py`). |
+| 4 | Nothing ties Monitor's Bernoulli branch to the fitted chart. The reviewer's four mutations survive, and one of them survives the whole suite. | Taken from the review; not re-run. It is consistent with #3 going unnoticed. |
+| 5 | `expected_detection_arl` is **meaningless for `direction="upper"`**. The code matches `docs/domain-model.md`, so this is a gap in the spec. | **Yes.** At m=150 f=40 it reads 357,451.6 against an achieved 406.2 (`a6_upper_detection.py`). |
+| 6 | Some refusals lack required ADR-002 keys: the ceiling and joint-cap refusals have no `constraint`, and the search-cap refusal has no `provided`. | **Yes**, by reading `bernoulli_cusum_fitting.py:860-875, 655-672, 987-997`. **One more, not in the review:** the `score_not_binary` refusal has `kind="invalid"` and no `provided`. |
+
+**How big defect 3 is, measured rather than asserted** (`a4`, `a5`). Over 400
+in-control runs per configuration, Monitor signalled earlier than the exact
+chain in these runs:
+
+- m=105 f=10: 2 runs
+- m=300 f=3: **211 runs**. That is every run in which the upper statistic reached h exactly. The upper lattice there is N=54 and r=53, and its float r is `53/54`.
+- m=200 f=20, m=150 f=40, m=1000 f=5, m=120 f=30: 0 runs
+
+No run signalled late. Over 4,000 paired runs at m=300 f=3 `direction="upper"`:
+
+| | mean run length |
+|---|---|
+| reported `achieved_arl` | 375.6 |
+| exact chain | 378.1 ± 9.0 |
+| Monitor's float arithmetic | 370.7 ± 8.7 |
+
+The float path signalled at or before the exact chain in **4,000 of 4,000** runs.
+The bias is small next to the Monte Carlo noise, but it only ever runs one way.
+It is a different chart from the one whose ARL₀ is reported, and at some
+configurations it hits every run that touches the boundary.
+
+**Why the first review and the coordinator's verification missed these.**
+
+- **Defect 1 was treated as built.** Amendment 1's §10a and its "What this
+  deliberately does not decide" section both discuss the floor as if it existed.
+  The implementation's docstring names a function that does not exist, and
+  nobody grepped for it. This project has made the same error before: ADR-013
+  §4's correction and `CLAUDE.md`'s *"a record of decisions, not of what
+  shipped"* both warn about it.
+- **Every check stayed on the existing grid.** Targets were 370 or higher and
+  baselines were small. Nobody compared `achieved_arl` against `requested_arl`
+  at f=0, and no test built a baseline beyond m=10,000, although `Baseline` has
+  no maximum size. Both reviews missed things for the same reason Amendment 1's
+  own defect was missed: they sampled "realistic" inputs instead of the edges of
+  the legal space.
+- **Amendment 1 itself carries three measurements that were wrong at the edges
+  (§1 below).** They are corrected here, not silently. §10b says one-sided fits
+  never exceed about 40,000 states: measured 300,924 at m=300,000 and 742,099
+  at m=3,000,000. §11 item 8 says the refusal bisection takes under 1 s:
+  measured 0.7 s at m=300 and **44.8 s at m=300,000** (`a8_maxt.py`). §10b's
+  line "`target_arl = 370` still fits every baseline" holds only because the
+  floor it would have collided with was never built (Decision 12).
+- **The Monitor check was vacuous.** It asserted only that some signal arrives
+  within 10,000 identical observations. Any chart that accumulates in the right
+  direction passes that. It is the same shape as the vacuity findings recorded
+  under `BIN-121`.
+
+---
+
+### Decision 12 (item 1): the lower arm's floor is exactly `1/p_U`, a property of the chart and not of the lattice. Fit, report and disclose; do not refuse.
+
+**✅ Ratified 2026-09-24.**
+
+**The measurement that decides it** (`a1_floor_structure.py`). The ARL₀ at the
+smallest decision interval the search uses (`h_units = 1`) equals
+**`1/p_U` to relative precision 1e-9 in every row**, from m=100 to m=300,000,
+with f=0 and f>0. Re-quantising the same `r` on lattices 2, 4 and 16 times
+finer **leaves it unchanged**:
+
+```
+m       f   1/p_U       N x1..x16             floor (every N)   next attainable value (N x1 / x4 / x16)
+300     0   130.79      78 .. 1,248           130.79            423.89 / 370.15 / 395.04
+852     0   370.52      219 .. 3,504          370.52            1,202.76 / 1,050.95 / 1,124.88
+1000    0   434.79      257 .. 4,112          434.79            1,411.04 / 1,232.57 / 1,320.92
+1000    5   108.05      64 .. 1,024           108.05            351.78 / 305.84 / 327.33
+5000    0   2,171.97    1,284 .. 20,544       2,171.97          7,040.34 / 6,155.62 / 6,594.30
+300000  0   130,288.84  76,972 .. 1,231,552   130,288.84        422,349.67 / 369,301.30 / 395,680.21
+```
+
+**Why this holds, so that it does not rest on the table alone.** For any
+`h < 1 − r`, one failure lifts the lower statistic from 0 to `1 − r > h` and
+the chart signals. A success leaves it at 0. So the run length is the waiting
+time to the first failure, which is geometric with mean exactly `1/p`. Nothing
+in that argument involves `N`. It holds for any lower-arm Bernoulli CUSUM, on
+any lattice, **and for the continuous-`r` chart too**: no chart that raises its
+statistic only on a failure can have an in-control ARL below the mean waiting
+time for one. **The hypothesis that the floor is an artefact of Decision 7's
+smallest `N` is refuted.**
+
+**It is a gap, not only a floor.** The next attainable value is roughly **2.8
+to 3.3 times** the floor at every baseline measured. That is the first `h` at
+which a single failure no longer signals. Refining `N` moves it by a few
+percent, not by a multiple. A target inside that gap gets the next value up:
+
+- m=1000 f=0 two-sided at 370: the lower arm's per-arm target of 740 lies in
+  (434.8, 1,411.0), and the result is 485.8.
+- m=300 f=0 lower at 370: 423.9.
+
+**Refusing only below the floor, as Decision 3 item 2 prescribes, would
+therefore not deliver `achieved ≈ requested` even when it fired.**
+
+**The interaction with the 1,000,000 joint-state cap is decisive against
+refusal** (`a8_maxt.py`, f=0, two-sided):
+
+```
+m        two-sided target at which the lower arm leaves its floor   max_two_sided_target_arl (1M cap)
+2,000    434.5                                                        1,768
+3,000    651.7                                                        1,112
+5,000    1,086.0                                                      1,085
+10,000   2,171.7                                                      2,171
+100,000  21,715.0                                                     21,714
+300,000  65,144.4                                                     65,143
+```
+
+From about m=5,000 upward, the joint-state cap binds **one unit below** the
+point where the lower arm leaves `h_units = 1`. The reason is that the second
+lower-arm regime needs `h_lower_units ≥ N_lower − r_units ≈ N_lower`, and
+`N_lower` grows linearly with m. So with a floor refusal, each such baseline
+would refuse every two-sided target below the floor, and the cap would refuse
+every target at or above it. **A healthy f=0 baseline of 5,000 or more
+observations could not be fitted two-sided at any `target_arl`.** Two-sided is
+the ratified default, and this is the most common production case: a reliable
+agent with a long clean history.
+
+**Decision (ratified 2026-09-24): replace Decision 3 item 2's refusal with
+fit-and-disclose for the Bernoulli CUSUM.**
+
+1. `fit_bernoulli_cusum` never refuses a `target_arl` for being below what is
+   attainable. The calibration keeps returning the smallest `h` that meets the
+   target. ARL₀ is non-decreasing in `h`, so a one-sided `achieved_arl` is
+   always `≥ requested_arl`, which is the conservative direction: fewer false
+   alarms than the engineer tolerated, never more.
+2. When the lower arm is at its floor, the artefact carries a structured
+   disclosure:
+   ```python
+   FittingAdvisory(
+       kind="lower_arm_signals_on_first_failure",
+       description=...,  # prose, not part of the contract
+       boundary=<exact one-sided lower-arm ARL at h_units = 1>,  # == 1/p_U
+   )
+   ```
+   - **Condition:** `direction` checks the lower arm (`"lower"` or
+     `"two_sided"`) **and** `h_lower_units < N_lower − r_lower_units`, which is
+     an integer test.
+   - **No threshold is invented.** The condition is a structural fact about the
+     constructed chart ("every single failure pages you"), not a judgement about
+     how far `achieved` may stray from `requested`.
+   - `boundary` is the smallest in-control ARL₀ **any** lower-arm Bernoulli
+     CUSUM can have on this baseline. That tells the engineer why the number is
+     what it is, and that no parameter they control changes it.
+3. The remaining general case, a target that falls in a gap above the floor,
+   stays ADR-012 §3's ratified "report, don't chase". `achieved_arl` sits next
+   to `requested_arl`, computed exactly.
+
+**Why refusal is wrong here, although it is right for the continuous CUSUM
+(BIN-117).**
+
+- **BIN-117's refusal has a lever.** Its recovery hint is *"lower
+  `reference_value`"*. Here there is none. The floor is `1/p_U`, which does not
+  depend on `detect_rate_multiple`, on `N` or on `direction`. The only thing
+  that lowers it is a *smaller* baseline, which is perverse.
+- **The refused call and its round-trip produce the same chart.**
+  `fit(target_arl=370)` and `fit(target_arl=434.79...)` at m=1000 f=0 both
+  construct `h_units = 1`, with identical fields apart from `requested_arl`. A
+  refusal whose only recovery rebuilds the chart it refused is ceremony.
+- **The failure BIN-117 guarded against is absent.** There, root-finding
+  bottomed out and the fit *"reported the achieved ARL0 as if it were a
+  successful fit"*. Here the exact `achieved_arl` is always reported beside the
+  request, and the new advisory names the regime.
+- **The governing principle is already ratified twice:** ADR-011's
+  *"informed choice over refusal"* and ADR-013 §4's rejection of a
+  detection-power floor.
+
+**Options rejected.**
+
+- **(a) Refuse per Decision 3 item 2, with a round-tripping `min_value`.**
+  This is the ratified text. Rejected for four reasons:
+  - it leaves f=0 baselines of 5,000 or more observations unfittable two-sided
+    at every target (table above);
+  - it refuses `target_arl = 370` for every f=0 baseline with m ≥ 851 one-sided
+    (the smallest m whose `1/p_U` reaches 370 is 851) and m ≥ 1,703 two-sided;
+  - its recovery reproduces an identical chart;
+  - it leaves the gap above the floor unguarded anyway.
+
+  For the product owner's comparison, this is its exact shape if ratified
+  instead:
+  - condition: `target_arl < floor`;
+  - floor: for one-sided `"lower"`, `1/p_U` via the solver at `h_units = 1`;
+    for `"two_sided"`, the value at which the equal split leaves the floor,
+    which is `floor_lower / 2` with a per-arm target of `2T`; for `"upper"`,
+    `1/(1 − p_U)` ≈ 1, which never binds in practice;
+  - context: `parameter`, `constraint`, `kind`, `provided`, `min_value`, and
+    `min_inclusive=True`;
+  - round-trip: passing `min_value` back is accepted, because the calibration
+    accepts `ARL(1) ≥ target` at equality.
+- **(b) Choose `N` so the target becomes attainable.** Rejected as impossible:
+  the floor and the gap do not depend on `N` (measured above, and proved).
+- **(d) Two-sided: keep the equal-split lower arm, then calibrate the upper arm
+  against the exact joint solve so the two-sided ARL₀ meets `T`.**
+  `a9_twosided_options.py` measured it:
+
+  | baseline | option (d) | shipped equal split |
+  |---|---|---|
+  | m=5000 f=0 | 370.4, 812 states | 552.2 |
+  | m=100,000 f=0 | 370.4, 744 states | 727.8 |
+  | m=1000 f=0 | 371.0, 85,838 states | 485.8 |
+
+  It is attractive, and it removes most of the two-sided gap. *As first
+  drafted*, this amendment held it back for two reasons:
+  - it moves most of the false-alarm budget onto the upper (improvement) arm.
+    At m=5000 f=0 the lower arm contributes about 1/2,172 per observation of
+    the 1/370 total;
+  - that arm's GICP coverage is Open Question 23, and the measurement below
+    points the wrong way for it.
+
+  It is listed as a product-owner option. It would also need a monotonicity
+  proof for the joint ARL in `h_up` before it could gate behaviour (ADR-013
+  §7).
+
+  > **Superseded 2026-09-24 by Decision 19.4.** Once the upper arm is designed
+  > at `p_L`, both objections fall away. The monotonicity proof is supplied
+  > there, by coupling, and option (d) is re-measured and adopted as
+  > calibration D.
+- **(e) Randomised signalling to hit the target exactly.** Rejected. ADR-012's
+  amendment §4 already foreclosed it on auditability.
+- **The literal "joint floor at `(1, 1)`" for two-sided.** Rejected as
+  meaningless. It is about 2.0 at every baseline measured, because the upper
+  arm then signals on the first success, so it never binds and discloses
+  nothing (`a9`).
+
+**Measured context for Open Question 23, not a decision.** At the observed rate
+`p̂ < p_U`, the upper arm alarms **more** often than its reported `achieved_arl`
+(`a10_upper_at_phat.py`, `direction="upper"`, T=370):
+
+| baseline | at `p_U` | at `p̂` |
+|---|---|---|
+| m=1000 f=0 | 371.1 | 268.0 |
+| m=300 f=3 | 375.6 | 172.3 |
+| m=200 f=20 | 385.6 | 148.8 |
+| m=100 f=10 | 391.5 | 108.9 |
+
+That is the direction Decision 6d feared: designing at an *upper* bound is
+anti-conservative for the arm that detects a *decrease*. It does not change any
+decision here. It is why this amendment first held option (d) back, and it
+raised Open Question 23 from "unverified" to "**measured evidence of a coverage
+problem**". *Resolution:* the product owner ruled to fix it inside BIN-133. It is
+settled by Decision 19, and option (d) was adopted there as calibration D.
+
+---
+
+### Decision 13 (item 2): integer lattice parameters end to end; no size bound on the baseline; a one-sided state cap; a raising postcondition
+
+**✅ Ratified 2026-09-24.**
+
+**What the measurements show** (`a2_integer_fit.py`, `a2_large.out`). I re-ran
+`fit_bernoulli_cusum`'s own design and calibration helpers, but computed every
+reported ARL straight from the integers `(N, r_units, h_units)` with nothing
+rebuilt.
+
+- **Agreement with the float path.** Wherever the float path works (m ≤ 150,000),
+  the two agree to every printed digit: m=1,000, 10,000 and 100,000 at T=370,
+  all three directions (`--with-float`).
+- **Correct results where the float path fails.** At m=200,000 upper T=370 the
+  integer path gives 370.79, where the float path gave the sentinel `1e15`. At
+  m=300,000 it gives 370.53, where the float path gave 369.52.
+- **Two-sided at T=370 is small at every baseline size.** It needs only
+  1,474–1,480 joint states from m=200,000 to m=3,000,000, and the solve takes
+  under 1 ms.
+- **Without the rebuild there is no segfault to reach.** The segfault needed
+  the rebuilt 16.5-million-state chain.
+
+f=0 figures at the extremes of the legal space:
+
+```
+m          N_lower    N_upper     scan    one-sided T=1e6: worst arm states / calibrate time
+10,000     2,566      5,132       0.001s  39,638 / 0.7s
+100,000    25,658     51,315      0.012s  168,337 / 3.3s
+300,000    76,972     153,943     0.037s  300,924 / 6.2s
+1,000,000  256,571    513,141     0.13s   518,866 / 8.7s
+3,000,000  769,710    1,539,420   0.37s   742,099 / 10.3s
+```
+
+With failures present (m=300,000, f ∈ {1, 30, 3000}) everything is smaller.
+Nothing fails numerically anywhere up to m=3,000,000.
+
+For peak memory of a single one-sided solve (`a7_onesided_rss.py`, a fresh
+process for each row):
+
+| states | time | peak RSS |
+|---|---|---|
+| 100,000 | 0.07 s | 182 MB |
+| 500,000 | 0.34 s | 507 MB |
+| 1,000,000 | 0.70 s | 958 MB |
+| 2,000,000 | 1.61 s | 2,012 MB |
+
+This matches Decision 10b's ≈950 bytes per state.
+
+**Decisions.**
+
+1. **The integers are the chart.** `fit_bernoulli_cusum` passes
+   `(N, r_units, h_units)` for each arm straight into the one-sided and joint
+   solvers.
+   - `_lattice_denominator`, `_DENOMINATOR_RECONSTRUCTION_CAP` and every
+     `limit_denominator` call are **removed from production code**.
+   - The float-accepting wrappers survive only as test helpers. The
+     published-value oracles (`sand2016-7395c`) state `r` and `h` as exact
+     decimals, so the test builds its integers from exact `Fraction`s.
+   - This is what Amendment 1's Decision 8 already said ("with per-arm integer
+     parameters, reconstruction is unnecessary"). It was never carried out.
+2. **No bound on baseline size and no bound on `N`.** None is needed. Every
+   legal f=0 configuration up to m=3,000,000 fits one-sided at
+   `MAX_MEANINGFUL_ARL` and two-sided at 370, and the adaptive-`N` scan costs
+   0.37 s at its largest. A bound on `m` would refuse the healthiest agents
+   precisely because they are healthy. Integer width is not a concern, since
+   Python `int` is unbounded and N stays under 2×10⁶ in this range.
+3. **The one-sided chain gets the same memory budget as the joint chain.**
+   - `_MAX_DECISION_INTERVAL_UNITS` becomes `_MAX_JOINT_STATES − 1`
+     (999,999), so no single solve, one-sided or joint, exceeds 1,000,000
+     transient states (about 958 MB).
+   - Today's value of 2,000,000 allows a one-sided solve peaking at about
+     2 GB. That contradicts the reasoning behind the ratified 1M joint cap
+     (Decision 10b: *"a fit peaking near 1.9 GB... can kill a small
+     container"*).
+   - **Nothing measured is refused by this change.** The worst case measured
+     is 742,099 states at m=3,000,000 T=10⁶. Past that, the existing
+     search-cap refusal fires with its round-tripping `max_attainable_arl`.
+4. **Postcondition, raising.** Every ARL copied onto the artefact
+   (`achieved_arl`, `expected_detection_arl`) must satisfy all of:
+   - it is finite;
+   - it is ≥ 1.0;
+   - it is **not** `_ILL_CONDITIONED_ARL_SENTINEL`;
+   - the solved chain's state count equals `h_units + 1` (one-sided) or
+     `(h_lower_units + 1) × (h_upper_units + 1)` (joint).
+
+   A violation raises. **The sentinel may steer the calibration search and
+   must never be copied into a field.**
+   - The error is `DegenerateBaselineError` with
+     `context["reason"] = "arl_not_computable"`, plus `chart_type` and
+     `figure` (`"achieved_arl"` or `"expected_detection_arl"`). This follows
+     the one existing precedent for "these inputs are legal but the resulting
+     number is not representable": `spc_numerics.require_representable_limits`,
+     BIN-142.
+   - After decisions 1–3 no measured input reaches this path, so it is a
+     guard, not an expected outcome. This **reverses the "never raises
+     `DegenerateBaselineError`" line** in `fit_bernoulli_cusum`'s docstring,
+     for this one reason only. The alternative, a bare `RuntimeError`, would
+     leak a non-`CaliperError` through a public entry point, the defect class
+     BIN-121 exists to prevent.
+5. **The refusal-path bisection must be cheap.**
+   - `_find_max_two_sided_target_arl` recalibrates both arms from scratch
+     about 20 times. That took 44.8 s at m=300,000 and 18.8 s at m=100,000
+     (`a8`).
+   - The value is correct: every row agrees with the floor analysis to one
+     unit.
+   - The cost is not acceptable for a refusal. It must reuse per-arm results,
+     for example by bisecting on per-arm `h_units` and evaluating each arm's
+     ARL once for each `h`, or by caching `achieved_at(h)` across iterations.
+   - The verification bar below sets the budget.
+
+**Options rejected.**
+
+- **Raise the reconstruction cap** (to 10⁷, say). Rejected. It moves the cliff
+  rather than removing it, and the reconstruction can mis-identify a
+  denominator at any cap (`a3`: the rebuilt N was a multiple, and neither the
+  true N nor a divisor of it).
+- **Bound the baseline size** (for example m ≤ 150,000). Rejected: nothing
+  above it fails once the integers are carried through, and refusing a
+  larger, cleaner baseline inverts the product's incentive.
+- **Keep the sentinel on the reporting path and document it.** Rejected. That
+  is BIN-140's defect class, and the module docstring's promise ("never
+  reported back") was the only guard, which is how it shipped.
+
+---
+
+### Decision 14 (item 3): the artefact carries each arm's integer lattice, and `Monitor` steps it in integers
+
+**✅ Ratified 2026-09-24.**
+
+**Decision.**
+
+1. **A new frozen value object, one for each arm:**
+
+   ```python
+   class BernoulliArmLattice(BaseModel):   # ConfigDict(frozen=True)
+       denominator: int               # N  >= 2
+       reference_units: int           # r_units, 0 < r_units < N
+       decision_interval_units: int   # h_units, 1 <= h_units <= _MAX_DECISION_INTERVAL_UNITS
+
+       @property
+       def reference_value(self) -> float: return self.reference_units / self.denominator
+       @property
+       def decision_interval(self) -> float: return self.decision_interval_units / self.denominator
+   ```
+
+   - Validators enforce each bound in the comments, and reject `bool` and any
+     non-exact `int`.
+   - `repr` shows the three integers. A `Fraction`-style "r=8/9, h=40/9" is
+     also fine; the choice is the implementer's.
+   - `__bool__` raises, as it does on every other domain type (BIN-110).
+2. **`FittedBernoulliCUSUM` gains `lattice_lower: BernoulliArmLattice` and
+   `lattice_upper: BernoulliArmLattice`.** These amend §6b's field table. They
+   are **the stored, authoritative definition of the chart.**
+3. **The four public float fields stay, and so does their meaning, but they
+   become derived.** `reference_value_lower`, `decision_interval_lower`,
+   `reference_value_upper` and `decision_interval_upper` are read-only computed
+   properties that delegate to the lattices (Pydantic `@computed_field`, so
+   they still appear in `repr`, `model_dump` and `audit_summary()`). **There is
+   one source of truth, and two independently stored copies can never
+   disagree.** Engineers read exactly what they read today.
+4. **`Monitor` accumulates in integer units.** The per-arm state is an `int`.
+   - On a failure: `s_lo += N_lo − r_lo`; `s_up = max(0, s_up − r_up)`.
+   - On a success: `s_lo = max(0, s_lo − r_lo)`; `s_up += N_up − r_up`.
+   - It signals on `s_lo > h_lo_units` or `s_up > h_up_units`, strictly
+     (ADR-009 §5 / BIN-112).
+   - This is exactly the transition structure the solver inverts, so the
+     reported `achieved_arl` belongs to the chart that `Monitor` runs.
+5. **`Monitor` re-validates the lattices at use** (exact `int`, the bounds
+   above).
+   - The artefact is caller-supplied, and `model_copy(update=...)` and
+     `model_construct()` skip validation.
+   - The same reasoning, and the same placement, as `_check_bernoulli_cusum`'s
+     existing `require_exact_str` on `direction` (BIN-143).
+   - A violation raises `InvalidParameterError` with
+     `parameter="artefact"`, a `constraint`, `kind="invalid"`, `provided`, and
+     `field` naming the offending attribute.
+
+**Why public fields, not private attributes.** A fitted artefact is the thing
+an engineer persists: fit once, then monitor in another process. With private
+attributes, `model_dump()` → `model_validate()` would drop the only exact
+description of the chart. The rebuilt artefact could then not drive `Monitor`
+exactly, or it would silently fall back to floats, which is defect 3 again.
+**What goes in comes out:** the artefact serialises to the chart that was
+fitted, and nothing is lost.
+
+**Why nested, not six flat fields.** Six more flat fields on an 18-field type
+bury the fields engineers actually read, which runs against "export what
+engineers need". One named object for each arm says what it is: *"the exact
+lattice of the lower arm"*. It groups three numbers that are meaningless apart,
+and the class can enforce `0 < r < N` itself. `BernoulliArmLattice` is exported
+from `drift_caliper.baseline`, because it appears in a public field's type, but
+**not** from the top-level `drift_caliper` namespace. Engineers read it; they do
+not construct it.
+
+**Options rejected.**
+
+- **Six flat integer fields beside the four floats.** Rejected: it creates two
+  stored records of the same number (this project's recurring failure), and it
+  adds namespace noise.
+- **`PrivateAttr` integers.** Rejected: they are lost on serialisation (above),
+  and they are invisible to `repr` and to auditing.
+- **`fractions.Fraction` accumulators in `Monitor`, rebuilt from the floats.**
+  Rejected: the rebuild uses `limit_denominator` and inherits defect 2's
+  cliff. The reviewer made the same point.
+- **Keep float accumulation with an epsilon at the boundary.** Rejected: it is
+  an invented constant, and it still leaves the running chart different from
+  the solved one.
+
+**Cost.** §6b's field table changes. `docs/domain-model.md` needs the new value
+object (domain-modeller's step, not done here). `audit_summary()` gains two
+lines. Pre-release, so no consumer migration is needed.
+
+---
+
+### Decision 15 (item 4): `expected_detection_arl` means *"at the shift this chart is tuned to detect"*, so the upper-only chart uses the improvement
+
+**✅ Ratified 2026-09-24.**
+
+**The defect** (`a6_upper_detection.py`, T=370, M=2). For `direction="upper"`,
+the shipped code evaluates an improvement-only chart at a **degradation**
+(`p̂ × M`), a shift it is built never to signal on. The resulting figure means
+nothing:
+
+```
+m     f    achieved   shipped (p̂·M)   ratified (p̂/M)   f=0 fallback (p_U/M)*
+150   40   406.2      357,451.6        32.8             39.6
+200   20   385.6      6,478.7          61.3             77.4
+105   10   392.5      2,209.6          52.5             73.0
+300   3    375.6      322.4            133.3            182.8
+1000  5    372.3      401.8            198.4            238.9
+1000  0    371.1      530.6            (undefined)      314.1
+100   30   406.9      173,301.6        27.0             34.5
+```
+
+\* The f = 0 column is historical. Decision 19 refuses `"upper"` at f = 0, so
+this fallback is withdrawn.
+
+**Decision.** `expected_detection_arl` is the exact ARL₁ of the constructed
+chart, evaluated at **the shift that the checked arm(s) are designed for**. It
+remains unconditional and first-class (Decision 4).
+
+| `direction` | evaluated at failure rate | f = 0 fallback |
+|---|---|---|
+| `"lower"` | `p̂ × M` (unchanged) | `p_U × M` (unchanged) |
+| `"two_sided"` | `p̂ × M` via the joint chain (unchanged; a doubling is the headline question for the default chart) | `p_U × M` (unchanged) |
+| `"upper"` | **`p̂ / M`**, the mirror of ADR-013 §4 and the upper arm's own design direction (ADR-012 amendment §2) | **`p_U / M`**, mirroring ADR-013 §4's fallback: at f=0, "an improvement from zero" is undefined, as "a rise from zero" is for the lower arm |
+
+**Why this and not the alternatives.**
+
+- ADR-013 §4 defines the figure as answering *"how fast will this plausibly
+  catch the degradation it is tuned to detect"*. For an upper-only chart the
+  tuned shift is an improvement, so evaluating it anywhere else answers a
+  question the chart was built not to answer.
+- **`None` for upper.** Rejected. It would make the field conditional, which
+  Decision 4 rejected, and it would force `float | None` on every consumer
+  branch for the default direction too.
+- **Keep the degradation for every direction.** Rejected: that is the defect.
+- **Report both figures for two-sided.** Plausible, but it adds a field no
+  scenario asks for. Deferred, not rejected.
+- **`p̂ / M` exactly as defined.** It uses the same "`p̂` for the expectation,
+  `p_U` only when `p̂` is degenerate" rule as ADR-013 §4, and needs no new
+  machinery.
+
+**The feature file does not change.** Its scenarios assert that the detection
+figure is reported, not what it is evaluated at. The glossary entry
+(`docs/domain-model.md` line ~1000) and the field row (line ~512) need a
+direction-aware definition. That is domain-modeller's step.
+
+---
+
+### Decision 16 (item 5): two-sided fits never surface the per-arm `max_attainable_arl`; a per-arm search-cap hit is reported as the joint-state refusal
+
+**✅ Ratified 2026-09-24.**
+
+**Reachability, measured, not assumed.** Under today's cap of 2,000,000 units
+no two-sided configuration measured reaches the per-arm search cap. The
+largest per-arm `h` is 1,211,962 units, at m=3,000,000 f=0 T=10⁶
+(`a2_large.out`). **Under Decision 13's cap of 999,999 units that same
+configuration does reach it.** The search-cap refusal would then fire before
+the joint-cap check, reporting a per-arm figure that does not round-trip as a
+two-sided `target_arl` (the per-arm target is `2T`). So the defect becomes
+reachable the moment Decision 13 lands, and it is decided here rather than
+left latent.
+
+**Decision.** In `"two_sided"` mode, a per-arm search-cap hit is caught and
+turned into the joint-state refusal (`reason = "joint_state_count_exceeded"`,
+with `max_two_sided_target_arl`).
+
+**Proof that this is correct, not merely convenient.** If either arm's
+`h_units` exceeds 999,999, then
+`(h_lower_units + 1)(h_upper_units + 1) ≥ 1,000,001 > _MAX_JOINT_STATES`. So
+the configuration is over the joint cap whatever the other arm is.
+`_find_max_two_sided_target_arl` already treats a search-cap hit inside its
+bisection as "over the cap", so its reported value round-trips unchanged. In
+`"lower"`/`"upper"` mode, `max_attainable_arl` is a one-sided figure and
+round-trips as a one-sided target, as it does now.
+
+**Rejected: halve `max_attainable_arl` for two-sided.** Half the per-arm
+maximum is not the two-sided maximum, because the joint ARL is not the
+harmonic combination (§6c). The value would not round-trip.
+
+---
+
+### Decision 17 (item 6): the complete `context` for every Bernoulli refusal, in one table
+
+**✅ Ratified 2026-09-24.**
+
+**ADR-002, as it applies here.**
+
+- §4's table requires `parameter`, `constraint` and `kind` on every
+  `invalid_parameter`.
+- §3 requires `provided` whenever `kind == "invalid"`.
+- BIN-134 adds `min_value`/`max_value` with `min_inclusive`/`max_inclusive`
+  wherever a numeric range bound is reported. A reported bound must
+  round-trip, which is BIN-122's rule.
+- `invalid_observation` requires `reason` and `missing_fields`;
+  `insufficient_baseline` requires `have` and `need`; `degenerate_baseline`
+  requires `reason`.
+
+The shipped code missed three of these and this amendment found a fourth. The
+rows below are **the whole contract**. Every row is an emission site, and every
+key listed is required. "New" marks a row this amendment adds or changes.
+
+**`fit_bernoulli_cusum`**
+
+| # | condition | type | required `context` |
+|---|---|---|---|
+| F1 | `baseline` is not a `Baseline` | `InvalidParameterError` | `parameter="baseline"`, `constraint`, `kind="invalid"`, `provided` (existing `require_type`) |
+| F2 | a score is not exactly 0.0/1.0 | `InvalidParameterError` | `parameter="baseline"`, `constraint`, `kind="invalid"`, **`provided`** (new: the `Baseline` passed, the same meaning `require_type` gives this parameter in F1), `reason="score_not_binary"`, `invalid_score`, `position` |
+| F3 | `target_arl` omitted | `InvalidParameterError` | `parameter="target_arl"`, `constraint`, `kind="missing"` (no `provided`) |
+| F4 | `target_arl` not a real number, or a `bool` | `InvalidParameterError` | `parameter`, `constraint`, `kind="invalid"`, `provided` (existing `require_real_number`) |
+| F5 | **new, merged:** `target_arl` non-finite, `< 1.0` or `> MAX_MEANINGFUL_ARL` | `InvalidParameterError` | `parameter="target_arl"`, `constraint` (e.g. `"must be a finite float in [1.0, 1000000.0]"`), `kind="invalid"`, `provided`, `min_value=1.0`, `max_value=MAX_MEANINGFUL_ARL`, `min_inclusive=True`, `max_inclusive=True`. Replaces today's two separate raises, one of which had no `constraint`. This is the key set `parameter_guards.classify_target_arl` already emits, so it should come from a shared, bounds-parameterised helper and not be hand-rolled (the reviewer's point: hand-rolling is how `constraint` was lost). |
+| F6 | `detect_rate_multiple` not a real number | `InvalidParameterError` | `parameter`, `constraint`, `kind="invalid"`, `provided` |
+| F7 | `detect_rate_multiple` non-finite or ≤ 0 | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `min_value=0.0`, `min_inclusive=False` (existing) |
+| F8 | `direction` not recognised, or not an exact `str` | `InvalidParameterError` | `parameter="direction"`, `constraint`, `kind="invalid"`, `provided` (existing `_validate_direction`/`require_exact_str`) |
+| F9 | fewer than 100 observations | `InsufficientBaselineError` | `have`, `need` |
+| F10 | every judgement failed | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `reason="all_baseline_judgements_failed"`; **no** `max_detect_rate_multiple` |
+| F11 | `p_U × M ≥ 1` | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `max_detect_rate_multiple` (round-trips; key name ratified, unchanged) |
+| F12 | one-sided search reaches `_MAX_DECISION_INTERVAL_UNITS` (`"lower"`/`"upper"` only, Decision 16) | `InvalidParameterError` | `parameter="target_arl"`, `constraint`, `kind="invalid"`, **`provided`** (new: the caller's `target_arl`, not the per-arm figure), `max_attainable_arl` (round-trips as a one-sided target), `direction` |
+| F13 | two-sided joint states over `_MAX_JOINT_STATES`, **or** a per-arm search-cap hit in two-sided mode (Decision 16) | `InvalidParameterError` | `parameter="target_arl"`, **`constraint`** (new: e.g. `"the two-sided joint state count must not exceed max_joint_states"`), `kind="invalid"`, `provided`, `reason="joint_state_count_exceeded"`, `joint_state_count`, `max_joint_states`, `max_two_sided_target_arl` (round-trips). When a per-arm hit triggered it, `joint_state_count` is the lower bound `(h_lo+1)(h_up+1)` at the capped arm, still over the cap. |
+| F14 | **new:** a reported ARL fails its postcondition (Decision 13.4) | `DegenerateBaselineError` | `reason="arl_not_computable"`, `chart_type="bernoulli_cusum"`, `figure` (`"achieved_arl"` or `"expected_detection_arl"`) |
+
+**Not a refusal: the disclosure (Decision 12).** It is
+`FittingAdvisory(kind="lower_arm_signals_on_first_failure", description, boundary)`,
+carried on `advisories`, with `boundary` equal to the exact one-sided lower-arm
+ARL₀ at `h_units = 1`.
+
+**`Monitor`**
+
+| # | condition | type | required `context` |
+|---|---|---|---|
+| M1 | Phase II score not exactly 0.0/1.0 | `InvalidObservationError` | `reason="score_not_binary"`, `missing_fields=()` (existing, Decision 2) |
+| M2 | **new:** a lattice on a caller-supplied `FittedBernoulliCUSUM` has an integer that is not exact, or is out of bounds (Decision 14.5) | `InvalidParameterError` | `parameter="artefact"`, `constraint`, `kind="invalid"`, `provided`, `field` (e.g. `"lattice_upper.reference_units"`) |
+| M3 | artefact `direction` not an exact `str` | `InvalidParameterError` | existing `require_exact_str` keys (BIN-143) |
+
+**Enforcement, so this cannot be missed a third time.**
+
+- Every row above is registered in `tests/support/exception_contract_registry.py`.
+- One parametrised test drives each site through the public API and asserts
+  the **full** key set in the table: presence, and for bounds, the
+  round-trip.
+- A site added later without a registry row must fail the existing
+  exception-contract audit. That is the BIN-121 mechanism, extended to this
+  module.
+
+---
+
+### Decision 18: the verification bar for Amendment 2
+
+**✅ Ratified 2026-09-24.**
+
+This is in addition to Decision 11, which stands, except where corrected in §0.
+**Every item must exist before Amendment 2 counts as implemented.** Items
+marked 🚨 are the ones that would each have caught a shipped defect.
+
+1. 🚨 **Differential test: `Monitor` against an independent exact stepper.**
+   - The stepper is written in the test itself, is ≤ 20 lines, and imports
+     nothing from `monitor.py` or `bernoulli_cusum_fitting.py`.
+   - It reads only `artefact.lattice_lower`/`lattice_upper` and applies the
+     integer transitions from Decision 14.4.
+   - Hypothesis generates the pass/fail sequences. At **every** step, for all
+     three `direction` values, `Monitor.record(...).is_in_control` and
+     `.direction` must equal the stepper's result.
+   - Required configurations:
+     - m=105 f=10 and m=300 f=3, where float drift was measured;
+     - one f=0 baseline with m ≥ 1,000;
+     - one baseline with p̂ ≥ 0.25.
+   - It must include **constructed sequences that land each arm's statistic
+     exactly on `h_units`**, which is in control, followed by the one step that
+     exceeds it, which signals.
+   - The reviewer's sequence at m=105 f=10 is pinned as a named regression. It
+     must stay in control through observation 139.
+   - This kills the reviewer's mutations M3a–M3d.
+2. **Simulated ARL₀ through `Monitor`**, in
+   `test_bernoulli_cusum_arl_simulated_properties.py`, following the three
+   continuous charts' convention exactly:
+   - `_N_RUNS = 1_500`, `_CONFIDENCE_Z = 4.0`, `derived_relative_tolerance`;
+   - no formula imported from production;
+   - in-control streams drawn at `p_U`, the rate `achieved_arl` is defined at.
+
+   Cover `"two_sided"` at m=300 f=3, `"upper"` at m=300 f=3, `"lower"` at
+   m=200 f=20, and one floored lower arm (m=1,000 f=0 `"lower"`, where
+   `achieved_arl = 1/p_U`).
+
+   ⚠️ **This test alone would not have caught defect 3.** At m=300 f=3
+   `"upper"` the float bias was 375.6 against 370.7 ± 8.7, inside any honest
+   tolerance. Item 1 is the precise check; this one guards the calibration
+   end to end.
+3. 🚨 **Large baselines, every direction.**
+   - Scope: m ∈ {300,000; 1,000,000}, f=0, with T ∈ {370, `MAX_MEANINGFUL_ARL`}.
+     Build each baseline with one shared `ScoringResult`, which takes about
+     0.05 s at 200,000.
+   - Every fit must either succeed or raise F12/F13 with a round-tripping
+     bound.
+   - Every reported ARL must be finite, ≥ 1, and not the sentinel.
+   - Every reported ARL must equal an **independent** integer reference solver
+     in the test to rel 1e-9. The existing
+     `TestJointTwoSidedBernoulliARL0MatchesTheReferenceSolver` solver,
+     extended, qualifies.
+   - Expected (from `a2_large.out`), each case must match:
+     - m=300,000: upper at 370 gives 370.5273;
+     - m=300,000: two-sided at 370 gives 735.9166, with 1,476 joint states;
+     - m=300,000: lower at 10⁶ gives 1,000,020.0999;
+     - m=300,000: two-sided at 10⁶ refuses with F13.
+   - m=3,000,000 at T=370, all directions, is marked `slow`.
+4. 🚨 **Decision 8 enforced by value, not by a timeout.** At a baseline whose
+   per-arm denominators are coprime (the test asserts `gcd(N_lo, N_up) == 1`
+   before anything else), spy on the solver's `n_states`, and assert it equals
+   `(h_lower_units + 1) × (h_upper_units + 1)`. This kills mutation M2, which
+   today is caught only by pytest-timeout.
+5. 🚨 **Decision 12, the floor and the disclosure.**
+   - For m ∈ {852, 1,000, 5,000, 300,000}, f=0, `"lower"` at T=370, and for
+     m=300 f=3 `"lower"` at T=50: `achieved_arl == 1/p_U` to rel 1e-9. The
+     advisory `lower_arm_signals_on_first_failure` is present, with
+     `boundary == achieved_arl`.
+   - For m=5,000 f=0 `"two_sided"` at T=370: the fit **succeeds** (552.2) and
+     carries the advisory.
+   - The advisory is **absent** when the arm is not floored (m=300 f=0
+     `"lower"` at T=370, where `h_units = 77`), and for `"upper"`.
+   - Property: a one-sided `achieved_arl ≥ requested_arl` for every legal
+     input, with Hypothesis drawing from the full legal space (f=0 at large m
+     included) as Decision 11 item 1 requires.
+6. **The postcondition raises (Decision 13.4).** Monkeypatch the solver to
+   return the sentinel, `NaN`, `0.5`, and a vector of the wrong length. Each
+   must raise F14 for `achieved_arl` and for `expected_detection_arl`, and
+   none may produce an artefact.
+7. **No float reconstruction in production.** A structural test (AST or grep)
+   asserts that `bernoulli_cusum_fitting.py` contains no `limit_denominator`
+   and no `Fraction` reconstruction.
+8. **Decision 15.** `"upper"`'s `expected_detection_arl` equals the reference
+   solver at failure rate `p̂/M`: 32.8 at m=150 f=40, and 61.3 at m=200 f=20.
+   At f=0 it uses `p_U/M`: 314.1 at m=1,000. `"lower"` and `"two_sided"` are
+   unchanged.
+9. **Decision 16.** Monkeypatch `_MAX_DECISION_INTERVAL_UNITS` small enough
+   that one arm hits it in `"two_sided"`. The fit must raise F13, not F12, and
+   `max_two_sided_target_arl` must round-trip.
+10. **Decision 17.** The registry-driven test asserts every row's full key set,
+    as described there.
+11. **Serialisation round-trip.**
+    `FittedBernoulliCUSUM.model_validate(chart.model_dump())` equals `chart`,
+    and drives `Monitor` identically under item 1's stepper. Each float field
+    equals `units / denominator` exactly.
+12. **Refusal-path budget.** The F13 refusal at m=300,000 f=0 `"two_sided"` at
+    T=`MAX_MEANINGFUL_ARL` completes in **≤ 5 s locally**; today it takes
+    44.8 s. This is an engineering budget, not a statistical constant.
+    Decision 11 item 8's "under 1 second" is withdrawn as unmeasured. Tests
+    must not drive a zero-drift chain to a real cap: monkeypatch the cap, as
+    `TestCapBisectionPath` already does. That is the reviewer's
+    Recommendation 1, and today the suite spends 101 s in one test.
+
+---
+
+### Decision 19: each arm is designed on the side that is conservative for the shift it detects. The upper arm uses the Clopper–Pearson lower bound `p_L`, and the two-sided budget is calibrated on an exact guaranteed bound.
+
+✅ **ACCEPTED — ratified by the product owner 2026-09-24.** The direction (Q7,
+fix now) and the numbers (Q8: `p_L` at α = 0.10, `B` as the two-sided
+`achieved_arl`, calibration D), on the evidence of 19.3 and 19.4. Q9 is 19.6, and
+Q10 is 19.2's f = 0 shape. **Open Question 23 is settled by this decision.**
+
+#### 19.0 The defect: the shipped upper arm is systematically anti-conservative
+
+The criterion is ADR-013 §3's. A baseline is counted if its **true** in-control
+ARL₀, evaluated at the true `p₀`, falls below `T/2`. The ratified appetite is at
+most 5%. `T = 370`, `M = 2.0`. Figures are exact, by enumeration over
+`f ~ Binomial(m, p₀)` (`g1b_upper_at_pu.py`), for the upper arm **as shipped,
+designed at `p_U`**:
+
+```
+p0      m=100            m=300            m=1000
+        <T/2    <T       <T/2    <T       <T/2    <T
+0.002   100.0%  100.0%   45.2%   100.0%   1.7%    100.0%
+0.01    100.0%  100.0%   57.8%   95.1%    8.2%    93.4%
+0.02    86.7%   100.0%   55.6%   94.0%    11.0%   93.6%
+0.05    74.2%   96.3%    53.7%   93.5%    13.9%   89.4%
+0.10    79.4%   94.2%    52.8%   93.0%    13.5%   90.8%
+0.30    62.3%   88.6%    32.7%   85.8%    3.0%    80.6%
+```
+
+This is not marginal: the appetite is breached by up to 20 times. The cause is
+the one Decision 6d suspected. The upper arm signals on *successes*, so its
+ARL₀ **falls** as the true failure rate falls. Designing it at an *upper* bound
+on the failure rate therefore calibrates it at the rate where it alarms least,
+and every true rate below that makes it alarm more.
+
+#### 19.1 The design
+
+| arm | detects | designed at | `r` from | calibrated at |
+|---|---|---|---|---|
+| lower | a rise in failure rate | `p_U` = Clopper–Pearson **upper** bound, α = 0.10 (unchanged, ADR-013) | `(p_U, M·p_U)` | `p_U` |
+| upper | a fall in failure rate | **`p_L` = Clopper–Pearson lower bound, α = 0.10**, the `α` quantile of `Beta(f, m − f + 1)` | `(1 − p_L, 1 − p_L/M)` on the success indicator | `1 − p_L` |
+
+`α` is ADR-013's ratified value and is not re-derived here. `p_L` has a closed
+form at f=1: `1 − (1 − α)^(1/m)`.
+
+**What Heidema et al. (2026) covers, and what it does not.** The paper's GICP
+proof covers detecting a parameter **increase**, using an upper confidence bound.
+Nothing in this decision cites it for decreases. **The mirrored argument is
+derived here instead**, and then measured (19.3).
+
+**Derivation: GICP for the upper arm, by coupling.**
+
+1. Drive every chart from one stream of uniforms `U_t`. At true rate `p`, a
+   failure is `U_t < p`, and a success is `U_t ≥ p`.
+2. The upper statistic's recursion `S ← max(0, S + (Y − r))` is non-decreasing
+   in each increment `Y`.
+3. For `p' ≤ p`, the success indicators satisfy `1[U ≥ p'] ≥ 1[U ≥ p]` on every
+   path. So the statistic at `p'` is pathwise at least the statistic at `p`, and
+   its stopping time is pathwise at most. **ARL₀ of the upper arm is
+   non-decreasing in the true failure rate.**
+4. Hence on the event `p_L ≤ p₀`: `ARL₀(p₀) ≥ ARL₀(p_L) = achieved_arl ≥ T`.
+5. The Clopper–Pearson lower bound satisfies `P(p_L ≤ p₀) ≥ 1 − α` (exact
+   binomial coverage).
+6. So `P(true ARL₀ ≥ T) ≥ 1 − α`. This is the same guarantee ADR-013 §1 states
+   for the lower arm, with the sign of the monotonicity reversed.
+
+The same coupling proves the lower arm's case: step 3 with the inequality
+flipped. It also predicts that **a breach of `ARL₀ ≥ T` happens only when `p_L`
+over-covers** (`p_L > p₀`), which 19.3 confirms numerically.
+
+**Alternatives considered for the upper arm.**
+
+- **Keep `p_U` (as shipped).** Rejected. It is measured at up to 100% breach
+  (19.0).
+- **Design at `p̂` (plug-in).** Rejected. It has no guarantee, and at f=0 it is
+  undefined, as `p_L` is. ADR-013 rejected plug-in design for the lower arm on
+  the same evidence (18–32% breach).
+- **One two-sided Clopper–Pearson interval at `α/2` each side.** Rejected. It
+  changes the lower arm's ratified design (a `p_U` at `α = 0.05`), which is a
+  ratified value and outside this decision's scope. Each one-sided arm meets the
+  appetite at α = 0.10 as it is (19.3).
+- **`p_L` at a different α.** Not considered. α is ratified, and the grid passed
+  at 0.10.
+
+#### 19.2 The f = 0 and small-f edges
+
+**f = 0.** `p_L = 0`. The upper arm's in-control success rate would be exactly
+1, and there is no improvement left to detect. The reference-value formula is
+undefined there.
+
+- **`direction="two_sided"` at f = 0:** the fit **builds the lower arm only**,
+  calibrated to the full `T` (not `2T`), since it is the only arm.
+  - The artefact reports **`direction = "lower"`**. That is the chart that
+    actually runs, and Decision 6d's rejected option ("silently only checking
+    the lower arm") is avoided by saying so.
+  - It carries `FittingAdvisory(kind="upper_arm_not_designable", boundary=1.0)`.
+    The boundary is the smallest baseline failure count at which the
+    improvement arm can be designed.
+  - `lattice_upper` is `None` for this artefact. `reference_value_upper` and
+    `decision_interval_upper` are therefore `float | None`, which changes the
+    ratified shape of 6b/14 **only at f = 0**.
+  - Why fit rather than refuse: the ratified default must not refuse the
+    healthiest baselines. Decision 12 established that reasoning for this same
+    population.
+- **`direction="upper"` at f = 0:** **refused.** It is new row F15 in
+  Decision 17. There is no value the engineer can pass instead, so no
+  round-trip key exists. This mirrors F10's all-failed case.
+- **Decision 15's f = 0 fallback (`p_U/M`) is withdrawn.** It is unreachable,
+  because `"upper"` refuses at f = 0 and `"two_sided"` becomes `"lower"`.
+  `expected_detection_arl` for `"upper"` is always at `p̂/M` with `f ≥ 1`.
+
+**f = 1, 2** (`g3_small_f.py`, T=370): the design is valid at every `m` measured.
+
+```
+m        f  p_L        upper N    up  h    achieved  ARL at p̂/M   two-sided (ES) states
+100      1  1.05e-3    1,122      1   312  371.0     760.3        25,162
+1000     1  1.05e-4    11,215     1   362  370.1     398.1        109,089
+10000    2  5.32e-5    22,217     1   366  370.6     373.8        1,452
+300000   1  3.51e-7    3,364,300  1   369  370.0     370.1        1,480
+```
+
+Two facts follow, and both are recorded rather than hidden.
+
+- **Cost is benign.** `up = 1`, so the statistic counts consecutive successes,
+  and `h ≈ T`. `N_upper` reaches 3.4 million at m=300,000, f=1, which takes a
+  0.58 s scan. The integer-exact path of Decision 13 is required here: a float
+  rebuild would fail far earlier.
+- 🚨 **Detection power is essentially nil when `p̂·T ≪ 1`.**
+  - The upper arm's ARL at its own target improvement (`p̂/M`) is about equal to
+    its in-control ARL₀, or **higher**: 398.1 against 370.1 at m=1000, f=1, and
+    760.3 against 371.0 at m=100, f=1.
+  - It fires about every T observations whether or not anything improved. That
+    is a property of the process, not of this design: with fewer than one
+    expected failure per T observations, a halving of the failure rate barely
+    changes the waiting time for a long run of successes.
+  - **No refusal or drop rule is adopted.** Any threshold on "too little power"
+    would be an invented number. ADR-013 §4 already ruled for disclosure over a
+    detection-power floor. The number is disclosed by `expected_detection_arl`
+    for `"upper"`.
+  - For `"two_sided"` there is no improvement-detection figure (Decision 15
+    deferred one). Whether to add one is question 9 below.
+
+#### 19.3 Verification: ADR-013 §3's grid for the upper arm at `p_L`, extended below p₀ = 0.02
+
+**Grid:**
+- `p₀ ∈ {0.002, 0.005, 0.01}`, below the ratified range, as requested; plus
+  ADR-013's `{0.02, 0.03, 0.05, 0.075, 0.10, 0.15, 0.20, 0.30}`;
+- `m ∈ {100, 200, 300, 500, 1000}`;
+- 55 cells, `M = 2.0`, `T = 370`;
+- the lattice is Decision 7's adaptive `N` with ε = 0.25 (the shipped design),
+  not ADR-013's fixed `N = 100`.
+- **`T = 370` is ADR-013's own request:** every §3/§4 measurement there is stated
+  at "request 370".
+
+**Two independent methods, per ADR-013 §7 item 2** (`g1_upper_grid.py`):
+- **A. Exact enumeration** over `f ~ Binomial(m, p₀)` with the production
+  helpers. There is no sampling noise, so this is the exact exceedance
+  probability.
+- **B. 4,000-baseline Monte Carlo** with a from-scratch implementation: its own
+  reference value, lattice scan, calibration and sparse solve. It is judged on
+  the Clopper–Pearson upper 95% bound, as ADR-013 §3 requires.
+- A and B returned **identical** ARLs (relative difference 0.0) on every design
+  compared.
+- f = 0 has no upper arm (19.2), so it cannot false-alarm. Its share is the
+  `P(f=0)` column.
+
+Result for `appetite = P(true ARL₀ < T/2)`, with ratified bar ≤ 5%:
+
+```
+                exact A (%)                              MC B upper-95% bound (%)
+p0      m=100  m=200  m=300  m=500  m=1000     m=100  m=200  m=300  m=500  m=1000
+0.002   0.112  0.006  0.004  0.000  0.000      0.33   0.09   0.09   0.09   0.09
+0.005   0.167  0.056  0.016  0.006  0.000      0.39   0.14   0.09   0.09   0.09
+0.01    0.343  0.101  0.102  0.021  0.001      0.74   0.36   0.36   0.14   0.09
+0.02    0.406  0.253  0.123  0.025  0.002      0.65   0.43   0.33   0.14   0.09
+0.03    1.062  0.310  0.205  0.070  0.004      1.19   0.52   0.39   0.26   0.09
+0.05    1.147  0.582  0.257  0.086  0.006      1.62   0.98   0.52   0.26   0.09
+0.075   1.727  0.444  0.376  0.118  0.007      2.32   0.77   0.74   0.29   0.18
+0.10    1.001  0.535  0.242  0.114  0.008      1.56   1.04   0.49   0.22   0.09
+0.15    1.189  0.529  0.329  0.104  0.007      1.59   0.83   0.65   0.29   0.09
+0.20    1.125  0.410  0.210  0.047  0.003      1.24   0.49   0.46   0.22   0.09
+0.30    0.717  0.261  0.083  0.017  0.000      0.95   0.39   0.22   0.14   0.09
+```
+
+✅ **Passes in every cell.**
+- The worst cell is `(0.075, 100)`: 1.727% exact, 2.32% on the Monte Carlo upper
+  bound. That is 2.7 points of headroom, against the lower arm's own 2.57% in
+  ADR-013 §3.
+- No noise can fake a pass or a breach here. Method A is exact, and method B
+  (4,000 reps) agrees with it cell by cell.
+- **The mechanism check:** `P(true ARL₀ < T)`, the guarantee, is ≤ 9.74% in
+  every cell, under α = 10%. In **44 of 55 cells** it equals `P(p_L > p₀)`, the
+  bound's own over-coverage, to the printed precision. In the other 11 it is
+  *smaller*: (0.30, 100), (0.20 and 0.30 at m = 200, 300 and 1000), and (0.05,
+  0.15, 0.20 and 0.30 at m = 500). Lattice overshoot there turns some
+  over-covering baselines into non-breaches. That is
+  exactly what the coupling proof in 19.1 predicts: a breach needs over-coverage.
+- Full per-cell output, including `P(ARL₀ < T)` and `P(p_L > p₀)`, is in
+  `g1_m{100,200,300,500,1000}.out`.
+
+#### 19.4 Two-sided (Q2): equal split, or reallocate on an exact guaranteed bound
+
+**What a two-sided `achieved_arl` means now.** The two arms have different
+design rates, so no single rate evaluates the pair. **Decision: the two-sided
+`achieved_arl` is `B`, the exact expected run length of the coupled
+three-outcome chain.** Using one uniform per step:
+
+| `U` falls in | lower arm | upper arm |
+|---|---|---|
+| `U < p_L` | failure | failure |
+| `p_L ≤ U < p_U` | failure | success |
+| `U ≥ p_U` | success | success |
+
+Why `B` is the right number:
+- By 19.1's coupling, **`B ≤ true joint ARL₀(p)` for every `p ∈ [p_L, p_U]`**.
+  It is a guaranteed floor, not a plug-in estimate.
+- It is exactly the conservative "false-alarm promise" `achieved_arl` exists to
+  state (ADR-013 §4).
+- It is solved exactly on the Decision 8 state space, with the same state count
+  as the ordinary joint chain.
+- One-sided `achieved_arl` is unchanged in kind: the lower arm is evaluated at
+  `p_U`, the upper at `p_L`.
+
+**Two calibrations, measured on the same 55 cells** (`g2_twosided_grid.py`,
+exact enumeration):
+
+- **ES (equal split):** each arm is calibrated one-sided to `2T` at its own
+  design rate.
+- **D (reallocation):** the lower arm is as ES. The upper arm's `h` is the
+  smallest with `B ≥ T`. This bisection is valid because `B` is non-decreasing
+  in `h_up`: a larger interval delays the upper stopping time pathwise, the same
+  coupling.
+
+```
+                  worst appetite (bar 5%)   worst P(ARL0<T)   P(B < T)   median B/T      mean true ARL1 at 2·p0 (examples)
+ES  equal split   1.781% (0.02, m=200)      6.53%             0 cells    1.01 – 1.27     m=500,p0=0.002: 1,251   m=300,p0=0.002: 1,678
+D   reallocation  1.781% (0.02, m=200)      7.88%             0 cells    1.001 – 1.08    m=500,p0=0.002:   908   m=300,p0=0.002: 1,166
+```
+
+**Both pass the appetite in every cell.** The worst cell and its value are the
+same for both; the full per-cell tables are in `g2_m*.out`.
+- **ES over-delivers.** The reported `B` sits 1–27% above the request, and
+  `P(B < T)` is 0 in every cell.
+- **D delivers what was asked:** a median `B/T` of 1.001–1.08.
+- **D detects degradation faster in the low-`p₀` cells:** 27–31% faster at
+  `p₀ ≤ 0.005` with `m ≥ 200`, and 56% faster at (0.005, 100). It is within 3%
+  of ES at `p₀ ≥ 0.05`.
+- **D never increased the upper interval in any cell** (`P(B<T) = 0` under ES),
+  so its joint state count is at most ES's. It costs no memory.
+
+**Decision (ratified 2026-09-24): D.** Calibrate the two-sided chart so its guaranteed
+bound `B` meets `T`, keeping the lower arm at its equal-split design and giving
+the upper arm the remaining budget.
+- This is Amendment 2's former option (d). The reason it was held back, an
+  upper arm with unverified coverage, is removed by 19.1 and 19.3.
+- For comparison with a10, the same cells before and after (`g4_a10_after.py`),
+  showing the true joint ARL₀ at `p̂`:
+
+```
+m      f    before (upper at p_U, ES): reported / true at p̂    after, D: reported B / true at p̂
+300    3    372.0 / 248.8                                        370.4 / 1,809.8
+200    20   388.7 / 206.8                                        371.1 / 2,018.0
+100    10   382.7 / 147.0                                        373.5 / 4,485.4
+1000   5    374.0 / 352.7                                        370.3 / 766.9
+1000   0    485.8 / 432.0                                        434.8 (lower arm only, Decision 12's floor) / —
+10000  0    632.9 / 684.0                                        4,343.4 (lower arm only, floored) / —
+```
+
+**Before:** the reported figure overstated the in-control spacing at `p̂` by up
+to 2.6 times. **After:** it is a floor that holds. The price is ADR-013 §4's
+known one, conservatism: at the observed rate the chart alarms much *less* often
+than requested. That is the direction the ratified appetite permits, and
+`expected_detection_arl` discloses what it costs.
+
+**The two-sided grid, checked by a fully independent implementation (Decision
+18 item 18, closed 2026-09-24)** (`g5_twosided_independent.py`, output in
+`g5.out`):
+- It was written from scratch and **imports nothing from `drift_caliper`**:
+  its own Clopper–Pearson bounds, reference value, adaptive-`N` scan, one-sided
+  calibration, coupled-chain solver (via `splu`) and calibration D.
+- It runs 4,000 baselines per cell, is judged on the Clopper–Pearson upper 95%
+  bound, and uses the same appetite criterion.
+
+```
+cell                       exact (g2, D)   independent MC: point   upper-95%   f=0 draws   designs differing   max rel |B| diff
+p0=0.02,  m=200  (2-sided worst)   1.781%   1.55%     1.98%    61/4000     0 of 14 f values    4.1e-15
+p0=0.075, m=100  (upper-arm worst) 0.689%   0.75%     1.07%    2/4000      0 of 19             3.6e-14
+p0=0.005, m=200                    0.001%   0.00%     0.09%    1,465/4000  0 of 7              9.2e-16
+p0=0.002, m=1000                   0.000%   0.00%     0.09%    577/4000    0 of 9              1.5e-16
+p0=0.002, m=100  (designable)      0.005%   0.00%     0.09%    3,316/4000  0 of 4              2.6e-15
+```
+
+✅ **Every cell passes on its upper bound, the worst being 1.98% against the 5%
+bar.**
+
+For every distinct failure count drawn, the independent implementation produced
+**the identical design**: the same `(N, r_units, h_units)` for both arms,
+including D's `h_up`. Its `B` matched to within floating-point rounding
+(≤ 3.6e-14 relative).
+
+⚠️ **What "production's `B`" means here:**
+- The comparison pipeline is `g2_twosided_grid.py`, which uses the production
+  *design* helpers (reference value, adaptive-`N` finder, one-sided
+  calibration) with `g2`'s own coupled-chain solver.
+- **Production has no `B` yet**, since it is this decision's proposal. So the
+  agreement shown is independent-versus-production on the design, and
+  independent-versus-`g2` on `B`.
+- The implemented `B` must re-pass this comparison. Decision 18 items 14 and 16
+  require that.
+
+**Rejected for two-sided.**
+- **ES:** it passes, but it reports and delivers more conservatism than
+  requested, and detects more slowly, for no gain in the appetite.
+- **Report the joint ARL at `p̂`:** it has no guarantee, and it is the number
+  that misled before.
+- **Report the minimum of the joint ARL over a grid of `p ∈ [p_L, p_U]`:** it is
+  not exact between grid points. `B` is exact and provably at or below that
+  minimum.
+
+#### 19.5 Consequences for the artefact, the refusals, Open Question 23 and the verification bar
+
+- **§6b/Decision 14 shape:**
+  - add **`p_l: float`**, reported beside `p_u`;
+  - `lattice_upper` is `None` only when f = 0 forced `direction = "lower"`
+    (19.2).
+- **Decision 15:** the `"upper"` row keeps `p̂/M`. Its f = 0 fallback is
+  withdrawn (19.2).
+- **Decision 16:** unchanged. A per-arm cap hit in two-sided mode, including
+  inside D's bisection, still routes to F13, with the bisection over `T`
+  applying the D calibration.
+- **Decision 17**, new rows:
+
+  | # | condition | type | required `context` |
+  |---|---|---|---|
+  | F15 | `direction="upper"` and the baseline has zero failures | `InvalidParameterError` | `parameter="direction"`, `constraint` (e.g. `"'upper' requires at least one failed judgement in the baseline"`), `kind="invalid"`, `provided="upper"`, `reason="no_baseline_failures"`; no round-trip key |
+
+  Disclosure (not a refusal):
+  `FittingAdvisory(kind="upper_arm_not_designable", boundary=1.0)` on a
+  two-sided fit at f = 0.
+- **Open Question 23** (`docs/domain-model.md`) is **SETTLED by Decision 19**,
+  ratified 2026-09-24: the upper arm is designed at
+  `p_L`, derived in 19.1 and measured in 19.3. Updating the domain model is
+  domain-modeller's step, not done here.
+- **Decision 18, extended:**
+
+  13. **Upper-arm GICP grid.** A slow-marked test re-runs 19.3 by exact
+      enumeration at (at least) the worst cell `(0.075, 100)` and the three
+      sub-0.02 rows at `m = 100`. It asserts appetite ≤ 5% and
+      `P(ARL₀ < T) ≤ α`, and pins the exact values to rel 1e-6.
+  14. **The coupling bound.** For three baselines, `B ≤` the exact joint ARL at
+      `p ∈ {p_L, p̂, p_U}` and at 5 interior points. `B` must also be
+      monotone in `h_up`.
+  15. **f = 0.**
+      - `"two_sided"` returns `direction == "lower"`, the
+        `upper_arm_not_designable` advisory, `lattice_upper is None`, and
+        `achieved_arl` equal to the one-sided lower fit at `T`.
+      - `"upper"` raises F15 with its full key set.
+      - f = 1 at m = 300,000 fits all three directions, within the time budget
+        of item 12.
+  16. **Calibration D.** `B ≥ T`, and `B` at `h_up − 1` is `< T` (minimality),
+      on the a10 cells above.
+  17. **Differential and simulated-ARL tests (items 1–2) cover a `p_L`-designed
+      upper arm.** Item 2's simulated two-sided run must be driven at `p̂` *and*
+      at both bounds, and assert the simulated mean `≥ B` within tolerance at
+      each.
+  18. ✅ **Done 2026-09-24; see 19.4's independent table.** *Original
+      requirement:* **Second method for the two-sided grid.** The 19.4 grid rests on exact
+      enumeration plus a from-scratch joint solver (`joint3`) that is
+      independent of production's joint solver. The production *design*
+      helpers are shared, however. A 4,000-rep Monte Carlo of the two-sided
+      appetite at the worst ES/D cell `(0.02, 200)` is required before
+      ratification is treated as closed, to meet ADR-013 §7 item 2 fully for
+      two-sided.
+  19. **`expected_improvement_detection_arl`:** as specified in 19.6.
+
+#### 19.6 `expected_improvement_detection_arl` (Q9, ratified 2026-09-24)
+
+**Field:** `expected_improvement_detection_arl: float | None` on
+`FittedBernoulliCUSUM`. It amends §6b and Decision 14.
+
+**Definition.** The exact ARL of the constructed two-sided chart, meaning the
+joint chain of Decision 8 with Decision 13's integer lattices and calibration
+D's intervals, evaluated at the single true failure rate **`p̂ / M`**. That is
+the improvement the upper arm is tuned to detect, the mirror of
+`expected_detection_arl`'s `p̂ · M` and the same rate Decision 15 uses for
+`"upper"`.
+- It is a number, not a warning. There is no threshold and no advisory tied to
+  it.
+- **`p̂ = 0` never reaches it.** At f = 0 a two-sided request becomes
+  `direction="lower"` (19.2), so the field is `None`. For every f ≥ 1,
+  `p̂/M > 0` and the rate is well-defined, so **no fallback exists or is needed**.
+
+**Which directions carry it. Rule: it is non-`None` exactly when the chart
+checks both arms.**
+
+| artefact `direction` | `expected_detection_arl` | `expected_improvement_detection_arl` |
+|---|---|---|
+| `"two_sided"` (f ≥ 1) | joint chain at `p̂·M` (degradation) | **joint chain at `p̂/M`** |
+| `"lower"`, requested or forced by f = 0 | lower arm at `p̂·M` (`p_U·M` at f = 0) | `None`: no upper arm is checked |
+| `"upper"` | upper arm at `p̂/M` (Decision 15, the improvement) | `None`: `expected_detection_arl` already is the improvement figure |
+
+**Why `"upper"` does not repeat it.** For an upper-only chart the improvement
+*is* the shift it is tuned to detect, so Decision 15 already puts that number in
+`expected_detection_arl`. Carrying it twice would give two fields meaning the
+same thing. The rule stays a single sentence: `expected_detection_arl` is the
+headline tuned shift; `expected_improvement_detection_arl` is the second arm's
+figure, present only on a two-armed chart.
+
+**Measured, calibration D, T = 370** (`g6_improvement_field.py`):
+
+```
+m     f    B (achieved)   expected_detection_arl (p̂·M)   expected_improvement_detection_arl (p̂/M)
+100   1    370.4          8,239.9                          1,416.5
+1000  1    370.1          570.8                            504.7
+1000  5    370.3          558.1                            580.9
+300   3    370.4          953.2                            780.3
+200   20   371.1          115.8                            220.1
+100   10   373.5          188.1                            334.5
+150   40   382.6          41.2                             85.5
+```
+
+It makes 19.2's finding visible without a warning. At m=1000 f=5 the figure
+(580.9) is **above** `B` (370.3): at the design improvement, the chart signals no
+sooner than it would false-alarm.
+
+**Verification (Decision 18 item 19).**
+- For the cells above, the field equals an independent reference joint solver
+  at `p̂/M` to rel 1e-9.
+- It is `None` for `"lower"`, for `"upper"`, and for an f = 0 two-sided request.
+- It is finite and ≥ 1 whenever present, under Decision 13.4's postcondition,
+  which extends to this field with `figure="expected_improvement_detection_arl"`
+  in F14.
+- It survives the serialisation round-trip of item 11.
+- The registry test of item 10 covers the extended F14.
+
+---
+
+### Summary of changes to the ADR body (Amendment 2)
+
+| decision | status |
+|---|---|
+| Decision 3 item 2 (computed attainability floor, refuse below it) | **superseded, if ratified**, by Decision 12: fit, report and disclose |
+| Decision 4 (`expected_detection_arl` first-class) | **amended** by Decision 15: evaluated at the checked arm's own tuned shift |
+| Decision 6b (field shape) | **amended** by Decision 14: `lattice_lower`/`lattice_upper` stored; the four floats become derived |
+| Decision 8 (independent lattices) | **completed** by Decision 13.1: integers end to end, no reconstruction |
+| Decision 10a (search cap) | **amended** by Decisions 13.3 and 16: cap is 999,999 units; two-sided hits are routed to F13 |
+| Decision 10b (joint cap) | **unchanged** (1,000,000). The one-sided "≤ ~40,000 states" claim is **corrected** (§0) |
+| Decision 11 (verification bar) | **extended** by Decision 18; item 8's "< 1 s" is withdrawn |
+| **NEW Decisions 12–18** | as above, **ratified 2026-09-24** |
+| Decision 6d (`p_U` for both arms) | **superseded** by Decision 19: the upper arm is designed at `p_L`. Open Question 23 is **settled** |
+| Decision 6b / 14 (shape) | **amended** by Decision 19: adds `p_l` and `expected_improvement_detection_arl` (19.6). At f = 0 two-sided, `lattice_upper` is `None` and the three upper-arm fields are optional |
+| Decision 6c (two-sided `achieved_arl`) | **amended** by Decision 19: the coupled bound `B`, calibrated per option D |
+| Decision 15 | f = 0 upper fallback **withdrawn** by Decision 19 |
+| **NEW Decision 19** | **ratified 2026-09-24**: upper arm at `p_L`, f = 0 rules, two-sided `B` with calibration D, and `expected_improvement_detection_arl` |
+
+### Questions for the product owner — ruled 2026-09-24
+
+All ten questions were ruled on 2026-09-24; the full list is in the status
+header. The questions are kept below **as they were asked**, for the record. Each
+now carries its ruling, and any pre-ruling drafting advice inside them is
+superseded by that ruling.
+
+
+1. *(Accepted.)* **Decision 12: replace Decision 3 item 2's ratified refusal
+   with fit-and-disclose?** If you keep the refusal (option (a)), f=0 baselines
+   of 5,000 or more observations become unfittable two-sided at every
+   `target_arl`, and one-sided `target_arl = 370` is refused for every f=0
+   baseline with m ≥ 851.
+2. **Option (d), two-sided budget reallocation: now, later, or never?** It
+   delivers about 370 where the equal split gives 552–728 at large clean
+   baselines. The cost is that the unverified upper arm carries most of the
+   false-alarm budget. *(Ruled with Q8: adopted as calibration D once the upper
+   arm was redesigned at `p_L`.)*
+3. *(Accepted.)* **Decision 13.3: lower the one-sided search cap from 2,000,000 to 999,999
+   units**, matching the ratified 1M joint-state memory budget? Nothing
+   measured up to m=3,000,000 is refused by the change.
+4. *(Accepted.)* **Decision 13.4: raise `DegenerateBaselineError(reason="arl_not_computable")`
+   for the postcondition**, reversing the documented "never raises
+   `DegenerateBaselineError`"? The alternative is a new `reason` on
+   `InvalidParameterError` naming `baseline`.
+5. *(Accepted.)* **Decision 14: the nested `BernoulliArmLattice` shape and its name**, and
+   public fields rather than private ones (they must survive serialisation).
+6. *(Accepted; f=0 fallback withdrawn by Decision 19.)* **Decision 15: the upper-only `expected_detection_arl` evaluated at
+   `p̂/M`**, falling back to `p_U/M` at f=0.
+7. *(Overruled "later": fix now; see Decision 19.)* **Open Question 23 priority.** The measured evidence (Decision 12's
+   context table) shows the upper arm alarming 1.4–3.6 times more often at
+   `p̂` than its reported `achieved_arl`. Should that study be scheduled before
+   the Bernoulli CUSUM ships two-sided by default?
+
+### Questions for the product owner — Decision 19 (ruled 2026-09-24)
+
+8. *(Ratified.)* **Ratify Decision 19's numbers:**
+   - the upper arm at `p_L` (α = 0.10);
+   - the 55-cell grid (worst appetite 1.727% exact, 2.32% MC upper bound);
+   - two-sided `achieved_arl` defined as the coupled bound `B`;
+   - calibration **D**, which keeps the equal split for the lower arm and gives
+     the upper arm the remaining budget (chosen over ES; both pass).
+9. *(Accepted as a number, not a warning; see 19.6.)* **Two-sided improvement detection.** When `p̂·T ≪ 1`, the upper arm has
+   essentially no power (19.2), and for `"two_sided"` nothing discloses this.
+   Should a second detection figure (the upper arm's ARL at `p̂/M`) be added,
+   or is this left undisclosed for two-sided? No drop rule is adopted, because
+   any power threshold would be an invented number.
+10. *(Accepted.)* **The f = 0 two-sided artefact reports `direction = "lower"`**, with the
+    `upper_arm_not_designable` advisory and `lattice_upper = None`. Is that
+    shape acceptable, given it makes three upper-arm fields optional?
+
+### 🚨 What Amendment 2 deliberately does not decide
+
+- ~~The upper arm's GICP coverage (Open Question 23)~~,
+  ~~whether the equal `2T` split should change~~ and
+  ~~a detection figure for the upper arm of a two-sided chart~~: **all settled by
+  Decision 19**, ratified 2026-09-24. They were addressed in 19.1–19.3, 19.4 and
+  19.6 respectively.
+- **A power threshold, or any refusal or drop rule, for an upper arm with no
+  detection power.** Deliberately not decided: any threshold would be invented.
+  The number is disclosed (19.6) instead.
+- **α for `p_L`.** It is taken as ADR-013's ratified 0.10, and is not re-derived.
+  The grid passed at it, so no adjustment was needed.
+- **Test runtime and Codecov patch coverage** (the reviewer's Blocker 6 and
+  Recommendations 1–2, 6). These are implementation, not architecture. Item 12
+  above sets the one budget that belongs here.
+- **`docs/domain-model.md`.** Domain-modeller's step, not performed here.
