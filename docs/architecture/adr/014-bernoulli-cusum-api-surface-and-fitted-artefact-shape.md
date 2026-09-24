@@ -327,7 +327,7 @@ back to `p_U × detect_rate_multiple` at `f = 0`) but leaves its **routing**
 open between two candidates: `FittingAdvisory.boundary` (already a `float`)
 or a first-class artefact field.
 
-**Decision: first-class field, `expected_detection_arl: float`.**
+**Decision: first-class field, `expected_detection_arl: float`.** ⚠️ *Corrected by the corrigendum (C13, ratified 2026-09-24): `float | None` in the structural no-shift case.*
 
 **Reasoning.** `FittingAdvisory` (ADR-011) is built for **optional,
 conditional** disclosures — the type's own module docstring and every
@@ -507,7 +507,7 @@ class FittedBernoulliCUSUM(FittedArtefactBase):
     provenance_criteria: str
     requested_arl: float
     achieved_arl: float
-    expected_detection_arl: float      # ADR-013 section 4's definition; Decision 4
+    expected_detection_arl: float      # ADR-013 section 4's definition; Decision 4  ⚠️ C13 (ratified): float | None
     calibration_method: str            # see 6c
     advisories: tuple[FittingAdvisory, ...] = ()   # empty today; Decision 4
 
@@ -2040,7 +2040,7 @@ key listed is required. "New" marks a row this amendment adds or changes.
 | F11 | `p_U × M ≥ 1` | `InvalidParameterError` | `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`, `provided`, `max_detect_rate_multiple` (round-trips; key name ratified, unchanged) |
 | F12 | one-sided search reaches `_MAX_DECISION_INTERVAL_UNITS` (`"lower"`/`"upper"` only, Decision 16) | `InvalidParameterError` | `parameter="target_arl"`, `constraint`, `kind="invalid"`, **`provided`** (new: the caller's `target_arl`, not the per-arm figure), `max_attainable_arl` (round-trips as a one-sided target), `direction` |
 | F13 | two-sided joint states over `_MAX_JOINT_STATES`, **or** a per-arm search-cap hit in two-sided mode (Decision 16) | `InvalidParameterError` | `parameter="target_arl"`, **`constraint`** (new: e.g. `"the two-sided joint state count must not exceed max_joint_states"`), `kind="invalid"`, `provided`, `reason="joint_state_count_exceeded"`, `joint_state_count`, `max_joint_states`, `max_two_sided_target_arl` (round-trips). When a per-arm hit triggered it, `joint_state_count` is the lower bound `(h_lo+1)(h_up+1)` at the capped arm, still over the cap. |
-| F14 | **new:** a reported ARL fails its postcondition (Decision 13.4) | `DegenerateBaselineError` | `reason="arl_not_computable"`, `chart_type="bernoulli_cusum"`, `figure` (`"achieved_arl"` or `"expected_detection_arl"`) ⚠️ *corrected by the corrigendum, below (C10)* |
+| F14 | **new:** a reported ARL fails its postcondition (Decision 13.4) | `DegenerateBaselineError` | `reason="arl_not_computable"`, `chart_type="bernoulli_cusum"`, `figure` (`"achieved_arl"` or `"expected_detection_arl"`) ⚠️ *corrected by the corrigendum, below (C10); C13 (ratified 2026-09-24): normally `"achieved_arl"` only* |
 
 **Not a refusal: the disclosure (Decision 12).** It is
 `FittingAdvisory(kind="lower_arm_signals_on_first_failure", description, boundary)`,
@@ -2707,7 +2707,7 @@ above is **not** edited. Each line that is now wrong carries a visible
 "⚠️ corrected by the corrigendum, below (Cn)" pointer.
 
 **Status:** ✅ **ACCEPTED 2026-09-24.** C12 corrects it within the ratified
-decisions, and reports one new defect (C12.4).
+decisions, and reports one new defect (C12.4). ✅ **C13 and C14 are ratified in full by the product owner 2026-09-24.**
 - **C1, C4–C10** are specification corrections. They follow from decisions
   already ratified.
 - **C2's lower bound:** ruled by the product owner as C-Q1, option (A).
@@ -3166,7 +3166,7 @@ precise meaning.** `k5_monotone.py` swept a dense 4,000-point log grid of M − 
 from 10⁻⁹ to 0.999·(M_max − 1), per baseline and per arm set, with the exact
 finder. The findings:
 - Non-constructible multiples lie **above** the first constructible one.
-- **All of them fall below M − 1 = 5.41×10⁻⁸** (worst: m=300,000 f=1).
+- **All of them fall below M − 1 = 5.41×10⁻⁸** (worst: m=300,000 f=1). ⚠️ *corrected by C14: this holds only for the baselines swept here (m ≤ 300,000). On the upper arm, when `p_L ≲ 3.5×10⁻⁷`, failures also occur at ordinary multiples up to about 36.*
 - **None falls anywhere else**, up to 0.999·M_max.
 
 A bisection therefore returns *a* boundary inside that band. A caller's M
@@ -3180,7 +3180,7 @@ above it could still be refused.
   requested.** It is found by the same bisection on `log(M − 1)`, bracketed
   between the requested M (or 1, when M ≤ 1) and a constructible anchor
   (M = 2, or halfway to F11's `max_detect_rate_multiple` when that is below 2;
-  the anchor is itself verified).
+  the anchor is itself verified). ⚠️ *corrected by C14: the fixed anchor is withdrawn in favour of an upward search from the request.*
   - It round-trips by construction.
   - Taking it changes the engineer's request by the least amount the
     arithmetic allows.
@@ -3299,6 +3299,223 @@ Decision 7 text is left as ratified and corrected here.
     - At f = 0, a two-sided request's `min_value` equals `"lower"`'s.
 27. **C12.2.** The registry asserts `provided` on F1/F4/F6, and
     `provided_type` on the type-failure paths of F8, M2, M3 and C4.
+
+#### C13. ✅ Ratified 2026-09-24: a disclosure figure that describes no shift is reported as `None` with an advisory, never refused
+
+**What was found.** Hypothesis found a refusal on an ordinary input:
+m=100, f=25, `direction="lower"`, T=10⁵, M=1.01. It is reproduced on `3bd013d`.
+- Production raises F14 (`arl_not_computable`, `figure="expected_detection_arl"`)
+  and refuses a chart that is itself valid.
+- At M=1.2 on the same baseline the fit succeeds: `achieved_arl` 105,662,
+  `expected_detection_arl` 2,843,692.
+- At M=1.3 the detection figure is 34,959, below `achieved_arl`.
+
+The ADR called F14 unreachable in practice. This input reaches it.
+
+**Cause, derived.** The detection figure is the chart's run length at a rate
+the engineer asked to be told about: `p̂·M` for a degradation, `p̂/M` for an
+improvement. The chart itself is calibrated at its conservative design rate:
+`p_U` for the lower arm, `p_L` for the upper arm.
+- **Degradation figure.** The lower arm's run length can only fall as the true
+  failure rate rises (the coupling argument of 19.1). So when `p̂·M ≤ p_U`,
+  `ARL(p̂·M) ≥ ARL(p_U) = achieved_arl`. The "detection" rate sits at or inside
+  the rate the chart is designed to tolerate. The figure then describes no
+  detection at all, and it can be arbitrarily large. At M=1.01 it exceeds
+  double resolution, which is why the solve fails.
+- **Improvement figure, mirrored.** The upper arm's run length can only fall as
+  the true failure rate falls. So when `p̂/M ≥ p_L`,
+  `ARL(p̂/M) ≥ ARL(p_L) = achieved_arl`.
+- **Two-sided.** Take any single true rate `p ∈ [p_L, p_U]`. By 19.4's coupling,
+  the joint run length at `p` is at least `B`, the chart's own false-alarm
+  floor. `p̂ ≥ p_L` and `M > 1` give `p̂·M > p_L`, so `p̂·M ≤ p_U` puts the
+  degradation rate inside `[p_L, p_U]`. Likewise `p̂/M ≥ p_L` (with `p̂/M < p̂ ≤
+  p_U`) puts the improvement rate inside. Either figure is then no faster than
+  the chart's guaranteed false-alarm spacing.
+
+**The structural conditions** (exact; boundary included, because at equality
+the figure equals the in-control run length):
+
+| figure | direction(s) | reported as `None` exactly when |
+|---|---|---|
+| `expected_detection_arl` (degradation) | `"lower"`, `"two_sided"` | f ≥ 1 and `p̂·M ≤ p_U` |
+| `expected_detection_arl` (improvement, Decision 15) | `"upper"` | `p̂/M ≥ p_L` (f ≥ 1 always holds here, because f = 0 raises F15) |
+| `expected_improvement_detection_arl` | `"two_sided"` | `p̂/M ≥ p_L` |
+
+**At f = 0** the degradation figure is evaluated at `p_U·M` (ADR-013 §4's
+fallback). Since M > 1, that is always above `p_U`, so the condition never
+holds and the figure is always reported. The improvement figures are `None` at
+f = 0 already, because no upper arm exists (19.2, C3).
+
+**Proposed specification.**
+1. **Field types.** `expected_detection_arl: float | None`, and
+   `expected_improvement_detection_arl: float | None` (already optional).
+   ⚠️ This reverses Decision 4's "unconditional, first-class" wording, but only
+   in this structural case. The field stays first-class.
+2. **The figure is `None` exactly when its condition above holds, decided from
+   `(p̂, M, p_U, p_L)` before any solve.** It is `None` whether or not the solve
+   would have succeeded. At m=100 f=25 M=1.2 the solve succeeds (2,843,692),
+   and that number is still `None` under this rule, because it describes a rate
+   the chart treats as in control. The rule is deterministic and does not
+   depend on floating-point luck.
+3. **One advisory per `None` figure:**
+   - Degradation: `FittingAdvisory(kind="detection_shift_within_design_rate",
+     boundary=p_U/p̂)`. `boundary` is the `detect_rate_multiple` at which
+     `p̂·M = p_U`. A strictly larger multiple gives a reported figure.
+   - Improvement: `FittingAdvisory(kind="improvement_shift_within_design_rate",
+     boundary=p̂/p_L)`. `boundary` is the multiple at which `p̂/M = p_L`. A
+     strictly larger multiple gives a reported figure. `p̂ ≥ p_L`, so the
+     boundary is ≥ 1.
+   - Both are **exclusive** boundaries. That is the opposite of F-row bounds,
+     and is stated so a test does not assume inclusivity.
+   - They are disclosures only: nothing refuses. The advisory ordering is the
+     floor advisory first, then these, then `upper_arm_not_designable`.
+4. **`achieved_arl` never takes this path.** It is the chart's calibration,
+   evaluated at the design rate by construction. `B` is evaluated on the
+   coupled chain at `[p_L, p_U]`, never at a shifted rate.
+5. **F14 stays for `achieved_arl` only.** Outside the structural condition, a
+   disclosure figure is bounded above by a quantity already computed:
+   - one-sided: `ARL(p_det) ≤ achieved_arl` by the same monotonicity;
+   - two-sided degradation: joint `≤` lower arm alone at `p̂·M` `≤` the lower
+     arm's own calibrated ARL at `p_U`;
+   - two-sided improvement: the mirror.
+
+   So an uncomputable figure there would be a genuine solver defect. It keeps
+   F14 with its `figure` key, and does not silently become `None`.
+
+   **Measured against `3bd013d`** (`c13_sweep.py`, `c13_edge.py`, single-thread
+   BLAS, a 15–20 s cap per fit):
+   - **Random legal fits:** 248 completed (seed 2 in full: 169 fits, 10 other
+     refusals, 19 over the cap; seed 1, first 100 draws: 79 fits).
+     - The structural condition held in 97 degradation and 110 improvement
+       draws.
+     - F14 fired twice, **both inside the condition**. **None fired outside
+       it**, and **none fired on `achieved_arl`**.
+   - **Targeted at the boundary** (M within 2% either side of `p_U/p̂` or
+     `p̂/p_L`, T from 10³ to 10⁵):
+     - 40 fits just **outside** the condition: 0 F14.
+     - 37 fits just inside: 0 F14. Inside, the figure is usually computable,
+       which is why point 2 decides `None` structurally rather than by
+       whether the solve fails.
+   - **Coverage gap.** 23 targeted and 33 random draws exceeded the per-fit
+     cap and are unmeasured. Three further targeted seeds were stopped
+     unfinished.
+   - ⚠️ **A false alarm, recorded so it is not repeated.** An early run
+     reported F14 on `achieved_arl` (m=150 f=64 two-sided T=10⁵ M≈1.1448).
+     Re-run in isolation, that fit succeeds (`B` = 100,478.7). The harness's
+     timeout exception subclassed `Exception`, and
+     `_solve_absorbing_chain`'s `except Exception` caught it and returned the
+     sentinel. The harness now uses `BaseException`, and **no F14 on
+     `achieved_arl` has been observed.**
+6. **Decision 17's F14 row** becomes: `figure` is always `"achieved_arl"` in
+   normal operation. The two disclosure values stay in the enumeration only as
+   the defect guard of point 5.
+
+**Verification (Decision 18, continued).**
+- **30.** m=100 f=25 `"lower"` T=10⁵ M=1.01 fits, with
+  `expected_detection_arl is None` and the degradation advisory,
+  `boundary = p_U/p̂` (≈ 1.2561). At M=1.3, just above the boundary, the figure
+  is a float (34,959.25) and the advisory is absent. At M=1.2 (inside) the
+  figure is `None`, even though the solve would succeed.
+- **31.** A property test over legal inputs: the figure is `None` **iff** its
+  condition holds. `achieved_arl` is never `None`. F14 is never raised for a
+  disclosure figure.
+- **32.** Mirrors of item 30:
+  - `"upper"` with `p̂/M ≥ p_L`;
+  - `"two_sided"` with either condition, and with both at once (two
+    advisories);
+  - f = 0 `"lower"`: the degradation figure is always reported.
+
+#### C14. ✅ Ratified 2026-09-24: the upper arm can be unconstructible at ordinary multiples, and `min_value` is searched upward from the request
+
+**What the implementation found.** At m=3,000,000, f=1, the upper arm is
+unconstructible at an ordinary multiple, M ≈ 4.1957. The independent
+reference agrees. C12.1 was therefore wrong on two counts:
+- It said non-constructible multiples fall only just above M = 1, below
+  M − 1 = 5.41×10⁻⁸. Its sweep reached m = 300,000 only.
+- It specified a fixed anchor at M = 2, and a bracket from the request up to 2
+  cannot hold a request at or above 2.
+
+**Why it happens.** The upper arm is designed on `(1 − p_L, 1 − p_L/M)`. When
+`p_L` is tiny, both endpoints sit within about `p_L` of 1. The width of that
+interval, and the Decision 7 tolerance `ε·p_L·(1 − 1/M)` inside it, then
+approach the spacing of doubles near 1 (about 1.1×10⁻¹⁶). A design that passes
+Decision 7 in exact arithmetic can fail it by one rounding. The lower arm is
+not affected: its endpoints `p_U` and `M·p_U` are small numbers, which doubles
+represent with full relative precision.
+
+**Measured** (`c14_upper_constructibility.py`, production helpers at
+`3bd013d`). This is the count of non-constructible upper-arm multiples on a
+3,000-point log grid of M − 1 from 10⁻⁶ to 10³, per baseline:
+
+```
+m            f    p_L          non-constructible   M range of failures
+10,000       all  ≥ 1.1e-5     0                   —
+100,000      all  ≥ 1.1e-6     0                   —
+300,000      1    3.5e-7       1                   9.736
+1,000,000    1    1.1e-7       1                   7.099
+1,000,000    2    5.3e-7       1                   8.985
+3,000,000    1    3.5e-8       28                  1 … 26.67
+3,000,000    2    1.8e-7       1                   10.96
+10,000,000   1    1.1e-8       269                 1 … 36.04
+10,000,000   2    5.3e-8       5                   1 … 22.30
+10,000,000   5    2.4e-7       1                   16.40
+30,000,000   1    3.5e-9       618                 1 … 36.04
+30,000,000   2    1.8e-8       79                  1 … 34.15
+30,000,000   5    8.1e-8       1                   ≈ 1
+any m ≤ 30M  20   ≥ 4.8e-7     0                   —
+```
+
+The pattern:
+- **Whether the upper arm fails depends on `p_L`, not on `m` or `f` separately.**
+  - `p_L ≥ 1.1×10⁻⁶`: none found.
+  - `p_L` from 5×10⁻⁸ to 5×10⁻⁷: isolated single multiples.
+  - `p_L ≤ 3.5×10⁻⁸`: frequent, up to 21% of the grid at `p_L = 3.5×10⁻⁹`.
+- **Failures stop above M ≈ 36 at every baseline.** There, `1 − 1/M` is close
+  to 1 and the interval is as wide as it gets.
+- **Such baselines are rare.** `p_L` this small needs a very large clean
+  baseline: `p_L(f=1, m) ≈ 0.105/m`, so `p_L < 10⁻⁶` means more than about
+  100,000 observations with one failure. The effect is still real and
+  reachable through the public API.
+
+**The `min_value` search, as the implementation does it** (proposed for
+ratification as F16's specified search, replacing C12.1's fixed anchor):
+1. Start from the refused request, or from 1 when the request is ≤ 1.
+2. Step upward by one float spacing, doubling the step until the designed arms
+   are constructible.
+3. Bisect between that multiple and the last refused one until the two are
+   adjacent floats.
+4. Return the constructible one.
+
+It is bounded above by F11's `max_detect_rate_multiple` when the lower arm is
+designed. When nothing below that bound is constructible, it returns
+`no_valid_multiple`; that was measured unreachable (C2, item 20).
+
+**Measured round-trip:** for every refused multiple in the table (up to 200 per
+baseline):
+- `min_value` is constructible;
+- the float just below it is not;
+- `min_value` ≥ the request.
+
+The largest move from the request was a relative 1.65×10⁻⁷, at m=30,000,000
+f=2. At m=3,000,000 f=1 it was 6.35×10⁻⁸. So `min_value` is the request plus a
+few float spacings.
+
+**Corrections to C12.1:**
+- "All of them fall below M − 1 = 5.41×10⁻⁸" holds for the baselines C12.1
+  swept (m ≤ 300,000). In general, **on the upper arm, non-constructible
+  multiples also occur at ordinary M (up to about 36) when `p_L ≲ 3.5×10⁻⁷`**,
+  as tabulated above.
+- The fixed anchor at M = 2 is withdrawn in favour of the upward search above.
+- F16's condition is unchanged: it is checked directly at the requested M.
+
+**Verification (Decision 18, continued).**
+- **28.** Pin the regression: `"upper"` at m=3,000,000, f=1, M ≈ 4.1957 raises
+  F16 with `reason="shift_below_numerical_resolution"`. Its `min_value` is
+  above the request, round-trips, and moves the request by less than 10⁻⁶
+  relative.
+- **29.** A property test: for any refused M ≥ 2 on a baseline with
+  `p_L < 10⁻⁷`, `min_value ≥ M`, `min_value` is constructible, and the float
+  below it is not.
 
 #### Product-owner rulings on the corrigendum (2026-09-24)
 
