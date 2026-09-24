@@ -3674,12 +3674,15 @@ regret-study choice; **(c)** evaluating the figure at the design shift
 `p_U·M` instead of `p̂·M` — always present, but for f = 1 "detects a doubling"
 would mean a 7.8× rise over what was observed, a number that misleads.
 
-**One consequence, text only:** the `recovery_hint` of both no-shift
+**One consequence, text only:** the `description` of both no-shift
 advisories (`detection_shift_within_design_rate`,
 `improvement_shift_within_design_rate`) must say that the figure appears once
 the baseline contains more failures (the ratio depends on f, not m), or with a
-`detect_rate_multiple` above the reported `boundary`. `recovery_hint` is
-human-facing and deliberately untested (ADR-002), so this adds no
+`detect_rate_multiple` above the reported `boundary`. ⚠️ *Corrected at
+implementation: this ruling first named the advisory's `recovery_hint`, but
+`FittingAdvisory` has no such field — its fields are `kind`, `description`
+and `boundary` (`recovery_hint` belongs to errors). The guidance is carried in
+`description`; no type change.* Human-facing text is untested, so this adds no
 verification item.
 
 **Verification (Decision 18, continued).**

@@ -583,7 +583,7 @@ No `target_value`, `sigma_estimate`, `sigma_estimation_method` or `baseline_spre
 
 **Improvement-detection power** (Decision 19.2, disclosed by 19.6, **deliberately not refused**). When `p̂·T ≪ 1`, the upper arm has essentially no power. Its ARL at its own target improvement is about equal to its in-control ARL₀, or higher: Amendment 2 measured 398.1 against 370.1 at m=1000 f=1. That is a property of the process, not of this design. No refusal, drop rule or power threshold is adopted, because any "too little power" threshold would be an invented number (ADR-013 §4's disclosure-over-floor ruling). **Corrigendum C13 changes how the worst of it is disclosed.** When the target shift lies at or inside the design rate (`p̂/M ≥ p_L`, as at m=1000 f=1, where `p̂/M` = 0.0005 ≥ `p_L` ≈ 0.000105), the figure is `None` with `improvement_shift_within_design_rate`, not a number above `achieved_arl`. Otherwise the number is disclosed by `expected_detection_arl` for `"upper"` and by `expected_improvement_detection_arl` for `"two_sided"`.
 
-**At the default `M = 2`, C13 blanks the disclosure for typical low-failure baselines** (ADR-014 corrigendum C15.3). ✅ **Ruled 2026-09-24: the default stays `M = 2` and the `None` stands**; both no-shift advisories' `recovery_hint` says the figure appears with more baseline failures or a larger `detect_rate_multiple`.
+**At the default `M = 2`, C13 blanks the disclosure for typical low-failure baselines** (ADR-014 corrigendum C15.3). ✅ **Ruled 2026-09-24: the default stays `M = 2` and the `None` stands**; both no-shift advisories' `description` says the figure appears with more baseline failures or a larger `detect_rate_multiple`.
 - The degradation figure is `None` iff `p_U/p̂ ≥ M`, and the improvement figure iff `p̂/p_L ≥ M`.
 - At α = 0.10 both ratios depend almost only on `f`, not `m`. For f = 1 they are about 3.83–3.89 and 9.49–9.50; for f = 10, about 1.50–1.54 and 1.59–1.61.
 - So at `M = 2`:
@@ -1606,7 +1606,7 @@ is proceeding on the old baseline with the new judge.
   - C15.1: re-based cells quoted where the model uses them.
   - C15.2: the ceiling `C`, with `U = p_L · 2⁵³`; F11 extended to the upper arm; F16's complete `no_valid_multiple` row and search termination.
   - OQ-39 and OQ-40 marked SETTLED.
-  - C15.3's default-`M` finding recorded; ruled 2026-09-24 — default stays 2, `None` stands, recovery hints updated.
+  - C15.3's default-`M` finding recorded; ruled 2026-09-24 — default stays 2, `None` stands, advisory descriptions updated.
   - The model's earlier self-computed version of that consequence is replaced by the ADR's measured one.
   - Implementation status: C15.2 confirmed not built at `3bd013d` (`_max_multiple` returns `math.inf` for upper-only fits).
 
@@ -1617,7 +1617,7 @@ is proceeding on the old baseline with the new judge.
 - 2026-09-24 (domain-modeller, BIN-133, following ADR-014 corrigendum **C15**, uncommitted, design-branch checkout):
   - **C15.2:** `detect_rate_multiple` gains the ceiling `C` (F11's bound, or `U = p_L · 2⁵³` for the upper arm). F11 is extended to the upper arm. F16's `no_valid_multiple` is a complete row, and the `min_value` search is capped at `C` and terminates.
   - **C15.1:** re-based figures are noted on the m=1000 f=5 cell. OQ-39 and OQ-40 are SETTLED.
-  - **C15.3:** at `M = 2`, the degradation figure is `None` for f ≤ 3 and the improvement figure for f ≤ 5, at every baseline size. Ruled 2026-09-24: default stays 2, the `None` stands, recovery hints updated.
+  - **C15.3:** at `M = 2`, the degradation figure is `None` for f ≤ 3 and the improvement figure for f ≤ 5, at every baseline size. Ruled 2026-09-24: default stays 2, the `None` stands, advisory descriptions updated.
   - **Implementation status:** C15.2 is not built at `3bd013d`.
 - 2026-09-24 (domain-modeller, BIN-133, following ADR-014 corrigendum **C12–C14**, ratified 2026-09-24; design-branch checkout `arch/BIN-133/adr-014-lattice-amendment` at `f8386a1`, working tree only):
   - **C13:**
