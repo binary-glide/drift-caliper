@@ -434,8 +434,10 @@ class TestExpectedDetectionArl:
     def test_present_and_finite_on_the_ordinary_happy_path(self) -> None:
         baseline = _mixed_baseline()
         result = fit_bernoulli_cusum(baseline, target_arl=_VALID_TARGET_ARL)
-        assert math.isfinite(result.expected_detection_arl)
-        assert result.expected_detection_arl > 0.0
+        figure = result.expected_detection_arl
+        assert figure is not None
+        assert math.isfinite(figure)
+        assert figure > 0.0
 
     def test_differs_from_achieved_arl(self) -> None:
         """Two distinct questions, ADR-013 section 4: false-alarm safety vs. detection

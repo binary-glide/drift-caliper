@@ -21,8 +21,8 @@ asserts the ratified behaviour on that path, not merely that it runs.
   that needs more than the per-arm cap, and one whose interval alone leaves no
   room under the joint cap for any upper interval. Caps are patched, never
   driven for real (Decision 18 item 12).
-- **A solver that raises** is ill-conditioned, and must surface as row F14,
-  never as the solver's own exception.
+- **A non-numerical exception inside the solve** propagates as itself: only
+  numerical failures are row F14.
 - **``audit_summary()`` of a one-sided chart** names the unchecked arm.
 """
 
@@ -172,23 +172,24 @@ class TestTwoSidedCapBranches:
         assert _fit(10_000, 1, target_arl=float(bound)).requested_arl == bound
 
 
-class TestASolverThatRaisesIsIllConditioned:
-    def test_surfaces_as_arl_not_computable(
+class TestANonNumericalRuntimeErrorPropagates:
+    def test_is_not_relabelled_as_arl_not_computable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Decision 13.4 / row F14: whatever the solver raises, the fit raises
-        ``DegenerateBaselineError``, never the solver's own exception."""
+        """Only SuperLU's exact-singularity ``RuntimeError`` is numerical
+        (covered in ``test_bernoulli_cusum_amendment2.py``); any other
+        ``RuntimeError`` raised inside the solve says nothing about the chain
+        and must reach the caller as itself, not as F14."""
 
         def spsolve(*_args: Any, **_kwargs: Any) -> Any:
-            raise RuntimeError("the factorisation broke down")
+            raise RuntimeError("the worker pool was shut down")
 
         monkeypatch.setattr(scipy.sparse.linalg, "spsolve", spsolve)
 
-        with pytest.raises(DegenerateBaselineError) as excinfo:
+        with pytest.raises(RuntimeError, match="worker pool") as excinfo:
             _fit(200, 20, target_arl=370.0, direction="lower")
 
-        assert excinfo.value.context["reason"] == "arl_not_computable"
-        assert excinfo.value.context["figure"] == "achieved_arl"
+        assert not isinstance(excinfo.value, DegenerateBaselineError)
 
 
 class TestAuditSummaryOfAOneSidedChart:

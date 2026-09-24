@@ -30,9 +30,8 @@ equals the in-control run length):
 - ``achieved_arl`` never takes this path, and F14 remains only for
   ``achieved_arl`` in normal operation (C13 point 5/6).
 
-**Reading the figure.** ``expected_detection_arl`` is annotated ``float`` until
-C13 is built; ``tests.support.bernoulli_surface.expected_detection_arl`` reads
-it as ``float | None`` so the type checkers stay green.
+**Reading the figure.** ``expected_detection_arl`` is annotated ``float | None``
+(C13), so it is read directly.
 """
 
 from __future__ import annotations
@@ -49,7 +48,6 @@ from hypothesis import strategies as st
 from drift_caliper.baseline import FittedBernoulliCUSUM, fit_bernoulli_cusum
 from drift_caliper.errors import DegenerateBaselineError, InvalidParameterError
 from tests.support import bernoulli_reference as ref
-from tests.support.bernoulli_surface import expected_detection_arl
 from tests.support.binary_baselines import binary_baseline
 
 _DEGRADATION = "detection_shift_within_design_rate"
@@ -86,7 +84,7 @@ class TestDegradationFigureInsideTheDesignRate:
         Today: ``DegenerateBaselineError`` (F14 on ``expected_detection_arl``)."""
         chart = _fit(100, 25, "lower", 1.01, target_arl=1e5)
 
-        assert expected_detection_arl(chart) is None
+        assert chart.expected_detection_arl is None
         assert chart.achieved_arl >= 1e5
         assert _advisories(chart)[_DEGRADATION] == pytest.approx(
             chart.p_u / 0.25, rel=1e-12
@@ -110,7 +108,7 @@ class TestDegradationFigureInsideTheDesignRate:
         )
         assert math.isfinite(solvable)
 
-        assert expected_detection_arl(chart) is None
+        assert chart.expected_detection_arl is None
         assert _DEGRADATION in _advisories(chart)
 
     def test_just_outside_the_boundary_the_figure_is_reported(self) -> None:
@@ -118,7 +116,7 @@ class TestDegradationFigureInsideTheDesignRate:
         advisory is absent. Passes today (already reported)."""
         chart = _fit(100, 25, "lower", 1.3, target_arl=1e5)
 
-        assert expected_detection_arl(chart) == pytest.approx(34959.25, abs=5e-3)
+        assert chart.expected_detection_arl == pytest.approx(34959.25, abs=5e-3)
         assert _DEGRADATION not in _advisories(chart)
 
     @pytest.mark.parametrize("direction", ["lower", "two_sided"])
@@ -132,9 +130,9 @@ class TestDegradationFigureInsideTheDesignRate:
         at = _fit(100, 25, direction, boundary)
         above = _fit(100, 25, direction, math.nextafter(boundary, math.inf))
 
-        assert expected_detection_arl(at) is None
+        assert at.expected_detection_arl is None
         assert _advisories(at)[_DEGRADATION] == boundary
-        assert expected_detection_arl(above) is not None
+        assert above.expected_detection_arl is not None
         assert _DEGRADATION not in _advisories(above)
 
     def test_zero_failures_always_reports_the_degradation_figure(self) -> None:
@@ -142,7 +140,7 @@ class TestDegradationFigureInsideTheDesignRate:
         always reported -- even at M=1.01. Passes today."""
         chart = _fit(300, 0, "lower", 1.01)
 
-        figure = expected_detection_arl(chart)
+        figure = chart.expected_detection_arl
         assert figure is not None
         assert math.isfinite(figure)
         assert _DEGRADATION not in _advisories(chart)
@@ -156,7 +154,7 @@ class TestImprovementFigureInsideTheDesignRate:
         """Today: 1,311.47 is reported at M=1.1."""
         chart = _fit(100, 25, "upper", 1.1)
 
-        assert expected_detection_arl(chart) is None
+        assert chart.expected_detection_arl is None
         assert _advisories(chart)[_IMPROVEMENT] == pytest.approx(
             0.25 / chart.p_l, rel=1e-12
         )
@@ -168,15 +166,15 @@ class TestImprovementFigureInsideTheDesignRate:
         at = _fit(100, 25, "upper", boundary)
         above = _fit(100, 25, "upper", math.nextafter(boundary, math.inf))
 
-        assert expected_detection_arl(at) is None
-        assert expected_detection_arl(above) is not None
+        assert at.expected_detection_arl is None
+        assert above.expected_detection_arl is not None
         assert _IMPROVEMENT not in _advisories(above)
 
     def test_upper_only_detection_figure_is_reported_outside(self) -> None:
         """Passes today (M=2: ``0.125 < p_L``)."""
         chart = _fit(100, 25, "upper", 2.0)
 
-        assert expected_detection_arl(chart) is not None
+        assert chart.expected_detection_arl is not None
         assert _IMPROVEMENT not in _advisories(chart)
 
     @pytest.mark.parametrize(
@@ -192,7 +190,7 @@ class TestImprovementFigureInsideTheDesignRate:
         figures are always floats and no advisory exists."""
         chart = _fit(100, 25, "two_sided", multiple)
 
-        assert (expected_detection_arl(chart) is None) is degradation_none
+        assert (chart.expected_detection_arl is None) is degradation_none
         assert (chart.expected_improvement_detection_arl is None) is improvement_none
         kinds = [a.kind for a in chart.advisories]
         expected_kinds = [
@@ -238,7 +236,7 @@ class TestNoRefusalForAFigureInsideTheDesignRate:
 
         chart = _fit(100, 25, "lower", 1.2)
 
-        assert expected_detection_arl(chart) is None
+        assert chart.expected_detection_arl is None
         assert touched == []
 
     def test_outside_the_condition_a_bad_solve_is_still_f14(
@@ -317,7 +315,7 @@ class TestDisclosureFigureProperty:
             p_hat, multiple, chart.p_l
         )
         assert math.isfinite(chart.achieved_arl)  # never None (C13 point 4)
-        detection = expected_detection_arl(chart)
+        detection = chart.expected_detection_arl
         if effective == "upper":
             assert (detection is None) is improvement_inside
         else:
@@ -354,9 +352,9 @@ class TestDefaultMultipleBlanksLowFailureFigures:
         few = _fit(m, 1, "two_sided", 2.0)
         many = _fit(m, 10, "two_sided", 2.0)
 
-        assert expected_detection_arl(few) is None
+        assert few.expected_detection_arl is None
         assert few.expected_improvement_detection_arl is None
         assert set(_advisories(few)) >= {_DEGRADATION, _IMPROVEMENT}
-        assert expected_detection_arl(many) is not None
+        assert many.expected_detection_arl is not None
         assert many.expected_improvement_detection_arl is not None
         assert not set(_advisories(many)) & {_DEGRADATION, _IMPROVEMENT}

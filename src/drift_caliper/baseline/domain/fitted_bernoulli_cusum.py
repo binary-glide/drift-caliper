@@ -73,25 +73,30 @@ class FittedBernoulliCUSUM(FittedArtefactBase):
     three-outcome chain -- a guaranteed floor on the joint in-control ARL
     over every true failure rate in ``[p_l, p_u]`` (Decision 19.4)."""
 
-    expected_detection_arl: float
+    expected_detection_arl: float | None
     """ADR-013 section 4's detection disclosure, as amended by ADR-014
-    Decision 15: the exact ARL1 of the constructed chart at **the shift the
-    checked arm(s) are tuned to detect** -- failure rate
-    ``observed_failure_rate * detect_rate_multiple`` for ``"lower"`` (``p_u *
-    detect_rate_multiple`` when no failures were observed) and for
+    Decision 15 and corrigendum C13: the exact ARL1 of the constructed chart
+    at **the shift the checked arm(s) are tuned to detect** -- failure rate
+    ``observed_failure_rate * detect_rate_multiple`` for ``"lower"``
+    (``p_u * detect_rate_multiple`` when no failures were observed) and for
     ``"two_sided"`` (the joint chain); ``observed_failure_rate /
-    detect_rate_multiple``, the improvement, for ``"upper"``. First-class and
-    unconditional (ADR-014 Decision 4)."""
+    detect_rate_multiple``, the improvement, for ``"upper"``.
+
+    ``None`` when that shifted rate lies at or inside the arm's design rate
+    (C13): the chart would take at least as long to signal it as to raise a
+    false alarm, so there is no detection to report. A
+    ``"detection_shift_within_design_rate"`` (or, for ``"upper"``,
+    ``"improvement_shift_within_design_rate"``) advisory then gives the
+    multiple above which the figure is reported."""
 
     expected_improvement_detection_arl: float | None = None
     """The two-sided joint chain's exact ARL at failure rate
     ``observed_failure_rate / detect_rate_multiple`` -- the improvement the
-    upper arm is tuned to detect (ADR-014 Decision 19.6). Present exactly
-    when the chart checks both arms (``direction == "two_sided"``); ``None``
-    otherwise, since an upper-only chart already reports its improvement
-    figure as ``expected_detection_arl``. A number, not a warning: it can
-    exceed ``achieved_arl`` when the baseline has too few failures for an
-    improvement to be detectable quickly."""
+    upper arm is tuned to detect (ADR-014 Decision 19.6). Only a two-sided
+    chart carries it: an upper-only chart already reports its improvement
+    figure as ``expected_detection_arl``. ``None`` also when that improved
+    rate lies at or inside the upper arm's design rate ``p_l`` (corrigendum
+    C13), with an ``"improvement_shift_within_design_rate"`` advisory."""
 
     calibration_method: str
     """``"gicp_markov_chain"`` for a one-sided fit (exact, at the checked

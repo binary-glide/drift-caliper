@@ -171,6 +171,28 @@ _ILL_CONDITIONED_ARL_SENTINEL = 1e15
 # floor on floating-point distinguishability, not a statistical constant.
 _DESIGN_POINT_SAFETY_MARGIN = 1e-9
 
+# Corrigendum C15.2: 2**53 = 1 / (the spacing of doubles just below 1), so
+# the upper arm's design point 1 - p_l / M stays below 1 exactly when M <=
+# p_l * 2**53.
+_UPPER_ARM_CEILING_FACTOR = 2.0**53
+
+# The exceptions that mean "this linear system has no usable solution in
+# double precision" -- the ill-conditioning the sentinel stands for, and
+# nothing else:
+# - np.linalg.LinAlgError: numpy/scipy's own singular-matrix signal.
+# - spla.MatrixRankWarning: what spsolve emits for an exactly singular matrix,
+#   raised as an exception when a caller promotes warnings to errors.
+# - ArithmeticError: FloatingPointError under a caller's np.errstate(all=
+#   "raise"), plus ZeroDivisionError/OverflowError from the same arithmetic.
+# SuperLU's exact-singularity RuntimeError is matched by message below,
+# because RuntimeError itself is far broader than numerics.
+_NUMERICAL_SOLVE_FAILURES = (
+    np.linalg.LinAlgError,
+    spla.MatrixRankWarning,
+    ArithmeticError,
+)
+_SUPERLU_SINGULAR = "singular"
+
 _ALL_FAILED_REASON = "all_baseline_judgements_failed"
 _SCORE_NOT_BINARY_REASON = "score_not_binary"
 _NO_BASELINE_FAILURES_REASON = "no_baseline_failures"
@@ -181,6 +203,8 @@ _NO_VALID_MULTIPLE_REASON = "no_valid_multiple"
 _ARL_NOT_COMPUTABLE_REASON = "arl_not_computable"
 
 _FLOORED_LOWER_ARM_ADVISORY = "lower_arm_signals_on_first_failure"
+_DEGRADATION_WITHIN_DESIGN_RATE_ADVISORY = "detection_shift_within_design_rate"
+_IMPROVEMENT_WITHIN_DESIGN_RATE_ADVISORY = "improvement_shift_within_design_rate"
 _UPPER_ARM_NOT_DESIGNABLE_ADVISORY = "upper_arm_not_designable"
 
 _LOWER = "lower"
@@ -464,8 +488,15 @@ def _solve_absorbing_chain(
     ``transitions`` pairs each outcome's probability with every state's
     destination under it, ``-1`` meaning absorbed. Solves ``(I - Q) m = 1``
     through ``scipy.sparse.linalg.spsolve``. Returns the sentinel when the
-    solve fails, returns something other than one value per state, or
-    returns a value that is not finite or is below 1.0.
+    solve fails *numerically*, returns something other than one value per
+    state, or returns a value that is not finite or is below 1.0.
+
+    Only numerical failures become the sentinel -- and so, if reported, row
+    F14's "these legal inputs give a number double precision cannot
+    represent". A ``MemoryError``, a ``KeyboardInterrupt``, a caller's
+    timeout, or any other non-numerical exception says nothing about the
+    chain and propagates as itself (ADR-002: Caliper does not relabel a
+    failure it does not own).
     """
     sources = np.arange(n_states)
     rows: list[npt.NDArray[np.int64]] = []
@@ -488,7 +519,14 @@ def _solve_absorbing_chain(
     ).tocsc()
     try:
         steps = spla.spsolve(system, np.ones(n_states))  # type: ignore[no-untyped-call]
-    except Exception:  # any solver failure reads as ill-conditioned below
+    except _NUMERICAL_SOLVE_FAILURES:
+        return _ILL_CONDITIONED_ARL_SENTINEL
+    except RuntimeError as error:
+        # SuperLU reports an exactly singular factor as a bare RuntimeError
+        # ("Factor is exactly singular"); every other RuntimeError is not a
+        # statement about this chain and propagates as itself.
+        if _SUPERLU_SINGULAR not in str(error):
+            raise
         return _ILL_CONDITIONED_ARL_SENTINEL
     steps_array = np.asarray(steps).reshape(-1)
     if steps_array.shape[0] != n_states:
@@ -788,9 +826,22 @@ def _max_two_sided_target_arl(
 # ===========================================================================
 
 
-def _max_multiple(arms: Sequence[str], p_u: float) -> float:
-    """F11's ``max_detect_rate_multiple`` when the lower arm is designed, else inf."""
-    return (1.0 - _DESIGN_POINT_SAFETY_MARGIN) / p_u if _LOWER in arms else math.inf
+def _max_multiple(arms: Sequence[str], p_u: float, p_l: float) -> float:
+    """Give ``C``, the largest ``detect_rate_multiple`` every designed arm can take.
+
+    Corrigendum C15.2: the smaller of F11's ``(1 - 1e-9) / p_u`` when the
+    lower arm is designed (its design point ``p_u * M`` must stay below 1) and
+    ``U = p_l * 2**53`` when the upper arm is designed. ``2**-53`` is the
+    spacing of doubles just below 1, so the upper design point ``1 - p_l /
+    M`` is representable strictly below 1 exactly when ``M <= U``. Every
+    fit designs at least one arm, so ``C`` is always finite.
+    """
+    ceilings = []
+    if _LOWER in arms:
+        ceilings.append((1.0 - _DESIGN_POINT_SAFETY_MARGIN) / p_u)
+    if _UPPER in arms:
+        ceilings.append(p_l * _UPPER_ARM_CEILING_FACTOR)
+    return min(ceilings)
 
 
 def _nearest_constructible_multiple(
@@ -806,27 +857,26 @@ def _nearest_constructible_multiple(
     round-trips and moves the engineer's request by the least the arithmetic
     allows.
 
-    ⚠️ **Deliberately not C12.1's fixed anchor at 2.** A bracket ``[request,
+    Not C12.1's fixed anchor at 2 (corrigendum C14): a bracket ``[request,
     2]`` cannot hold a request at or above 2, and non-constructible multiples
-    do occur there: at m = 3,000,000 f = 1, ``"upper"`` is refused at M ~
-    4.1957 (see ``_arm_lattice``). The doubling search brackets from the
-    request itself, whatever its size. ``None`` when no multiple below F11's
-    ceiling is constructible (``"no_valid_multiple"``).
+    do occur there -- at m = 3,000,000 f = 1, ``"upper"`` is refused at M ~
+    4.1957. The search is capped at the ceiling ``C`` (C15.2), so it always
+    terminates: the step at least doubles each time, reaching ``C`` within
+    about 1,100 doublings, and the bisection halves a bracket of doubles.
+    ``None`` when nothing in ``(requested, C]`` is constructible
+    (``"no_valid_multiple"``; measured unreachable, C15.2).
     """
     refused = max(requested, 1.0)
-    ceiling = _max_multiple(arms, p_u)
+    ceiling = _max_multiple(arms, p_u, p_l)
     step = math.ulp(refused)
-    candidate = refused + step
-    while _designed_lattices(arms, p_u, p_l, candidate) is None:
+    while True:
+        candidate = min(refused + step, ceiling)
+        if _designed_lattices(arms, p_u, p_l, candidate) is not None:
+            break
+        if candidate >= ceiling:
+            return None
         refused = candidate
         step *= 2.0
-        candidate = refused + step
-        if not candidate < ceiling:  # pragma: no cover
-            # Measured unreachable (corrigendum C2, item 20): at f = m - 1,
-            # the only way to put p_u near 1/2, every lower-arm design on a
-            # 400-point grid of multiples was constructible up to m =
-            # 10,000,000.
-            return None
     while True:
         mid = refused + (candidate - refused) / 2.0
         if mid <= refused or mid >= candidate:
@@ -845,30 +895,40 @@ def _require_constructible_multiple(
     F16 fires when ``multiple <= 1`` (no shift to detect: ``p1 = p0``, and
     below 1 the arms would be mislabelled) or when some designed arm is not
     constructible at the multiple the caller passed (corrigendum C12.1).
-    F11 fires when the lower arm's design point ``p_u * multiple`` is not a
-    probability. Returns the designed arms' lattices.
+    F11 fires when a designed arm has no representable design point: the
+    lower arm's ``p_u * multiple`` is not below 1, or (C15.2) the upper arm's
+    ``1 - p_l / multiple`` rounds to 1, i.e. ``multiple`` exceeds ``U = p_l *
+    2**53``. Its ``max_detect_rate_multiple`` is the ceiling ``C`` over the
+    designed arms, which round-trips. Returns the designed arms' lattices.
     """
     if multiple <= 1.0:
         raise _multiple_refusal(multiple, _NO_SHIFT_REASON, arms, p_u, p_l)
-    if _LOWER in arms and p_u * multiple >= 1.0:
-        max_multiple = _max_multiple(arms, p_u)
+    lower_unrepresentable = _LOWER in arms and p_u * multiple >= 1.0
+    upper_unrepresentable = (
+        _UPPER in arms and multiple > p_l * _UPPER_ARM_CEILING_FACTOR
+    )
+    if lower_unrepresentable or upper_unrepresentable:
+        max_multiple = _max_multiple(arms, p_u, p_l)
         raise InvalidParameterError(
             "detect_rate_multiple implies a design point that is not a "
             "valid probability",
             context={
                 "parameter": "detect_rate_multiple",
                 "constraint": (
-                    "p_u * detect_rate_multiple must be strictly less than 1.0"
+                    "p_u * detect_rate_multiple must be strictly less than 1.0, "
+                    "and 1 - p_l / detect_rate_multiple strictly less than 1.0 "
+                    "in double precision"
                 ),
                 "kind": "invalid",
                 "provided": multiple,
                 "max_detect_rate_multiple": max_multiple,
             },
             recovery_hint=(
-                "The requested detect_rate_multiple, applied to this "
-                "baseline's conservative failure-rate estimate (p_u), "
-                "implies a failure rate of 1.0 or higher -- not a valid "
-                "probability. The largest value this baseline supports is "
+                "The requested detect_rate_multiple is too large for this "
+                "baseline: applied to p_u it implies a failure rate of 1.0 or "
+                "higher, or applied to p_l it implies an improved failure "
+                "rate too small to represent. The largest value this "
+                "baseline supports is "
                 f"reported in context['max_detect_rate_multiple'] "
                 f"({max_multiple}); pass that value, or a smaller one."
             ),
@@ -890,12 +950,12 @@ def _multiple_refusal(
         "kind": "invalid",
         "provided": multiple,
     }
-    if minimum is None:  # pragma: no cover
-        # Unreachable as measured -- see `_nearest_constructible_multiple`.
+    if minimum is None:
         context["reason"] = _NO_VALID_MULTIPLE_REASON
         hint = (
-            "No detect_rate_multiple gives this baseline a constructible "
-            "design; collect a baseline with a lower failure rate."
+            "No detect_rate_multiple at or above the one requested gives this "
+            "baseline a constructible design. Pass a smaller "
+            "detect_rate_multiple."
         )
     else:
         context.update(reason=reason, min_value=minimum, min_inclusive=True)
@@ -986,6 +1046,80 @@ def _not_designable_advisory() -> FittingAdvisory:
     )
 
 
+class _ShiftsWithinDesignRate(NamedTuple):
+    """Corrigendum C13's disclosures: which figures describe no shift.
+
+    Each is the advisory to attach -- and the signal to report the figure as
+    ``None`` without solving it -- or ``None`` when the figure is reported.
+    """
+
+    degradation: FittingAdvisory | None
+    improvement: FittingAdvisory | None
+
+    @classmethod
+    def of(
+        cls,
+        arms: Sequence[str],
+        f: int,
+        p_hat: float,
+        multiple: float,
+        p_u: float,
+        p_l: float,
+    ) -> _ShiftsWithinDesignRate:
+        """Decide both conditions from the inputs alone, before any solve.
+
+        The lower arm's run length can only fall as the failure rate rises,
+        and the upper arm's only as it falls (Decision 19.1's coupling), so a
+        shifted rate at or inside the arm's design rate gives a run length
+        no shorter than the chart's own false-alarm figure: it describes no
+        detection, and can be beyond double resolution. The degradation
+        condition is ``p_hat * M <= p_u`` with ``f >= 1`` (at f = 0 the
+        figure is taken at ``p_u * M``, always outside); the improvement
+        condition is ``p_hat / M >= p_l``. Each is tested as ``M <=
+        boundary``, against the very ``boundary`` the advisory reports, so
+        the advisory's promise -- any strictly larger multiple reports the
+        figure -- holds exactly, with no rounding between the two.
+        """
+        degradation = improvement = None
+        if f >= 1 and _LOWER in arms:
+            boundary = p_u / p_hat
+            if multiple <= boundary:
+                degradation = _no_shift_advisory(
+                    _DEGRADATION_WITHIN_DESIGN_RATE_ADVISORY, boundary
+                )
+        if f >= 1 and _UPPER in arms:
+            boundary = p_hat / p_l
+            if multiple <= boundary:
+                improvement = _no_shift_advisory(
+                    _IMPROVEMENT_WITHIN_DESIGN_RATE_ADVISORY, boundary
+                )
+        return cls(degradation, improvement)
+
+
+def _no_shift_advisory(kind: str, boundary: float) -> FittingAdvisory:
+    """Corrigendum C13's disclosure for a figure reported as ``None``."""
+    shift, design_bound = (
+        ("a degradation of", "p_u")
+        if kind == _DEGRADATION_WITHIN_DESIGN_RATE_ADVISORY
+        else ("an improvement of", "p_l")
+    )
+    return FittingAdvisory(
+        kind=kind,
+        description=(
+            f"The detection figure for {shift} detect_rate_multiple from the "
+            f"observed failure rate is not reported: that shifted rate lies at "
+            f"or inside the rate this arm is designed to tolerate ({design_bound}), "
+            "so the chart would take at least as long to signal it as to raise "
+            "a false alarm. The chart itself is valid. The figure appears once "
+            "the baseline contains more failures -- the gap between the "
+            "observed rate and its confidence bound depends on the failure "
+            "count, not the baseline's size -- or with a detect_rate_multiple "
+            f"strictly above {boundary} (this advisory's boundary)."
+        ),
+        boundary=boundary,
+    )
+
+
 class _Design(NamedTuple):
     """Every number a fit derives from the baseline before building the artefact."""
 
@@ -993,7 +1127,7 @@ class _Design(NamedTuple):
     lattice_lower: BernoulliArmLattice | None
     lattice_upper: BernoulliArmLattice | None
     achieved_arl: float
-    expected_detection_arl: float
+    expected_detection_arl: float | None
     expected_improvement_detection_arl: float | None
 
 
@@ -1010,14 +1144,24 @@ def _one_sided_design(
     in_control_up: float,
     detection_up: float,
     target: float,
+    *,
+    detection_within_design_rate: bool,
 ) -> _Design:
-    """Calibrate the one checked arm and report its figures (C3)."""
+    """Calibrate the one checked arm and report its figures (C3, C13).
+
+    The detection figure is not solved at all when its shifted rate lies
+    within the design rate (corrigendum C13).
+    """
     n, k = arm
     h = _calibrate_one_sided_decision_interval_units(
         k, n, in_control_up, target, direction=direction
     )
     achieved = _reported_arl(_arm_arl(arm, h, in_control_up), "achieved_arl")
-    detection = _reported_arl(_arm_arl(arm, h, detection_up), "expected_detection_arl")
+    detection = (
+        None
+        if detection_within_design_rate
+        else _reported_arl(_arm_arl(arm, h, detection_up), "expected_detection_arl")
+    )
     lattice = _to_lattice(arm, h)
     return _Design(
         direction=direction,
@@ -1037,8 +1181,15 @@ def _two_sided_design(
     p_hat: float,
     multiple: float,
     target: float,
+    *,
+    within_design_rate: tuple[bool, bool],
 ) -> _Design:
-    """Calibration D, or row F13 with C11's round-tripping bound."""
+    """Calibration D, or row F13 with C11's round-tripping bound.
+
+    ``within_design_rate`` is C13's ``(degradation, improvement)`` pair: a
+    figure whose shifted rate lies within the design rate is not solved.
+    """
+    degradation_within, improvement_within = within_design_rate
     calibration = _calibrate_two_sided(lower, upper, p_u, p_l, target)
     if calibration.intervals is None:
         maximum = _max_two_sided_target_arl(lower, upper, p_u, p_l, target)
@@ -1069,13 +1220,21 @@ def _two_sided_design(
     achieved = _reported_arl(
         _coupled_arl_in_units(lower_arm, upper_arm, p_l, p_u), "achieved_arl"
     )
-    detection = _reported_arl(
-        _joint_two_sided_arl0_in_units(lower_arm, upper_arm, p_hat * multiple),
-        "expected_detection_arl",
+    detection = (
+        None
+        if degradation_within
+        else _reported_arl(
+            _joint_two_sided_arl0_in_units(lower_arm, upper_arm, p_hat * multiple),
+            "expected_detection_arl",
+        )
     )
-    improvement = _reported_arl(
-        _joint_two_sided_arl0_in_units(lower_arm, upper_arm, p_hat / multiple),
-        "expected_improvement_detection_arl",
+    improvement = (
+        None
+        if improvement_within
+        else _reported_arl(
+            _joint_two_sided_arl0_in_units(lower_arm, upper_arm, p_hat / multiple),
+            "expected_improvement_detection_arl",
+        )
     )
     return _Design(
         direction=_TWO_SIDED,
@@ -1202,17 +1361,15 @@ def fit_bernoulli_cusum(
     f = scores.count(0.0)
     _require_designable_baseline(m, f, multiple, requested_direction)
 
-    advisories: list[FittingAdvisory] = []
-    effective_direction = requested_direction
-    if requested_direction == _TWO_SIDED and f == 0:
-        effective_direction = _LOWER
-        advisories.append(_not_designable_advisory())
+    not_designable = requested_direction == _TWO_SIDED and f == 0
+    effective_direction = _LOWER if not_designable else requested_direction
 
     p_hat = f / m
     p_u = clopper_pearson_upper_bound(failures=f, observations=m, alpha=_ALPHA)
     p_l = clopper_pearson_lower_bound(failures=f, observations=m, alpha=_ALPHA)
     arms = _ARMS_CHECKED[effective_direction]
     lattices = _require_constructible_multiple(multiple, arms, p_u, p_l)
+    shifts = _ShiftsWithinDesignRate.of(arms, f, p_hat, multiple, p_u, p_l)
 
     if effective_direction == _LOWER:
         design = _one_sided_design(
@@ -1221,6 +1378,7 @@ def fit_bernoulli_cusum(
             p_u,
             (p_hat if f > 0 else p_u) * multiple,
             validated_target_arl,
+            detection_within_design_rate=shifts.degradation is not None,
         )
     elif effective_direction == _UPPER:
         design = _one_sided_design(
@@ -1229,6 +1387,7 @@ def fit_bernoulli_cusum(
             1.0 - p_l,
             1.0 - p_hat / multiple,
             validated_target_arl,
+            detection_within_design_rate=shifts.improvement is not None,
         )
     else:
         design = _two_sided_design(
@@ -1239,9 +1398,23 @@ def fit_bernoulli_cusum(
             p_hat,
             multiple,
             validated_target_arl,
+            within_design_rate=(
+                shifts.degradation is not None,
+                shifts.improvement is not None,
+            ),
         )
-    if _is_floored(design.lattice_lower):
-        advisories.insert(0, _floor_advisory(p_u))
+    # C13 point 3's order: the floor, the no-shift disclosures, then
+    # upper_arm_not_designable.
+    advisories = [
+        advisory
+        for advisory in (
+            _floor_advisory(p_u) if _is_floored(design.lattice_lower) else None,
+            shifts.degradation,
+            shifts.improvement,
+            _not_designable_advisory() if not_designable else None,
+        )
+        if advisory is not None
+    ]
 
     provenance = baseline.provenance_signature
     if provenance is None:  # pragma: no cover

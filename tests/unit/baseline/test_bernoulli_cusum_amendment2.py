@@ -91,7 +91,7 @@ from drift_caliper.errors import (
     InvalidParameterError,
 )
 from tests.support import bernoulli_reference as ref
-from tests.support.bernoulli_surface import expected_detection_arl, triplet
+from tests.support.bernoulli_surface import triplet
 from tests.support.binary_baselines import binary_baseline
 from tests.support.isolated_bernoulli_fit import fit_in_child
 
@@ -549,7 +549,7 @@ class TestLowerArmFloorIsDisclosedNotRefused:
             if direction == "upper"
             else ref.degradation_within_design_rate(f, p_hat, multiple, chart.p_u)
         )
-        assert (expected_detection_arl(chart) is None) is inside
+        assert (chart.expected_detection_arl is None) is inside
 
 
 # ===========================================================================
@@ -1078,7 +1078,7 @@ class TestDetectionFigureIsAtTheTunedShift:
         the upper arm's design rate and the figure is ``None``."""
         chart = _fit(m, f, direction="upper")
         expected_fit = _reference_for(chart, m=m, f=f, direction="upper")
-        reported = expected_detection_arl(chart)
+        reported = chart.expected_detection_arl
 
         if expected is None:
             # C13 (re-based; ADR figure predates C13) -- C15.1.
@@ -1106,7 +1106,7 @@ class TestDetectionFigureIsAtTheTunedShift:
         either way."""
         chart = _fit(m, f, direction=direction)
         expected_fit = _reference_for(chart, m=m, f=f, direction=direction)
-        reported = expected_detection_arl(chart)
+        reported = chart.expected_detection_arl
 
         if expected_fit.expected_detection_arl is None:
             assert reported is None
@@ -1242,7 +1242,7 @@ class TestImprovementDetectionFigure:
         expected_fit = _reference_for(chart, m=m, f=f, direction="two_sided")
         reported = chart.expected_improvement_detection_arl
         assert chart.achieved_arl == pytest.approx(b, abs=0.05)
-        reported_detection = expected_detection_arl(chart)
+        reported_detection = chart.expected_detection_arl
         if detection is None:
             assert reported_detection is None
             _assert_c13_none(chart, "expected_detection_arl", m, f)
