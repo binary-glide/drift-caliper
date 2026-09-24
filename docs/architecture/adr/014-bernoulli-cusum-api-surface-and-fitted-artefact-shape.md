@@ -2280,7 +2280,7 @@ undefined there.
   because `"upper"` refuses at f = 0 and `"two_sided"` becomes `"lower"`.
   `expected_detection_arl` for `"upper"` is always at `p̂/M` with `f ≥ 1`.
 
-**f = 1, 2** (`g3_small_f.py`, T=370): the design is valid at every `m` measured.
+**f = 1, 2** (`g3_small_f.py`, T=370): the design is valid at every `m` measured. ⚠️ *C15.1: under C13 every "ARL at p̂/M" in this table is reported as `None`.*
 
 ```
 m        f  p_L        upper N    up  h    achieved  ARL at p̂/M   two-sided (ES) states
@@ -2296,7 +2296,7 @@ Two facts follow, and both are recorded rather than hidden.
   and `h ≈ T`. `N_upper` reaches 3.4 million at m=300,000, f=1, which takes a
   0.58 s scan. The integer-exact path of Decision 13 is required here: a float
   rebuild would fail far earlier.
-- 🚨 **Detection power is essentially nil when `p̂·T ≪ 1`.**
+- 🚨 **Detection power is essentially nil when `p̂·T ≪ 1`.** ⚠️ *C15.1: this is exactly C13's structural case; the figure is `None` with `improvement_shift_within_design_rate`.*
   - The upper arm's ARL at its own target improvement (`p̂/M`) is about equal to
     its in-control ARL₀, or **higher**: 398.1 against 370.1 at m=1000, f=1, and
     760.3 against 371.0 at m=100, f=1.
@@ -2590,7 +2590,7 @@ m     f    B (achieved)   expected_detection_arl (p̂·M)   expected_improvement
 150   40   382.6          41.2                             85.5
 ```
 
-It makes 19.2's finding visible without a warning. At m=1000 f=5 the figure
+It makes 19.2's finding visible without a warning. ⚠️ *C15.1: under C13, the f=1 rows, m=300 f=3, and m=1000 f=5's improvement figure are `None`; the other figures stand.* At m=1000 f=5 the figure
 (580.9) is **above** `B` (370.3): at the design improvement, the chart signals no
 sooner than it would false-alarm.
 
@@ -2707,7 +2707,9 @@ above is **not** edited. Each line that is now wrong carries a visible
 "⚠️ corrected by the corrigendum, below (Cn)" pointer.
 
 **Status:** ✅ **ACCEPTED 2026-09-24.** C12 corrects it within the ratified
-decisions, and reports one new defect (C12.4). ✅ **C13 and C14 are ratified in full by the product owner 2026-09-24.**
+decisions, and reports one new defect (C12.4). ✅ **C13 and C14 are ratified in full by the product owner 2026-09-24.** C15 corrects the
+specification within them, and records one finding the product owner has ruled on
+(C15.3: the default `detect_rate_multiple` stays 2, ruled 2026-09-24).
 - **C1, C4–C10** are specification corrections. They follow from decisions
   already ratified.
 - **C2's lower bound:** ruled by the product owner as C-Q1, option (A).
@@ -2741,9 +2743,9 @@ superseded behaviour is reused.**
 | 5 | F15 | m=1000 f=0 `"upper"` → F15 with its full key set |
 | 3 | m=300,000 **f=1**, `"lower"` | T=370: floored, 77126.7422. T=10⁶: `h = 101,595`, 1000018.2953 |
 | 3 | m=300,000 f=1, `"upper"` | T=370: `N = 3,364,300`, `h = 369`, 370.0241. T=10⁶: `h = 857,041`, 1000001.1949 (fits; **not** F12) |
-| 3 | m=300,000 f=1, `"two_sided"` | T=370: `h = (1, 370)`, 742 states, `B` 370.1115, `expected_detection_arl` 370.5428, `expected_improvement_detection_arl` 370.8856. T=10⁶: **F13**, because the upper arm's per-arm target of 2·10⁶ exceeds the 999,999-unit cap (Decision 16's route) |
+| 3 | m=300,000 f=1, `"two_sided"` | T=370: `h = (1, 370)`, 742 states, `B` 370.1115, `expected_detection_arl` 370.5428, `expected_improvement_detection_arl` 370.8856. T=10⁶: **F13**, because the upper arm's per-arm target of 2·10⁶ exceeds the 999,999-unit cap (Decision 16's route) ⚠️ *C15.1: the f=1 figures are `None` under C13; replacement cells are in C15.1* |
 | 3 | m=300,000 **f=30** | `"upper"` T=370: 370.2214. `"upper"` T=10⁶: `h = 81,621`, 1000026.7807. `"two_sided"` T=370: `h = (1, 379)`, 760 states, `B` 370.9495 |
-| 8 | `"upper"` `expected_detection_arl` at `p̂/M`, upper arm at `p_L` | m=150 f=40: 72.1128. m=200 f=20: 157.6429. m=1000 f=1: 398.1379. ⚠️ **The original 32.8 and 61.3 were computed with the upper arm at `p_U`**, and 314.1 is the withdrawn f = 0 fallback. All three are withdrawn |
+| 8 | `"upper"` `expected_detection_arl` at `p̂/M`, upper arm at `p_L` | m=150 f=40: 72.1128. m=200 f=20: 157.6429. m=1000 f=1: 398.1379. ⚠️ **The original 32.8 and 61.3 were computed with the upper arm at `p_U`**, and 314.1 is the withdrawn f = 0 fallback. All three are withdrawn ⚠️ *C15.1: the f=1 figures are `None` under C13; replacement cells are in C15.1* |
 | 12 | F13 refusal-path budget | re-based to f ≥ 1. m=300,000 f=1 `"two_sided"` T=10⁶ refuses. Under the D bisection, `max_two_sided_target_arl` was 38,562, took 17.8 s, and was over the 5 s budget. **Resolved by C11:** the equal-split bound reports 38,563 in 2.2 s end to end, and the budget is replaced |
 
 **Decision 16's reachability, re-measured at f ≥ 1.** The per-arm search cap is
@@ -3346,7 +3348,7 @@ fallback). Since M > 1, that is always above `p_U`, so the condition never
 holds and the figure is always reported. The improvement figures are `None` at
 f = 0 already, because no upper arm exists (19.2, C3).
 
-**Proposed specification.**
+**Specification** (drafted as a proposal; ✅ ratified 2026-09-24).
 1. **Field types.** `expected_detection_arl: float | None`, and
    `expected_improvement_detection_arl: float | None` (already optional).
    ⚠️ This reverses Decision 4's "unconditional, first-class" wording, but only
@@ -3477,7 +3479,7 @@ The pattern:
   100,000 observations with one failure. The effect is still real and
   reachable through the public API.
 
-**The `min_value` search, as the implementation does it** (proposed for
+**The `min_value` search, as the implementation does it** (✅ ratified 2026-09-24; bounded by C15.2; originally proposed for
 ratification as F16's specified search, replacing C12.1's fixed anchor):
 1. Start from the refused request, or from 1 when the request is ≤ 1.
 2. Step upward by one float spacing, doubling the step until the designed arms
@@ -3488,7 +3490,7 @@ ratification as F16's specified search, replacing C12.1's fixed anchor):
 
 It is bounded above by F11's `max_detect_rate_multiple` when the lower arm is
 designed. When nothing below that bound is constructible, it returns
-`no_valid_multiple`; that was measured unreachable (C2, item 20).
+`no_valid_multiple`; that was measured unreachable (C2, item 20). ⚠️ *corrected by C15.2: C2 only assigned the measurement. It is recorded in C15.2, and the upper-only search is capped at `U = p_L·2⁵³`.*
 
 **Measured round-trip:** for every refused multiple in the table (up to 200 per
 baseline):
@@ -3516,6 +3518,184 @@ few float spacings.
 - **29.** A property test: for any refused M ≥ 2 on a baseline with
   `p_L < 10⁻⁷`, `min_value ≥ M`, `min_value` is constructible, and the float
   below it is not.
+
+#### C15. Follow-ons to C13 and C14 (2026-09-24)
+
+C15.1 and C15.2 are specification corrections within C13 and C14, which the
+product owner ratified on 2026-09-24. They are settled here, within the
+corrigendum's ACCEPTED status. C15.3 is a finding for the product owner, not a
+decision.
+
+##### C15.1 Figures C13 turns into `None`, re-based
+
+Each condition below is checked from the fitted artefact's **own** `p_u` and
+`p_l` (`c15_rebase.py`, on production at `3bd013d`, which predates C13 and so
+still reports these figures). M = 2 and T = 370 throughout.
+
+| cell | `p̂·M` vs `p_U` | `p̂/M` vs `p_L` | `expected_detection_arl` | `expected_improvement_detection_arl` |
+|---|---|---|---|---|
+| m=300,000 f=1 `"two_sided"` (C1 item 3) | 6.667e-6 ≤ 1.297e-5 | 1.667e-6 ≥ 3.512e-7 | **None** (was 370.5428) | **None** (was 370.8856) |
+| m=1000 f=1 `"upper"` (C1 item 8) | — | 5e-4 ≥ 1.054e-4 | **None** (was 398.1379) | — |
+| m=100 f=1 `"two_sided"` (19.6) | 0.02 ≤ 0.03834 | 0.005 ≥ 0.001053 | **None** (was 8,239.9) | **None** (was 1,416.5) |
+| m=1000 f=1 `"two_sided"` (19.6) | 0.002 ≤ 0.003884 | 5e-4 ≥ 1.054e-4 | **None** (was 570.8) | **None** (was 504.7) |
+| m=1000 f=5 `"two_sided"` (19.6) | 0.01 > 0.009255 | 0.0025 ≥ 0.002435 | 558.0511 (stays) | **None** (was 580.9) |
+| m=300 f=3 `"two_sided"` (19.6) | 0.02 ≤ 0.02213 | 0.005 ≥ 0.003679 | **None** (was 953.2) | **None** (was 780.3) |
+| m=100 f=1, m=10,000 f=2, m=300,000 f=1 `"upper"` (19.2's table) | — | all ≥ `p_L` | **None** (were 760.3, 373.8, 370.1) | — |
+
+**19.2's power finding is now exactly C13's case.** Where `p̂·T ≪ 1`, the
+improvement shift lies inside the design rate. The upper arm's figure is `None`
+with `improvement_shift_within_design_rate`; it is no longer reported as a
+number close to `achieved_arl`.
+
+**Replacement cells outside the condition,** so that each affected Decision 18
+item still pins the non-`None` path. All were re-measured on `3bd013d` at M = 2
+and T = 370:
+
+| Decision 18 item | replacement cell | condition check | re-measured figure(s) |
+|---|---|---|---|
+| 3 (C1, large baselines, two-sided figures) | m=300,000 **f=30** `"two_sided"` | 2e-4 > 1.277e-4; 5e-5 < 7.743e-5 | `B` 370.9495; `expected_detection_arl` **365.9542**; `expected_improvement_detection_arl` **376.4221** |
+| 3 (C1, large baselines, upper) | m=300,000 f=30 `"upper"` | 5e-5 < 7.743e-5 | `achieved_arl` 370.2214; `expected_detection_arl` **368.3603** |
+| 8 (C1, upper figure) | m=150 f=40 and m=200 f=20 `"upper"` (already in the item) | 0.1333 < 0.2197; 0.05 < 0.07347 | **72.1128**; **157.6429** |
+| 19 (19.6) | m=200 f=20, m=100 f=10, m=150 f=40 `"two_sided"`; m=1000 f=5's degradation figure | all outside the respective condition | detection / improvement: **115.7655 / 220.0559**, **188.0735 / 334.5367**, **41.2331 / 85.5018**; m=1000 f=5 detection **558.0511** |
+
+**The `None` cells stay in Decision 18,** as assertions that the figure is `None`
+and that the matching advisory is present, with
+`boundary = p_U/p̂` or `p̂/p_L`.
+
+##### C15.2 The `min_value` search is bounded for every arm set, and it terminates (Open Question 40)
+
+**The gap.** C14's upward search is bounded by F11 only when the lower arm is
+designed. For `"upper"`, termination rested on the measurement that failures
+stop above M ≈ 36. The production code uses `math.inf` as the ceiling, so the
+doubling step would run to `inf` if nothing were constructible.
+
+**The upper arm's natural ceiling.** The upper design point is `1 − p_L/M`. It
+is representable strictly below 1 in double precision exactly when
+`p_L/M ≥ 2⁻⁵³`, the spacing of doubles just below 1. So
+**`U = p_L · 2⁵³`** is the largest multiple at which the upper arm has a
+design point at all.
+- **Measured** (`c15_termination.py`, 2,000-point log grid of M from 36 to U,
+  seven baselines with `p_L` from 3.5e-9 to 0.96):
+  - the upper arm was constructible **at every grid point and at U itself**;
+  - it was **not constructible at 4U**, where `1 − p_L/M` rounds to 1.
+
+**Specification.**
+1. **Ceiling.** Define the ceiling on `detect_rate_multiple` as `C(arms)`, the
+   smaller of:
+   - F11's `(1 − 10⁻⁹)/p_U`, when the lower arm is designed;
+   - `U = p_L · 2⁵³`, when the upper arm is designed.
+2. **A request above `C` is refused by F11**, extended to the upper arm. The
+   row's keys are unchanged: `parameter="detect_rate_multiple"`, `constraint`,
+   `kind="invalid"`, `provided`, `max_detect_rate_multiple = C`. The
+   `constraint` text now also names `1 − p_L/M < 1`.
+   - It round-trips: at `C`, the lower-arm bound is F11's existing behaviour,
+     and the upper arm is constructible at `U` in every measured case.
+   - Verification item 34 pins that.
+3. **A non-constructible request at or below `C` gets C14's upward search,
+   capped at `C`.**
+   - **The search terminates.** The candidate strictly increases, since each
+     step is at least one ulp and then doubles. So the ceiling is reached in at
+     most about `log₂(C/ulp(M)) ≤ 1,100` doublings. The bisection then halves
+     a bracket of doubles until its ends are adjacent, which takes at most
+     about 1,100 halvings.
+   - **If no constructible multiple lies in `(request, C]`, F16 raises with
+     `reason="no_valid_multiple"` and no `min_value`.** Complete row:
+     `parameter="detect_rate_multiple"`, `constraint`, `kind="invalid"`,
+     `provided`, `reason="no_valid_multiple"`. There is no round-trip key,
+     mirroring F10. The recovery hint directs the engineer to a smaller multiple.
+   - **There is no unbounded loop on any path.** The production `math.inf`
+     ceiling for upper-only fits is replaced by `U`.
+
+**Is `no_valid_multiple` reachable? Measured now, correcting C14.** C14 said
+it "was measured unreachable (C2, item 20)". C2 only **assigned** that
+measurement to verification item 20, and no result was ever recorded. It is
+recorded now (`c15_termination.py`):
+- **Lower-designed fits** (`"lower"` and `"two_sided"`), at the baselines that
+  put `p_U` closest to its limits: m ∈ {100, 1,000, 100,000, 10,000,000} with
+  f ∈ {m/2, 3m/4, 9m/10, m − 1}, 32 cases.
+  - A constructible multiple always exists just above 1, from
+    M − 1 = 9×10⁻¹⁶ to 9.3×10⁻⁹.
+  - F11's ceiling is never below it. That includes f = m − 1, where the
+    ceiling is as close to 1 as 1.00105 at m=100 and 1.00011 at m=1,000, and
+    within 10⁻¹⁰ of 1 at m ≥ 100,000.
+- **Upper-designed fits:** no non-constructible multiple on `[36, U]` at any
+  of the seven baselines. The C14 table shows none above M ≈ 36 at all.
+- **So `no_valid_multiple` was not reached in any measured case.** It remains
+  specified, because the search must terminate on every path.
+
+C14's sentence is corrected accordingly.
+
+##### C15.3 Finding for the product owner: at the default `detect_rate_multiple = 2`, C13 blanks the figures for typical low-failure baselines
+
+The finding itself is not a decision; the product owner's ruling follows below. C13's degradation figure is
+`None` iff `p_U/p̂ ≥ M`, and its improvement figure is `None` iff
+`p̂/p_L ≥ M`. At α = 0.10 (`c15_ratios.py`):
+
+```
+         p_U / p̂ (degradation)                          p̂ / p_L (improvement)
+f     m=100   m=300   m=1000  m=10000  m=300000       m=100   m=300   m=1000  m=10000  m=300000
+1     3.834   3.871   3.884   3.889    3.890          9.496   9.493   9.492   9.491    9.491
+2     2.617   2.646   2.657   2.661    2.661          3.752   3.758   3.760   3.761    3.761
+3     2.186   2.213   2.223   2.227    2.227          2.710   2.718   2.721   2.722    2.722
+5     1.815   1.842   1.851   1.855    1.855          2.039   2.050   2.054   2.055    2.055
+10    1.499   1.527   1.536   1.540    1.541          1.585   1.600   1.605   1.607    1.607
+20    1.303   1.336   1.347   1.352    1.352          1.344   1.366   1.374   1.377    1.377
+```
+
+**What it shows:**
+- **The ratios depend almost only on the failure count `f`, not on `m`.** Both
+  bounds scale like `f/m`, and their ratio to `p̂ = f/m` tends to a function of
+  `f` alone.
+- **At M = 2:**
+  - the **degradation** figure is `None` for **f ≤ 3**, at every baseline
+    size measured;
+  - the **improvement** figure is `None` for **f ≤ 5**.
+- Healthy agents on large baselines typically have very few failures, so
+  **the default reports neither detection figure for them**. That covers
+  m = 100, 1,000 or 300,000 with f = 1, and m = 300 with f = 3. The chart
+  itself is valid; only the disclosure is absent, with its advisory giving the
+  multiple (`p_U/p̂`, or `p̂/p_L`) above which it would be reported.
+- **Why this is not a defect.** At f ≤ 3 the Clopper–Pearson bound is more than
+  twice the estimate. A doubling of `p̂` is still a rate the chart is designed
+  to tolerate. So "how fast would it catch a doubling" honestly has no finite
+  answer below the false-alarm spacing.
+- **For the product owner, separately:** whether the default M should rise, or
+  depend on `f`, so that the disclosure is present at typical low-failure
+  baselines. Nothing here changes it.
+
+✅ **Ruled by the product owner 2026-09-24: option (a) — the default stays
+`detect_rate_multiple = 2`, and the `None` stands.** The `None` is true: with
+few failures in the baseline, a doubling of the observed rate cannot be told
+apart from in-control on that baseline, by this chart or any other; the remedy
+is more baseline data, not a different default. Rejected: **(b)** raising the
+default — `M` also sets the shift the chart is tuned for, so a larger default
+makes the chart less sensitive to smaller degradations, and 2.0 is ADR-012's
+regret-study choice; **(c)** evaluating the figure at the design shift
+`p_U·M` instead of `p̂·M` — always present, but for f = 1 "detects a doubling"
+would mean a 7.8× rise over what was observed, a number that misleads.
+
+**One consequence, text only:** the `recovery_hint` of both no-shift
+advisories (`detection_shift_within_design_rate`,
+`improvement_shift_within_design_rate`) must say that the figure appears once
+the baseline contains more failures (the ratio depends on f, not m), or with a
+`detect_rate_multiple` above the reported `boundary`. `recovery_hint` is
+human-facing and deliberately untested (ADR-002), so this adds no
+verification item.
+
+**Verification (Decision 18, continued).**
+- **33.** C15.1:
+  - each `None` cell asserts `None`, plus its advisory with the stated
+    boundary;
+  - each replacement cell asserts its figure to rel 1e-6 against an
+    independent reference.
+- **34.** C15.2:
+  - `"upper"` at `M = C` fits;
+  - `M` above `C` raises F11 with `max_detect_rate_multiple = C`, which
+    round-trips;
+  - the search, driven by a monkeypatched always-refusing lattice finder, ends
+    in `no_valid_multiple` within a bounded number of probes and never hangs.
+- **35.** C15.3's table is pinned as a property. For every m, at M = 2, both
+  figures are `None` for f = 1 and both are floats for f = 10.
 
 #### Product-owner rulings on the corrigendum (2026-09-24)
 
