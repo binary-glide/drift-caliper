@@ -38,7 +38,7 @@ from drift_caliper.baseline import FittedBernoulliCUSUM, fit_bernoulli_cusum
 from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting_module
 from drift_caliper.errors import InvalidParameterError
 from tests.support import bernoulli_reference as ref
-from tests.support.bernoulli_surface import lattice_lower, lattice_upper, p_l, triplet
+from tests.support.bernoulli_surface import triplet
 from tests.support.binary_baselines import binary_baseline
 from tests.support.isolated_bernoulli_fit import fit_in_child
 
@@ -136,7 +136,7 @@ class TestJointStateSpaceIsThePerArmProduct:
 
         chart = _fit(100, 10, 370.0)
 
-        lower, upper = triplet(lattice_lower(chart)), triplet(lattice_upper(chart))
+        lower, upper = triplet(chart.lattice_lower), triplet(chart.lattice_upper)
         assert lower is not None
         assert upper is not None
         assert math.gcd(lower[0], upper[0]) == 1
@@ -176,9 +176,9 @@ class TestPerArmCapHitInTwoSidedModeIsTheJointRefusal:
         assert chart.requested_arl == float(bound)
         assert bound == ref.es_bound(
             _lattice(ref.lower_arm_design_pair(chart.p_u, 2.0)),
-            _lattice(ref.upper_arm_design_pair(p_l(chart), 2.0)),
+            _lattice(ref.upper_arm_design_pair(chart.p_l, 2.0)),
             chart.p_u,
-            p_l(chart),
+            chart.p_l,
         )
 
 

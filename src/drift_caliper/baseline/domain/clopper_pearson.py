@@ -1,4 +1,4 @@
-"""Clopper-Pearson upper confidence bound -- the ``p_U`` GICP designs against.
+"""Clopper-Pearson confidence bounds -- the ``p_U`` and ``p_L`` GICP designs against.
 
 See ``docs/architecture/adr/013-gicp-supersedes-the-provisional-baseline-floor.md``
 section 1. Guaranteed In-Control Performance (Heidema et al. 2026) designs a
@@ -10,6 +10,13 @@ classical Clopper-Pearson interval:
 
     p_U(f, m, alpha) = quantile function of Beta(f+1, m-f) at 1-alpha  (f < m)
     p_U(0, m, alpha) = 1 - alpha**(1/m)                    (closed form, f=0)
+    p_L(f, m, alpha) = quantile function of Beta(f, m-f+1) at alpha    (f > 0)
+    p_L(0, m, alpha) = 0
+
+The lower bound is ADR-014 Decision 19.1's addition: the Bernoulli CUSUM's
+improvement-detecting arm alarms *more* as the failure rate falls, so its
+conservative design rate is the lower bound, by the mirror of the same
+coupling argument.
 
 ``alpha`` is not exposed here as a validated, engineer-facing range -- it is
 supplied by ``bernoulli_cusum_fitting.py`` as a fixed internal constant
@@ -49,6 +56,48 @@ from scipy.stats import beta  # type: ignore[attr-defined]
 from drift_caliper.errors import InvalidParameterError
 
 
+def _require_valid_counts(*, failures: int, observations: int) -> None:
+    """Reject counts outside both bounds' shared domain, ``0 <= f < m``.
+
+    Shared by :func:`clopper_pearson_upper_bound` and
+    :func:`clopper_pearson_lower_bound` so the two bounds can never disagree
+    about which baselines are legal.
+    """
+    if observations <= 0:
+        raise InvalidParameterError(
+            "observations must be a positive integer",
+            context={
+                "parameter": "observations",
+                "constraint": "must be a positive integer",
+                "kind": "invalid",
+                "provided": observations,
+            },
+            recovery_hint=(
+                "Pass a positive observation count -- the number of Phase I "
+                "judgements the failure rate was estimated from."
+            ),
+        )
+    if failures < 0 or failures >= observations:
+        raise InvalidParameterError(
+            "failures must be between 0 and observations (exclusive of "
+            "observations itself)",
+            context={
+                "parameter": "failures",
+                "constraint": f"must satisfy 0 <= failures < {observations}",
+                "kind": "invalid",
+                "provided": failures,
+            },
+            recovery_hint=(
+                "Clopper-Pearson's upper bound is undefined when every "
+                "observation failed (failures == observations) -- "
+                "Beta(failures + 1, observations - failures) has no defined "
+                "second shape parameter at that point. A caller with an "
+                "all-failed baseline must handle that case before calling "
+                "this function."
+            ),
+        )
+
+
 def clopper_pearson_upper_bound(
     *, failures: int, observations: int, alpha: float
 ) -> float:
@@ -85,39 +134,7 @@ def clopper_pearson_upper_bound(
         (ADR-013 section 5) -- it is a different, more specific failure
         than an ordinary out-of-range ``failures``/``observations`` pair.
     """
-    if observations <= 0:
-        raise InvalidParameterError(
-            "observations must be a positive integer",
-            context={
-                "parameter": "observations",
-                "constraint": "must be a positive integer",
-                "kind": "invalid",
-                "provided": observations,
-            },
-            recovery_hint=(
-                "Pass a positive observation count -- the number of Phase I "
-                "judgements the failure rate was estimated from."
-            ),
-        )
-    if failures < 0 or failures >= observations:
-        raise InvalidParameterError(
-            "failures must be between 0 and observations (exclusive of "
-            "observations itself)",
-            context={
-                "parameter": "failures",
-                "constraint": f"must satisfy 0 <= failures < {observations}",
-                "kind": "invalid",
-                "provided": failures,
-            },
-            recovery_hint=(
-                "Clopper-Pearson's upper bound is undefined when every "
-                "observation failed (failures == observations) -- "
-                "Beta(failures + 1, observations - failures) has no defined "
-                "second shape parameter at that point. A caller with an "
-                "all-failed baseline must handle that case before calling "
-                "this function."
-            ),
-        )
+    _require_valid_counts(failures=failures, observations=observations)
     if failures == 0:
         # math.pow, not `alpha ** (1.0 / observations)` -- typeshed's
         # `float.__pow__` stub returns a union including `complex` (a
@@ -131,4 +148,48 @@ def clopper_pearson_upper_bound(
     return float(beta.ppf(1.0 - alpha, failures + 1, observations - failures))
 
 
-__all__ = ["clopper_pearson_upper_bound"]
+def clopper_pearson_lower_bound(
+    *, failures: int, observations: int, alpha: float
+) -> float:
+    """Compute the one-sided Clopper-Pearson lower confidence bound ``p_L``.
+
+    The ``alpha`` quantile of ``Beta(f, m - f + 1)`` -- the mirror of
+    :func:`clopper_pearson_upper_bound`, and the design rate of the Bernoulli
+    CUSUM's upper (improvement-detecting) arm (ADR-014 Decision 19.1). That
+    arm signals on *successes*, so its in-control ARL falls as the true
+    failure rate falls; designing it at a lower bound is what makes its
+    guarantee conservative, by the coupling argument in Decision 19.1.
+
+    Parameters
+    ----------
+    failures
+        The observed failure count ``f``. Must satisfy ``0 <= failures <
+        observations``, the same domain as the upper bound's.
+    observations
+        The total observation count ``m``. Must be strictly positive.
+    alpha
+        The guarantee's own risk appetite -- ADR-013's ratified ``0.10``,
+        shared with ``p_U`` (Decision 19.1 does not re-derive it).
+
+    Returns
+    -------
+    float
+        ``p_L``: exactly ``0.0`` when ``failures == 0`` (Decision 19.2 -- no
+        improvement from zero exists to detect), otherwise strictly inside
+        ``(0, failures / observations]``.
+
+    Raises
+    ------
+    InvalidParameterError
+        ``observations <= 0``, or ``failures`` is outside
+        ``[0, observations)`` -- validated exactly as the upper bound does,
+        so the two bounds accept the same inputs.
+    """
+    _require_valid_counts(failures=failures, observations=observations)
+    if failures == 0:
+        return 0.0
+    # scipy.stats.beta.ppf has no type stub mypy can see (see above).
+    return float(beta.ppf(alpha, failures, observations - failures + 1))
+
+
+__all__ = ["clopper_pearson_lower_bound", "clopper_pearson_upper_bound"]

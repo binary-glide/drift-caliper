@@ -37,12 +37,7 @@ from hypothesis import strategies as st
 from drift_caliper.baseline import FittedBernoulliCUSUM, fit_bernoulli_cusum
 from drift_caliper.errors import InvalidParameterError
 from tests.support import bernoulli_reference as ref
-from tests.support.bernoulli_surface import (
-    lattice_lower,
-    lattice_upper,
-    p_l,
-    triplet,
-)
+from tests.support.bernoulli_surface import triplet
 from tests.support.binary_baselines import binary_baseline
 
 _NO_SHIFT = "no_shift_to_detect"
@@ -175,7 +170,7 @@ class TestJustAboveOne:
         instead of the linear scan that hung."""
         chart = _fit(200, 20, 1.0000001, direction=direction, target_arl=370.0)
 
-        lattice = lattice_lower(chart) if direction == "lower" else lattice_upper(chart)
+        lattice = chart.lattice_lower if direction == "lower" else chart.lattice_upper
         assert triplet(lattice) == expected_lattice
 
     # Budget: reference D feasibility check 1.9 s + C11 bound 0.9 s locally;
@@ -255,10 +250,10 @@ def _assert_lattice_is_the_ratified_one(
 ) -> None:
     if arm == "lower":
         p0, p1 = ref.lower_arm_design_pair(chart.p_u, multiple)
-        lattice = triplet(lattice_lower(chart))
+        lattice = triplet(chart.lattice_lower)
     else:
-        p0, p1 = ref.upper_arm_design_pair(p_l(chart), multiple)
-        lattice = triplet(lattice_upper(chart))
+        p0, p1 = ref.upper_arm_design_pair(chart.p_l, multiple)
+        lattice = triplet(chart.lattice_upper)
     assert lattice is not None
     n, k, _ = lattice
 
@@ -293,7 +288,7 @@ class TestLatticeFinderAtLargeMultiples:
         the violation reproduces either way.) The ratified rule gives (14, 1) and
         (2859, 1)."""
         chart = _fit(m, f, multiple, direction="lower")
-        lattice = triplet(lattice_lower(chart))
+        lattice = triplet(chart.lattice_lower)
 
         assert lattice is not None
         assert lattice[:2] == expected

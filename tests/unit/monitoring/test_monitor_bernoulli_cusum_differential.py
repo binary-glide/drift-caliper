@@ -47,7 +47,7 @@ from drift_caliper.baseline import FittedBernoulliCUSUM, fit_bernoulli_cusum
 from drift_caliper.errors import InvalidParameterError
 from drift_caliper.measurement import Provenance, ScoringResult
 from drift_caliper.monitoring import Monitor
-from tests.support.bernoulli_surface import lattice_lower, lattice_upper, triplet
+from tests.support.bernoulli_surface import triplet
 from tests.support.binary_baselines import binary_baseline
 
 _T = 370.0
@@ -84,7 +84,7 @@ def _chart(m: int, f: int, direction: str) -> tuple[FittedBernoulliCUSUM, Proven
 
 
 def _lattices(chart: FittedBernoulliCUSUM) -> tuple[Lattice, Lattice]:
-    return triplet(lattice_lower(chart)), triplet(lattice_upper(chart))
+    return triplet(chart.lattice_lower), triplet(chart.lattice_upper)
 
 
 def _observation(provenance: Provenance, failed: bool) -> ScoringResult:
@@ -302,7 +302,7 @@ class _IntSubclass(int):
 def _corrupted(
     chart: FittedBernoulliCUSUM, field: str, attribute: str, value: object
 ) -> FittedBernoulliCUSUM:
-    lattice = lattice_lower(chart) if field == "lattice_lower" else lattice_upper(chart)
+    lattice = chart.lattice_lower if field == "lattice_lower" else chart.lattice_upper
     assert lattice is not None
     bad_lattice: Any = lattice
     return chart.model_copy(

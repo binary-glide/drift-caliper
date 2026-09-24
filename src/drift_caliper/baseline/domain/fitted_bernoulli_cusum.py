@@ -3,7 +3,9 @@
 See ``docs/domain-model.md`` (Fitted Artefact Protocol -- Chart-Specific
 Artefacts -- FittedBernoulliCUSUM) and
 ``docs/architecture/adr/014-bernoulli-cusum-api-surface-and-fitted-artefact-shape.md``
-Decision 6b for the field table this type implements verbatim.
+Decision 6b for the field table, as amended by Amendment 2 (Decisions 14,
+15 and 19) and its corrigendum (C3, C5): the two ``BernoulliArmLattice``
+fields are the chart, and the four arm floats are derived from them.
 
 🚨 **Does not satisfy ``FittedControlLimits``** -- the first fitted artefact
 type that does not (ADR-014 Decision 6a). Its statistic accumulates the raw
@@ -27,9 +29,10 @@ from __future__ import annotations
 
 from typing import NoReturn
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, computed_field
 
 from drift_caliper.baseline.domain.audit_summary import CHART_SPECIFIC_HEADING
+from drift_caliper.baseline.domain.bernoulli_arm_lattice import BernoulliArmLattice
 from drift_caliper.baseline.domain.fitted_artefact_base import FittedArtefactBase
 from drift_caliper.baseline.domain.fitting_advisory import FittingAdvisory
 
@@ -62,61 +65,115 @@ class FittedBernoulliCUSUM(FittedArtefactBase):
     provenance_criteria: str
     requested_arl: float
     achieved_arl: float
-    """Exact, via the joint two-armed Markov-chain solve for a two-sided fit,
-    or the single-arm exact solve for a one-sided fit (ADR-014 section 6c)."""
+    """The exact in-control ARL of the constructed integer chart (ADR-014
+    Decision 13.1), and always ``>= requested_arl``. Its meaning depends on
+    which arms are checked: for ``"lower"``, the lower arm's one-sided ARL0 at
+    ``p_u``; for ``"upper"``, the upper arm's one-sided ARL0 at ``p_l``; for
+    ``"two_sided"``, **B**, the exact expected run length of the coupled
+    three-outcome chain -- a guaranteed floor on the joint in-control ARL
+    over every true failure rate in ``[p_l, p_u]`` (Decision 19.4)."""
 
     expected_detection_arl: float
-    """ADR-013 section 4's detection-performance disclosure -- the exact
-    ARL1 of the constructed chart, evaluated at ``observed_failure_rate *
-    detect_rate_multiple`` (or ``p_u * detect_rate_multiple`` when no
-    failures were observed, since "a rise from zero" is otherwise undefined
-    as a target rate). A first-class, unconditional field, not routed
-    through ``FittingAdvisory`` (ADR-014 Decision 4) -- every fit reports it
-    on the main happy path."""
+    """ADR-013 section 4's detection disclosure, as amended by ADR-014
+    Decision 15: the exact ARL1 of the constructed chart at **the shift the
+    checked arm(s) are tuned to detect** -- failure rate
+    ``observed_failure_rate * detect_rate_multiple`` for ``"lower"`` (``p_u *
+    detect_rate_multiple`` when no failures were observed) and for
+    ``"two_sided"`` (the joint chain); ``observed_failure_rate /
+    detect_rate_multiple``, the improvement, for ``"upper"``. First-class and
+    unconditional (ADR-014 Decision 4)."""
+
+    expected_improvement_detection_arl: float | None = None
+    """The two-sided joint chain's exact ARL at failure rate
+    ``observed_failure_rate / detect_rate_multiple`` -- the improvement the
+    upper arm is tuned to detect (ADR-014 Decision 19.6). Present exactly
+    when the chart checks both arms (``direction == "two_sided"``); ``None``
+    otherwise, since an upper-only chart already reports its improvement
+    figure as ``expected_detection_arl``. A number, not a warning: it can
+    exceed ``achieved_arl`` when the baseline has too few failures for an
+    improvement to be detectable quickly."""
 
     calibration_method: str
-    """``"gicp_markov_chain"`` -- the exact joint (two-sided) or single-arm
-    (one-sided) Markov-chain solve, never the continuous chart's
-    harmonic-combination approximation (ADR-014 section 6c)."""
+    """``"gicp_markov_chain"`` for a one-sided fit (exact, at the checked
+    arm's own conservative bound); ``"gicp_markov_chain_coupled_bound"`` for
+    a two-sided fit, whose ``achieved_arl`` is the coupled floor B under
+    calibration D (ADR-014 corrigendum C5). No approximate path exists."""
 
-    # ADR-011's non-raising disclosure vehicle -- carried for forward
-    # compatibility with ADR-005's still-unbuilt middle-tier baseline-
-    # adequacy advisory (ADR-013 section 2 confirms it does apply to binary
-    # baselines unchanged); empty today, since no producer for this chart
-    # exists yet.
     advisories: tuple[FittingAdvisory, ...] = ()
+    """Non-raising disclosures (ADR-011's vehicle). Two kinds are produced for
+    this chart: ``"lower_arm_signals_on_first_failure"`` when the lower arm is
+    at its floor -- every single failure signals, so the achieved ARL0 is
+    ``1/p_u`` whatever was requested (ADR-014 Decision 12; ``boundary`` is
+    that ARL0) -- and ``"upper_arm_not_designable"`` when a two-sided request
+    met a zero-failure baseline and only the lower arm could be built
+    (Decision 19.2; ``boundary`` is ``1.0``, the smallest failure count at
+    which the improvement arm can be designed)."""
 
     # -- Bernoulli-specific design surface --
     detect_rate_multiple: float
     """*M* -- the shift lever, a multiple of the in-control failure rate
-    rather than a sigma multiple (ADR-012 section 1)."""
+    rather than a sigma multiple (ADR-012 section 1). Moves the lower arm's
+    design point up (``M * p_u``) and the upper arm's down (``p_l / M``)."""
 
     alpha: float
-    """GICP's own risk appetite -- ``0.10`` (ADR-013 section 3), fixed.
-    Reported for auditability, not settable (ADR-014 Decision 5)."""
+    """GICP's own risk appetite -- ``0.10`` (ADR-013 section 3), the level of
+    both confidence bounds. Reported for auditability, not settable (ADR-014
+    Decision 5)."""
 
     p_u: float
     """The one-sided Clopper-Pearson upper confidence bound on the
-    baseline's observed failure rate -- the conservative rate the design
-    actually uses in place of ``observed_failure_rate`` (ADR-013 section 1)."""
+    baseline's failure rate -- the lower arm's design and calibration rate
+    (ADR-013 section 1)."""
+
+    p_l: float
+    """The one-sided Clopper-Pearson lower confidence bound on the baseline's
+    failure rate -- the upper arm's design and calibration rate (ADR-014
+    Decision 19.1). ``0.0`` when no failures were observed."""
 
     direction: str
-    """``"two_sided"`` (default), ``"lower"``, or ``"upper"`` -- same
-    vocabulary as ``FittedCUSUM.direction``."""
+    """The chart that actually runs: ``"two_sided"``, ``"lower"`` or
+    ``"upper"`` -- same vocabulary as ``FittedCUSUM.direction``. A two-sided
+    request against a zero-failure baseline reports ``"lower"``, because only
+    that arm could be designed (ADR-014 Decision 19.2)."""
 
-    reference_value_lower: float
-    """*r* for the degradation-detecting (lower) arm -- design point
-    ``p_1 = detect_rate_multiple * p_u``."""
+    lattice_lower: BernoulliArmLattice | None
+    """The exact integer definition of the degradation-detecting (lower)
+    arm -- **the stored, authoritative chart** (ADR-014 Decision 14). Present
+    exactly when ``direction`` checks the lower arm (corrigendum C3)."""
 
-    decision_interval_lower: float
-    """*h* for the degradation-detecting (lower) arm."""
+    lattice_upper: BernoulliArmLattice | None
+    """The same for the improvement-detecting (upper) arm; present exactly
+    when ``direction`` checks the upper arm."""
 
-    reference_value_upper: float
-    """*r* for the improvement-detecting (upper) arm -- design point
-    ``p_u / detect_rate_multiple`` (ADR-012 amendment section 2)."""
+    # Derived, never stored (Decision 14.3): one source of truth, so a float
+    # can never disagree with the integers Monitor actually steps.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def reference_value_lower(self) -> float | None:
+        """*r* for the lower arm -- ``reference_units / denominator``."""
+        lattice = self.lattice_lower
+        return None if lattice is None else lattice.reference_value
 
-    decision_interval_upper: float
-    """*h* for the improvement-detecting (upper) arm."""
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def decision_interval_lower(self) -> float | None:
+        """*h* for the lower arm -- ``decision_interval_units / denominator``."""
+        lattice = self.lattice_lower
+        return None if lattice is None else lattice.decision_interval
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def reference_value_upper(self) -> float | None:
+        """*r* for the upper arm -- ``reference_units / denominator``."""
+        lattice = self.lattice_upper
+        return None if lattice is None else lattice.reference_value
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def decision_interval_upper(self) -> float | None:
+        """*h* for the upper arm -- ``decision_interval_units / denominator``."""
+        lattice = self.lattice_upper
+        return None if lattice is None else lattice.decision_interval
 
     def __bool__(self) -> NoReturn:
         """Forbid truthiness -- see the class docstring's BIN-110 note."""
@@ -144,19 +201,33 @@ class FittedBernoulliCUSUM(FittedArtefactBase):
             f"Requested ARL: {self.requested_arl}",
             f"Achieved ARL: {self.achieved_arl}",
             f"Expected detection ARL: {self.expected_detection_arl}",
+            "Expected improvement detection ARL: "
+            f"{self.expected_improvement_detection_arl}",
             f"Calibration method: {self.calibration_method}",
             "",
             CHART_SPECIFIC_HEADING,
             f"Detect rate multiple (M): {self.detect_rate_multiple}",
             f"Alpha: {self.alpha}",
             f"Clopper-Pearson upper bound (p_U): {self.p_u}",
+            f"Clopper-Pearson lower bound (p_L): {self.p_l}",
             f"Direction: {self.direction}",
+            f"Lattice, lower arm: {_describe_lattice(self.lattice_lower)}",
             f"Reference value, lower arm (r): {self.reference_value_lower}",
             f"Decision interval, lower arm (h): {self.decision_interval_lower}",
+            f"Lattice, upper arm: {_describe_lattice(self.lattice_upper)}",
             f"Reference value, upper arm (r): {self.reference_value_upper}",
             f"Decision interval, upper arm (h): {self.decision_interval_upper}",
         ]
         return "\n".join(lines)
+
+
+def _describe_lattice(lattice: BernoulliArmLattice | None) -> str:
+    if lattice is None:
+        return "not checked"
+    return (
+        f"N={lattice.denominator}, r_units={lattice.reference_units}, "
+        f"h_units={lattice.decision_interval_units}"
+    )
 
 
 __all__ = ["FittedBernoulliCUSUM"]

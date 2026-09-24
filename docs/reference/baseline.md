@@ -25,6 +25,8 @@ calibrated control limits from it.
 
 ::: drift_caliper.FittedBernoulliCUSUM
 
+::: drift_caliper.baseline.BernoulliArmLattice
+
 ::: drift_caliper.FittedControlLimits
 
 ::: drift_caliper.FittingAdvisory

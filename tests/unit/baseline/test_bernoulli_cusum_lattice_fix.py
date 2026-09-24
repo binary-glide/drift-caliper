@@ -47,7 +47,6 @@ from drift_caliper.errors import InvalidParameterError
 from drift_caliper.measurement import Provenance
 from drift_caliper.monitoring import Monitor
 from tests.factories import ProvenanceFactory, ScoringResultFactory
-from tests.support.bernoulli_surface import optional_arm_float
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -168,7 +167,7 @@ class TestReferenceValueIntervalInvariant:
 
         # Upper arm: r_q must be in (q0_upper, q1_upper) strictly. ADR-014
         # Decision 19.2: at f = 0 a two-sided request fits the lower arm only.
-        r_q_upper = optional_arm_float(result, "reference_value_upper")
+        r_q_upper = result.reference_value_upper
         if f == 0:
             assert r_q_upper is None
             return
@@ -239,14 +238,14 @@ class TestFixedN100RegressionCases:
 
         if arm == "upper" and f == 0:
             assert result.direction == "lower"
-            assert optional_arm_float(result, "reference_value_upper") is None
+            assert result.reference_value_upper is None
             return
         if arm == "lower":
-            r_q = optional_arm_float(result, "reference_value_lower")
+            r_q = result.reference_value_lower
             p0, p1 = design["p0_lower"], design["p1_lower"]
             r_real = design["r_lower"]
         else:
-            r_q = optional_arm_float(result, "reference_value_upper")
+            r_q = result.reference_value_upper
             p0, p1 = design["q0_upper"], design["q1_upper"]
             r_real = design["r_upper"]
         assert r_q is not None
@@ -351,14 +350,19 @@ class TestSearchCapEnforcement:
         assert math.isfinite(max_arl)
         assert max_arl >= 1.0
 
-    # Budget: measured 90.4 s locally against the pre-amendment code (it
-    # drives a zero-drift chain to the real cap); x3 = 271 s. Decision 18 item
-    # 12 asks for the cap to be monkeypatched instead -- left to the
-    # implementer, since this test pins a private helper's behaviour.
-    @pytest.mark.timeout(300)
-    def test_max_attainable_arl_round_trips(self) -> None:
+    # Budget: the cap is patched to 10,000 units (Decision 18 item 12: never
+    # drive a zero-drift chain to the real 999,999-unit cap -- that took
+    # 90.4 s pre-amendment and 26.5 s after). What is asserted is unchanged:
+    # the reported bound, passed back, is accepted.
+    @pytest.mark.timeout(60)
+    def test_max_attainable_arl_round_trips(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """BIN-122 rule: the reported max_attainable_arl must itself be
         accepted when passed back as the target."""
+        import drift_caliper.baseline.domain.bernoulli_cusum_fitting as mod
+
+        monkeypatch.setattr(mod, "_MAX_DECISION_INTERVAL_UNITS", 10_000)
         from drift_caliper.baseline.domain.bernoulli_cusum_fitting import (
             _calibrate_one_sided_decision_interval_units,
         )

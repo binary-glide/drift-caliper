@@ -31,6 +31,7 @@ from drift_caliper.baseline.domain.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
 )
+from drift_caliper.baseline.domain.bernoulli_arm_lattice import BernoulliArmLattice
 from drift_caliper.baseline.domain.bernoulli_cusum_fitting import (
     DEFAULT_DETECT_RATE_MULTIPLE,
     fit_bernoulli_cusum,
@@ -60,6 +61,7 @@ __all__ = [
     "DEFAULT_SMOOTHING_PARAM",
     "DEFAULT_SUFFICIENCY_THRESHOLD",
     "Baseline",
+    "BernoulliArmLattice",
     "DataQualityConcern",
     "FittedBernoulliCUSUM",
     "FittedCUSUM",

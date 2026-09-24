@@ -42,7 +42,6 @@ import pytest
 from drift_caliper.baseline import FittedBernoulliCUSUM, fit_bernoulli_cusum
 from drift_caliper.measurement import Provenance, ScoringResult
 from drift_caliper.monitoring import Monitor
-from tests.support.bernoulli_surface import p_l
 from tests.support.binary_baselines import binary_baseline
 from tests.support.spc_simulation import derived_relative_tolerance
 
@@ -105,7 +104,7 @@ def test_one_sided_simulated_mean_run_length_matches_achieved_arl(
     m: int, f: int, direction: str, rate_name: str
 ) -> None:
     chart, provenance = _fit(m, f, direction)
-    rate = chart.p_u if rate_name == "p_u" else p_l(chart)
+    rate = chart.p_u if rate_name == "p_u" else chart.p_l
 
     simulated = _mean_run_length(chart, provenance, rate)
 
@@ -135,7 +134,7 @@ def test_two_sided_simulated_mean_run_length_is_at_least_the_coupled_bound(
     """Decision 18 item 17 at m=300 f=3: ``B`` is a floor at ``p_L``, ``p_hat``
     and ``p_U`` (Decision 19.4's coupling argument)."""
     chart, provenance = _fit(300, 3, "two_sided")
-    rate = {"p_l": p_l(chart), "p_hat": 3 / 300, "p_u": chart.p_u}[rate_name]
+    rate = {"p_l": chart.p_l, "p_hat": 3 / 300, "p_u": chart.p_u}[rate_name]
 
     simulated = _mean_run_length(chart, provenance, rate)
 

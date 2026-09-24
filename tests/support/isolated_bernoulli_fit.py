@@ -23,7 +23,10 @@ import math
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from drift_caliper.baseline import BernoulliArmLattice
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,12 +43,7 @@ def _json_safe(value: object) -> object:
     return repr(value)
 
 
-def _field(chart: object, name: str) -> Any:
-    return getattr(chart, name)
-
-
-def _lattice(chart: object, name: str) -> list[int] | None:
-    lattice = _field(chart, name)
+def _lattice(lattice: BernoulliArmLattice | None) -> list[int] | None:
     if lattice is None:
         return None
     return [
@@ -86,15 +84,15 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
                 "requested_arl": chart.requested_arl,
                 "achieved_arl": chart.achieved_arl,
                 "expected_detection_arl": chart.expected_detection_arl,
-                "expected_improvement_detection_arl": _field(
-                    chart, "expected_improvement_detection_arl"
+                "expected_improvement_detection_arl": (
+                    chart.expected_improvement_detection_arl
                 ),
                 "calibration_method": chart.calibration_method,
-                "lattice_lower": _lattice(chart, "lattice_lower"),
-                "lattice_upper": _lattice(chart, "lattice_upper"),
+                "lattice_lower": _lattice(chart.lattice_lower),
+                "lattice_upper": _lattice(chart.lattice_upper),
                 "advisories": [[a.kind, a.boundary] for a in chart.advisories],
                 "p_u": chart.p_u,
-                "p_l": _field(chart, "p_l"),
+                "p_l": chart.p_l,
             }
         )
     return {"outcomes": outcomes}

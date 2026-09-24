@@ -25,6 +25,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from drift_caliper.baseline.domain.attribute_probe import invalid_observation_error
+from drift_caliper.baseline.domain.bernoulli_arm_lattice import (
+    BernoulliArmLattice,
+    lattice_integer_violation,
+)
 from drift_caliper.baseline.domain.compare_provenance import compare_provenance
 from drift_caliper.baseline.domain.fitted_bernoulli_cusum import FittedBernoulliCUSUM
 from drift_caliper.baseline.domain.fitted_control_limits import FittedControlLimits
@@ -54,6 +58,68 @@ _VALID_ARTEFACT_DIRECTIONS = _DIRECTIONS_WITH_UPPER_ARM | _DIRECTIONS_WITH_LOWER
 # names what could not be described, rather than a single generic label.
 _UNREPRESENTABLE_RECEIVER = "<unrepresentable receiver>"
 _UNREPRESENTABLE_ARTEFACT = "<unrepresentable artefact>"
+
+
+_LATTICE_INTEGERS = ("denominator", "reference_units", "decision_interval_units")
+
+
+def _checked_lattice(
+    artefact: FittedBernoulliCUSUM, field: str
+) -> tuple[int, int, int]:
+    """Re-validate one arm's lattice at use and return its three integers.
+
+    ADR-014 Decision 14.5 (row M2) and corrigendum C4. The artefact is
+    caller-supplied, and ``model_copy(update=...)``/``model_construct()``
+    skip ``BernoulliArmLattice``'s validators, so each integer is re-checked
+    with the same rule before ``Monitor`` steps it. A missing lattice, or
+    anything that is not a ``BernoulliArmLattice``, reports only its type
+    (``provided_type``), as does a non-exact ``int``; an exact ``int`` out of
+    bounds reports its value (``provided``) -- corrigendum C6/C12.2.
+    """
+    lattice = getattr(artefact, field)
+    if not isinstance(lattice, BernoulliArmLattice):
+        raise _lattice_refusal(
+            field,
+            "must be a BernoulliArmLattice when direction checks this arm",
+            {"provided_type": type(lattice).__name__},
+        )
+    values: dict[str, int] = {}
+    for attribute in _LATTICE_INTEGERS:
+        value = getattr(lattice, attribute)
+        violation = lattice_integer_violation(
+            attribute, value, denominator=values.get("denominator", 0)
+        )
+        if violation is not None:
+            constraint, detail = violation
+            raise _lattice_refusal(f"{field}.{attribute}", constraint, detail)
+        values[attribute] = value
+    return (
+        values["denominator"],
+        values["reference_units"],
+        values["decision_interval_units"],
+    )
+
+
+def _lattice_refusal(
+    field: str, constraint: str, detail: dict[str, object]
+) -> InvalidParameterError:
+    return InvalidParameterError(
+        "the fitted Bernoulli CUSUM's lattice is not a chart Monitor can run",
+        context={
+            "parameter": "artefact",
+            "constraint": constraint,
+            "kind": "invalid",
+            "field": field,
+            **detail,
+        },
+        recovery_hint=(
+            "Construct Monitor from the artefact fit_bernoulli_cusum() "
+            "returned, or from FittedBernoulliCUSUM.model_validate() of its "
+            "model_dump() -- both carry a validated lattice for every arm the "
+            "chart checks. An artefact edited with model_copy(update=...) or "
+            "built with model_construct() skips that validation."
+        ),
+    )
 
 
 def _safe_repr(obj: object, *, fallback: str) -> str:
@@ -249,8 +315,9 @@ class Monitor:
         )
         self._cusum_s_hi: float = 0.0
         self._cusum_s_lo: float = 0.0
-        self._bernoulli_s_lower: float = 0.0
-        self._bernoulli_s_upper: float = 0.0
+        # Integer lattice units, never floats (ADR-014 Decision 14.4).
+        self._bernoulli_s_lower: int = 0
+        self._bernoulli_s_upper: int = 0
 
     @property
     def history(self) -> tuple[MonitoringResult, ...]:
@@ -585,49 +652,29 @@ class Monitor:
     def _check_bernoulli_cusum(
         self, artefact: FittedBernoulliCUSUM, score: float
     ) -> tuple[bool, str | None]:
-        """Recursive: update both one-sided sums directly on the raw pass/fail value.
+        """Step each checked arm's integer lattice, exactly as the fit solved it.
 
         Notes
         -----
-        Unlike ``_check_cusum``, there is no standardisation step --
-        ``FittedBernoulliCUSUM`` has no ``sigma_estimate``/``target_value``
-        to standardise against (ADR-014 section 6a); the accumulators
-        operate directly on the ``0.0``/``1.0`` score (guaranteed by
-        ``record()``'s precondition above, which runs before this is ever
-        reached).
+        The artefact's ``lattice_lower``/``lattice_upper`` are the chart
+        (ADR-014 Decision 14): each arm's statistic is an ``int`` in units of
+        ``1/denominator``, stepped by exactly the transitions whose
+        absorption time the fit reports as ``achieved_arl``. The derived float
+        fields are never read -- accumulating them in binary floating point
+        ran a different chart, which signalled earlier than the reported one
+        (Amendment 2 section 0, defect 3). Per Decision 14.4:
 
-        ``X_t = 1 - score`` is the failure indicator (score ``0.0`` ->
-        failure); the lower arm accumulates on it directly:
-        ``S_lower_t = max(0, S_lower_(t-1) + X_t - r_lower)`` (degradation
-        -- a rising failure rate). ``Y_t = score`` is the success
-        indicator; the upper arm accumulates on it:
-        ``S_upper_t = max(0, S_upper_(t-1) + Y_t - r_upper)`` (improvement
-        -- a falling failure rate, i.e. a possibly-stale baseline). Both
-        sums are initialised to zero at construction and always updated
-        regardless of ``direction`` -- the same convention ``_check_cusum``
-        already establishes for the continuous chart -- so switching which
-        arm is *checked* never depends on which arm has historically been
-        *updated*. A signal is ``S_lower > decision_interval_lower`` or
-        ``S_upper > decision_interval_upper`` -- strict inequality
-        (ADR-009 section 5), gated by ``direction`` exactly as
-        ``_check_cusum`` gates its own two arms.
+        - failure (``score == 0.0``): ``s_lo += N_lo - r_lo``;
+          ``s_up = max(0, s_up - r_up)``
+        - success (``score == 1.0``): ``s_lo = max(0, s_lo - r_lo)``;
+          ``s_up += N_up - r_up``
+
+        Only the arms ``direction`` checks accumulate (corrigendum C3). A
+        signal is a statistic strictly exceeding its ``decision_interval_units``
+        (ADR-009 section 5 / BIN-112). Everything read from the
+        caller-supplied artefact is validated before any state changes
+        (Decision 14.5, corrigendum C4, BIN-143).
         """
-        failure_indicator = 1.0 - score
-        success_indicator = score
-
-        self._bernoulli_s_lower = max(
-            0.0,
-            self._bernoulli_s_lower
-            + failure_indicator
-            - artefact.reference_value_lower,
-        )
-        self._bernoulli_s_upper = max(
-            0.0,
-            self._bernoulli_s_upper
-            + success_indicator
-            - artefact.reference_value_upper,
-        )
-
         # 🚨 Same BIN-143 hazard `_check_cusum` guards against -- `artefact`
         # is caller-supplied, and `in` on a frozenset hashes it before any
         # comparison happens.
@@ -636,15 +683,35 @@ class Monitor:
             parameter="direction",
             constraint=f"must be one of {sorted(_VALID_ARTEFACT_DIRECTIONS)}",
         )
+        lower = (
+            _checked_lattice(artefact, "lattice_lower")
+            if direction in _DIRECTIONS_WITH_LOWER_ARM
+            else None
+        )
+        upper = (
+            _checked_lattice(artefact, "lattice_upper")
+            if direction in _DIRECTIONS_WITH_UPPER_ARM
+            else None
+        )
 
-        if (
-            direction in _DIRECTIONS_WITH_LOWER_ARM
-            and self._bernoulli_s_lower > artefact.decision_interval_lower
-        ):
+        failed = score == 0.0
+        if lower is not None:
+            n, r, _ = lower
+            self._bernoulli_s_lower = (
+                self._bernoulli_s_lower + (n - r)
+                if failed
+                else max(0, self._bernoulli_s_lower - r)
+            )
+        if upper is not None:
+            n, r, _ = upper
+            self._bernoulli_s_upper = (
+                max(0, self._bernoulli_s_upper - r)
+                if failed
+                else self._bernoulli_s_upper + (n - r)
+            )
+
+        if lower is not None and self._bernoulli_s_lower > lower[2]:
             return False, "lower"
-        if (
-            direction in _DIRECTIONS_WITH_UPPER_ARM
-            and self._bernoulli_s_upper > artefact.decision_interval_upper
-        ):
+        if upper is not None and self._bernoulli_s_upper > upper[2]:
             return False, "upper"
         return True, None

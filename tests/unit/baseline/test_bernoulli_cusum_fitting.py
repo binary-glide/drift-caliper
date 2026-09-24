@@ -38,7 +38,6 @@ from drift_caliper.errors import (
 )
 from drift_caliper.measurement import Provenance
 from tests.factories import ProvenanceFactory, ScoringResultFactory
-from tests.support.bernoulli_surface import optional_arm_float
 
 _VALID_TARGET_ARL = 370.0
 
@@ -377,8 +376,8 @@ class TestDirection:
         )
         assert isinstance(result.reference_value_lower, float)
         assert isinstance(result.decision_interval_lower, float)
-        assert optional_arm_float(result, "reference_value_upper") is None
-        assert optional_arm_float(result, "decision_interval_upper") is None
+        assert result.reference_value_upper is None
+        assert result.decision_interval_upper is None
 
 
 # ===========================================================================

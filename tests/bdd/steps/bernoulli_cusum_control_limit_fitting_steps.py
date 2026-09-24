@@ -616,15 +616,19 @@ def artefact_reports_scoring_criteria(outcome: FittingOutcome) -> None:
 )
 def attempt_to_mutate_the_fitted_artefact(outcome: FittingOutcome) -> MutationAttempt:
     result = outcome.result
+    decision_interval_lower = result.decision_interval_lower
+    reference_value_lower = result.reference_value_lower
+    assert decision_interval_lower is not None
+    assert reference_value_lower is not None
     snapshot: dict[str, object] = {
-        "decision_interval_lower": result.decision_interval_lower,
-        "reference_value_lower": result.reference_value_lower,
+        "decision_interval_lower": decision_interval_lower,
+        "reference_value_lower": reference_value_lower,
         "observed_failure_rate": result.observed_failure_rate,
         "provenance_model_version": result.provenance_model_version,
     }
     attempted_mutations: list[tuple[str, object]] = [
-        ("decision_interval_lower", result.decision_interval_lower + 1.0),
-        ("reference_value_lower", result.reference_value_lower + 0.01),
+        ("decision_interval_lower", decision_interval_lower + 1.0),
+        ("reference_value_lower", reference_value_lower + 0.01),
         ("observed_failure_rate", result.observed_failure_rate + 0.01),
         ("provenance_model_version", "tampered"),
     ]

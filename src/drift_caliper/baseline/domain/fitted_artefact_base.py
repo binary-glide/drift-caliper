@@ -33,11 +33,21 @@ cannot be incompletely applied.
 from __future__ import annotations
 
 import math
-from typing import Self
+from types import UnionType
+from typing import Self, Union, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from drift_caliper.errors import InvalidParameterError
+
+
+def _is_float_annotation(annotation: object) -> bool:
+    """``float`` or ``float | None`` -- the annotations the backstop covers."""
+    if annotation is float:
+        return True
+    return get_origin(annotation) in (Union, UnionType) and set(
+        get_args(annotation)
+    ) == {float, type(None)}
 
 
 class FittedArtefactBase(BaseModel):
@@ -103,7 +113,8 @@ class FittedArtefactBase(BaseModel):
     def every_float_field_must_be_finite(self) -> Self:
         """Reject an artefact carrying ``NaN`` or an infinite float (BIN-142).
 
-        Runs over every field annotated ``float`` on the concrete type, so a
+        Runs over every field annotated ``float`` -- or ``float | None``,
+        skipping ``None`` (ADR-014 corrigendum C7) -- on the concrete type, so a
         chart-specific boundary -- ``ucl``, ``lcl``, ``decision_interval`` --
         is covered by the same rule as the shared core, without any type
         having to remember to opt in.
@@ -121,10 +132,10 @@ class FittedArtefactBase(BaseModel):
         type-level backstop for every other construction route.
         """
         for name, field in type(self).model_fields.items():
-            if field.annotation is not float:
+            if not _is_float_annotation(field.annotation):
                 continue
             value = getattr(self, name)
-            if not math.isfinite(value):
+            if value is not None and not math.isfinite(value):
                 raise InvalidParameterError(
                     f"{name} must be a finite number",
                     context={

@@ -79,18 +79,15 @@ from scipy.stats import beta as scipy_beta  # type: ignore[attr-defined]
 from scipy.stats import binom  # type: ignore[attr-defined]
 
 import drift_caliper
-from drift_caliper.baseline import FittedBernoulliCUSUM, fit_bernoulli_cusum
+from drift_caliper.baseline import (
+    BernoulliArmLattice,
+    FittedBernoulliCUSUM,
+    fit_bernoulli_cusum,
+)
 from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting_module
 from drift_caliper.errors import DegenerateBaselineError, InvalidParameterError
 from tests.support import bernoulli_reference as ref
-from tests.support.bernoulli_surface import (
-    bernoulli_arm_lattice_type,
-    expected_improvement_detection_arl,
-    lattice_lower,
-    lattice_upper,
-    p_l,
-    triplet,
-)
+from tests.support.bernoulli_surface import triplet
 from tests.support.binary_baselines import binary_baseline
 from tests.support.isolated_bernoulli_fit import fit_in_child
 
@@ -131,7 +128,7 @@ def _reference_for(
         direction=direction,
         multiple=chart.detect_rate_multiple,
         p_u=chart.p_u,
-        p_l=p_l(chart),
+        p_l=chart.p_l,
     )
 
 
@@ -158,12 +155,12 @@ class TestBernoulliArmLatticeValueObject:
     """ADR-014 Decision 14.1; ``docs/domain-model.md`` Value Object Inventory."""
 
     def test_is_exported_from_baseline_but_not_from_the_top_level(self) -> None:
-        bernoulli_arm_lattice_type()
+        assert drift_caliper.baseline.BernoulliArmLattice is BernoulliArmLattice
         assert "BernoulliArmLattice" in drift_caliper.baseline.__all__
         assert "BernoulliArmLattice" not in drift_caliper.__all__
 
     def test_derived_floats_are_units_over_denominator(self) -> None:
-        lattice = bernoulli_arm_lattice_type()(
+        lattice = BernoulliArmLattice(
             denominator=9, reference_units=8, decision_interval_units=40
         )
         assert lattice.reference_value == 8 / 9
@@ -177,7 +174,7 @@ class TestBernoulliArmLatticeValueObject:
     def test_accepts_its_bounds(
         self, denominator: int, reference_units: int, decision_interval_units: int
     ) -> None:
-        lattice = bernoulli_arm_lattice_type()(
+        lattice = BernoulliArmLattice(
             denominator=denominator,
             reference_units=reference_units,
             decision_interval_units=decision_interval_units,
@@ -225,10 +222,10 @@ class TestBernoulliArmLatticeValueObject:
             **overrides,
         }
         with pytest.raises(InvalidParameterError):
-            bernoulli_arm_lattice_type()(**arguments)
+            BernoulliArmLattice(**arguments)
 
     def test_repr_shows_the_three_integers(self) -> None:
-        lattice = bernoulli_arm_lattice_type()(
+        lattice = BernoulliArmLattice(
             denominator=9, reference_units=8, decision_interval_units=40
         )
         text = repr(lattice)
@@ -237,18 +234,18 @@ class TestBernoulliArmLatticeValueObject:
         assert "40" in text
 
     def test_bool_raises(self) -> None:
-        lattice = bernoulli_arm_lattice_type()(
+        lattice = BernoulliArmLattice(
             denominator=9, reference_units=8, decision_interval_units=40
         )
         with pytest.raises(TypeError):
             bool(lattice)
 
     def test_is_immutable(self) -> None:
-        lattice = bernoulli_arm_lattice_type()(
+        lattice = BernoulliArmLattice(
             denominator=9, reference_units=8, decision_interval_units=40
         )
         with pytest.raises(pydantic.ValidationError):
-            lattice.denominator = 10
+            lattice.denominator = 10  # ty: ignore[invalid-assignment]
 
 
 class TestArtefactShape:
@@ -286,8 +283,8 @@ class TestArtefactShape:
         chart = _fit(m, f, direction=requested)
 
         assert chart.direction == reported
-        assert (lattice_lower(chart) is not None) is lower_present
-        assert (lattice_upper(chart) is not None) is upper_present
+        assert (chart.lattice_lower is not None) is lower_present
+        assert (chart.lattice_upper is not None) is upper_present
 
     @pytest.mark.parametrize("direction", ["lower", "upper", "two_sided"])
     def test_each_float_field_is_its_lattice_units_over_denominator(
@@ -296,8 +293,8 @@ class TestArtefactShape:
         """Decision 14.3: one source of truth; a float is ``None`` with its lattice."""
         chart = _fit(200, 20, direction=direction)
         pairs = [
-            (lattice_lower(chart), "lower"),
-            (lattice_upper(chart), "upper"),
+            (chart.lattice_lower, "lower"),
+            (chart.lattice_upper, "upper"),
         ]
 
         for lattice, arm in pairs:
@@ -350,8 +347,8 @@ class TestArtefactShape:
 
         assert rebuilt == chart
         assert from_json == chart
-        assert triplet(lattice_lower(rebuilt)) == triplet(lattice_lower(chart))
-        assert triplet(lattice_upper(rebuilt)) == triplet(lattice_upper(chart))
+        assert triplet(rebuilt.lattice_lower) == triplet(chart.lattice_lower)
+        assert triplet(rebuilt.lattice_upper) == triplet(chart.lattice_upper)
 
     def test_finite_float_backstop_covers_the_optional_improvement_figure(
         self,
@@ -374,19 +371,19 @@ class TestArtefactShape:
         chart = _fit(m, f, direction="lower")
 
         if f == 0:
-            assert p_l(chart) == 0.0
+            assert chart.p_l == 0.0
         else:
             expected = float(scipy_beta.ppf(0.10, f, m - f + 1))
-            assert p_l(chart) == pytest.approx(expected, rel=1e-12)
+            assert chart.p_l == pytest.approx(expected, rel=1e-12)
         if f == 1:
-            assert p_l(chart) == pytest.approx(1.0 - 0.9 ** (1.0 / m), rel=1e-12)
+            assert chart.p_l == pytest.approx(1.0 - 0.9 ** (1.0 / m), rel=1e-12)
 
     def test_audit_summary_reports_each_present_lattice(self) -> None:
         """Decision 14 "Cost": ``audit_summary()`` gains the lattice lines."""
         chart = _fit(200, 20)
         summary = chart.audit_summary()
 
-        for lattice in (lattice_lower(chart), lattice_upper(chart)):
+        for lattice in (chart.lattice_lower, chart.lattice_upper):
             values = triplet(lattice)
             assert values is not None
             for value in values:
@@ -421,7 +418,7 @@ class TestLowerArmFloorIsDisclosedNotRefused:
         the pre-amendment code ran it in 0.12 s without incident (measured)."""
         chart = _fit(m, 0, direction="lower")
 
-        lower = lattice_lower(chart)
+        lower = chart.lattice_lower
         assert lower is not None
         assert lower.decision_interval_units == 1
         assert chart.achieved_arl == pytest.approx(1.0 / chart.p_u, rel=1e-9)
@@ -446,7 +443,7 @@ class TestLowerArmFloorIsDisclosedNotRefused:
         "report, don't chase")."""
         chart = _fit(300, 3, target_arl=50.0, direction="lower")
 
-        assert triplet(lattice_lower(chart)) == (27, 1, 26)
+        assert triplet(chart.lattice_lower) == (27, 1, 26)
         assert chart.achieved_arl == pytest.approx(147.5931, abs=5e-5)
         assert _FLOOR_ADVISORY not in _advisory_kinds(chart)
 
@@ -454,7 +451,7 @@ class TestLowerArmFloorIsDisclosedNotRefused:
         """C1 item 5: m=300 f=0 "lower" T=370 -- h_units = 77, 423.8900."""
         chart = _fit(300, 0, direction="lower")
 
-        assert triplet(lattice_lower(chart)) == (78, 1, 77)
+        assert triplet(chart.lattice_lower) == (78, 1, 77)
         assert chart.achieved_arl == pytest.approx(423.8900, abs=5e-5)
         assert _FLOOR_ADVISORY not in _advisory_kinds(chart)
 
@@ -474,7 +471,7 @@ class TestLowerArmFloorIsDisclosedNotRefused:
         chart = _fit(5_000, 0, direction="two_sided")
 
         assert chart.direction == "lower"
-        assert lattice_upper(chart) is None
+        assert chart.lattice_upper is None
         assert chart.achieved_arl == pytest.approx(2171.9724, abs=5e-5)
         assert _advisory_boundary(chart, _FLOOR_ADVISORY) == pytest.approx(
             chart.achieved_arl, rel=1e-12
@@ -967,8 +964,8 @@ class TestTwoSidedCoupledBound:
         chart = _fit(m, f)
         expected_fit = _reference_for(chart, m=m, f=f, direction="two_sided")
 
-        assert triplet(lattice_lower(chart)) == expected_fit.lattice_lower
-        assert triplet(lattice_upper(chart)) == expected_fit.lattice_upper
+        assert triplet(chart.lattice_lower) == expected_fit.lattice_lower
+        assert triplet(chart.lattice_upper) == expected_fit.lattice_upper
         assert expected_fit.achieved_arl is not None
         assert chart.achieved_arl == pytest.approx(expected_fit.achieved_arl, rel=1e-9)
 
@@ -976,12 +973,12 @@ class TestTwoSidedCoupledBound:
     def test_calibration_d_is_minimal(self, m: int, f: int) -> None:
         """Decision 18 item 16: ``B >= T``, and ``B`` at ``h_up - 1`` is ``< T``."""
         chart = _fit(m, f)
-        lower, upper = triplet(lattice_lower(chart)), triplet(lattice_upper(chart))
+        lower, upper = triplet(chart.lattice_lower), triplet(chart.lattice_upper)
         assert lower is not None
         assert upper is not None
         n_up, k_up, h_up = upper
 
-        below = ref.coupled_arl(lower, (n_up, k_up, h_up - 1), p_l(chart), chart.p_u)
+        below = ref.coupled_arl(lower, (n_up, k_up, h_up - 1), chart.p_l, chart.p_u)
 
         assert chart.achieved_arl >= _T
         assert below < _T
@@ -993,10 +990,10 @@ class TestTwoSidedCoupledBound:
         """Decision 18 item 14: ``B <=`` the exact joint ARL at ``p in {p_L, p_hat,
         p_U}`` and 5 interior points; and ``B`` is non-decreasing in ``h_up``."""
         chart = _fit(m, f)
-        lower, upper = triplet(lattice_lower(chart)), triplet(lattice_upper(chart))
+        lower, upper = triplet(chart.lattice_lower), triplet(chart.lattice_upper)
         assert lower is not None
         assert upper is not None
-        low, high = p_l(chart), chart.p_u
+        low, high = chart.p_l, chart.p_u
         rates = [low, f / m, high, *np.linspace(low, high, 7)[1:-1]]
 
         for rate in rates:
@@ -1030,8 +1027,8 @@ class TestTwoSidedCoupledBound:
         chart = _fit(200, 20, direction="upper")
         expected_fit = _reference_for(chart, m=200, f=20, direction="upper")
 
-        assert triplet(lattice_upper(chart)) == expected_fit.lattice_upper
-        assert triplet(lattice_upper(chart)) == (17, 16, 52)
+        assert triplet(chart.lattice_upper) == expected_fit.lattice_upper
+        assert triplet(chart.lattice_upper) == (17, 16, 52)
         assert expected_fit.achieved_arl is not None
         assert chart.achieved_arl == pytest.approx(expected_fit.achieved_arl, rel=1e-9)
 
@@ -1061,7 +1058,7 @@ class TestImprovementDetectionFigure:
         joint solver at ``p_hat / M`` to rel 1e-9, finite and >= 1."""
         chart = _fit(m, f)
         expected_fit = _reference_for(chart, m=m, f=f, direction="two_sided")
-        reported = expected_improvement_detection_arl(chart)
+        reported = chart.expected_improvement_detection_arl
 
         assert reported is not None
         assert expected_fit.expected_improvement_detection_arl is not None
@@ -1083,7 +1080,7 @@ class TestImprovementDetectionFigure:
     ) -> None:
         """19.6's rule: non-``None`` exactly when the chart checks both arms."""
         assert (
-            expected_improvement_detection_arl(_fit(m, f, direction=direction)) is None
+            _fit(m, f, direction=direction).expected_improvement_detection_arl is None
         )
 
 
@@ -1098,14 +1095,14 @@ class TestZeroFailureShape:
         lower = _fit(300, 0, direction="lower")
 
         assert requested_two_sided.direction == "lower"
-        assert lattice_upper(requested_two_sided) is None
+        assert requested_two_sided.lattice_upper is None
         assert _advisory_boundary(requested_two_sided, _NOT_DESIGNABLE_ADVISORY) == 1.0
         assert requested_two_sided.achieved_arl == lower.achieved_arl
-        assert triplet(lattice_lower(requested_two_sided)) == triplet(
-            lattice_lower(lower)
+        assert triplet(requested_two_sided.lattice_lower) == triplet(
+            lower.lattice_lower
         )
         assert requested_two_sided.calibration_method == _ONE_SIDED_METHOD
-        assert p_l(requested_two_sided) == 0.0
+        assert requested_two_sided.p_l == 0.0
 
     def test_a_directly_requested_lower_fit_carries_no_not_designable_advisory(
         self,
@@ -1164,7 +1161,7 @@ class TestUpperArmGicpGrid:
             weight = float(binom.pmf(f, m, p0))
             if weight <= 1e-12:
                 continue
-            upper = triplet(lattice_upper(_fit(m, f, direction="upper")))
+            upper = triplet(_fit(m, f, direction="upper").lattice_upper)
             assert upper is not None
             n, k, h = upper
             true_arl = ref.one_sided_arl(n, k, h, 1.0 - p0)
