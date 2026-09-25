@@ -404,9 +404,14 @@ class TestMonitorRevalidatesTheLattices:
         """C4: never ``AttributeError``/``TypeError`` (BIN-121)."""
         chart, provenance = _chart(300, 3, direction)
         monitor = Monitor(chart.model_copy(update={missing: None}))
+        # Record the observation that would move the arm that is still
+        # present: a failure moves only the lower statistic and a success only
+        # the upper one. Otherwise the "statistics untouched" check below could
+        # not tell a refusal-before-stepping from a refusal-after-stepping.
+        moves_the_present_arm = missing == "lattice_upper"
 
         with pytest.raises(InvalidParameterError) as excinfo:
-            monitor.record(_observation(provenance, failed=True))
+            monitor.record(_observation(provenance, failed=moves_the_present_arm))
 
         context = excinfo.value.context
         assert context["parameter"] == "artefact"

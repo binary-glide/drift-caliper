@@ -177,13 +177,15 @@ is nothing to declare: a baseline whose every score is `0.0` or `1.0` is the
 binary case. Each judgement is one observation, so no batching is needed.
 
 - It is **two-sided by default**: one arm watches for a rising failure rate,
-  the other for a falling one (which usually means the baseline has gone stale).
+  the other for a falling one — an improvement, or a sign the baseline no
+  longer describes the agent.
 - Its in-control ARL₀ is **exact**, solved on a finite Markov chain rather than
   approximated. It is designed at a confidence bound on your baseline's failure
   rate rather than the observed rate, so the `achieved_arl` it reports is a
   floor on the true ARL₀, not an estimate of it: with at least 90% confidence
-  for a one-sided chart, and at every rate between the two bounds for the
-  two-sided one. `achieved_arl` is never below the `target_arl` you asked for,
+  for a one-sided chart, and, for the two-sided one, at every rate between the
+  two bounds — an interval that contains the true failure rate with at least
+  80% confidence (two one-sided 90% bounds). `achieved_arl` is never below the `target_arl` you asked for,
   and can sit well above it — the fitted artefact's `advisories` say why.
 - A baseline with **few failures** cannot tell a doubling of its failure rate
   from normal variation. The detection figures (`expected_detection_arl`,

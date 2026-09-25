@@ -171,8 +171,8 @@ Each judgement is one observation, so the 100-observation Phase I minimum means
 ### What you get
 
 - **Two-sided by default.** The lower arm watches for a rising failure rate —
-  degradation. The upper arm watches for a falling one, which usually means the
-  baseline no longer describes the agent. Pass `direction="lower"` or
+  degradation. The upper arm watches for a falling one — an improvement, or a
+  sign the baseline no longer describes the agent. Pass `direction="lower"` or
   `direction="upper"` to check one arm only; the fitted artefact carries only the
   arms it checks.
 - **An exact ARL₀.** A pass/fail statistic moves in fixed steps, so the chart is a
@@ -186,7 +186,8 @@ Each judgement is one observation, so the 100-observation Phase I minimum means
   lower arm, `p_l` for the upper, each at 90% confidence). For a one-sided
   chart, the true ARL₀ is then at least `achieved_arl` with at least 90%
   confidence. For the two-sided chart, `achieved_arl` is a floor on the true
-  ARL₀ at every failure rate between the two bounds.
+  ARL₀ at every failure rate between the two bounds — an interval that contains
+  the true failure rate with at least 80% confidence (two one-sided 90% bounds).
 - **`detect_rate_multiple`, default `2.0`,** is the shift the chart is tuned for:
   a multiple of the failure rate, not of a standard deviation. It must be finite
   and greater than 1.
@@ -250,9 +251,9 @@ exactly, and was considered. It was rejected because it makes the chart
 non-deterministic: the same data could signal on one run and not the next, which
 is unacceptable for a library whose claim is auditability.
 
-The Bernoulli CUSUM avoids this because its lever, `detect_rate_multiple`, is
-the library's to design around, whereas the p-chart's lever is the batch size,
-which is your data rate.
+The Bernoulli CUSUM's ARL₀ is discrete too, but its lattice steps are far finer
+than a p-chart's integer limits: at ordinary baselines it lands just above your
+target, and where it cannot (the floor, or a gap above it) an advisory says so.
 
 ⚠️ **Do not batch pass/fail judgements into a pass rate** and monitor it on a
 continuous chart. It is no longer needed, and a *rolling* pass rate would also
