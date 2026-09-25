@@ -295,6 +295,14 @@ class TestSerialisedArtefactDrivesMonitorIdentically:
 # ===========================================================================
 
 
+def _assert_statistics_untouched(monitor: Monitor) -> None:
+    """Review 3, S3: "before any state changes" (Decision 14.5, C4) means the
+    integer statistics too, not only the history. Both start at 0; a
+    refusal that stepped first would have moved one of them."""
+    assert monitor._bernoulli_s_lower == 0
+    assert monitor._bernoulli_s_upper == 0
+
+
 class _IntSubclass(int):
     """Not an exact ``int`` (Decision 14.1)."""
 
@@ -308,6 +316,35 @@ def _corrupted(
     return chart.model_copy(
         update={field: bad_lattice.model_copy(update={attribute: value})}
     )
+
+
+class TestMonitorRefusesAnUnknownDirection:
+    """Review 3, R4: ``model_copy(update={"direction": "sideways"})`` passes
+    ``require_exact_str`` (it is an exact ``str``), and ``Monitor`` then selects
+    neither arm and reports in control forever -- a drift signal nobody
+    receives, the failure this library exists to prevent. The ADR's M-rows do
+    not name an unknown *value*; this follows M3's ``require_exact_str`` family
+    and F8's unknown-string path: ``parameter="direction"``, ``kind="invalid"``,
+    ``provided`` carrying the value (not ``provided_type``). Refusal may come at
+    construction or at the first ``record()``; either satisfies the test. (The
+    continuous CUSUM has the same defect; it is a separate ticket and is
+    deliberately not tested here.)"""
+
+    @pytest.mark.parametrize("direction", ["sideways", "", "Two_Sided"])
+    def test_an_unrecognised_direction_is_refused(self, direction: str) -> None:
+        """Today: accepted, and every observation reports in control."""
+        chart, provenance = _chart(300, 3, "two_sided")
+        corrupted = chart.model_copy(update={"direction": direction})
+
+        with pytest.raises(InvalidParameterError) as excinfo:
+            Monitor(corrupted).record(_observation(provenance, failed=True))
+
+        context = excinfo.value.context
+        assert context["parameter"] == "direction"
+        assert context["kind"] == "invalid"
+        assert context["provided"] == direction
+        assert "constraint" in context
+        assert "provided_type" not in context
 
 
 class TestMonitorRevalidatesTheLattices:
@@ -355,6 +392,7 @@ class TestMonitorRevalidatesTheLattices:
             assert context["provided"] == value
             assert "provided_type" not in context
         assert monitor.history == ()
+        _assert_statistics_untouched(monitor)
 
     @pytest.mark.parametrize(
         ("direction", "missing"),
@@ -378,3 +416,4 @@ class TestMonitorRevalidatesTheLattices:
         assert "constraint" in context
         assert "provided" not in context
         assert monitor.history == ()
+        _assert_statistics_untouched(monitor)

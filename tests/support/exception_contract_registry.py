@@ -2459,6 +2459,25 @@ BERNOULLI_REFUSAL_CONTRACT: tuple[RefusalContractRow, ...] = (
         },
         absent=frozenset({"provided"}),
     ),
+    RefusalContractRow(
+        # Review 3, R4: an exact str that is not a recognised direction.
+        # require_exact_str accepts it; before this row nothing refused it, and
+        # Monitor reported in control forever. Shape follows F8's
+        # unknown-string path: the value itself in `provided`.
+        "M3_unknown_value",
+        lambda: _bernoulli_monitor_record(
+            _FITTED_BERNOULLI_CUSUM.model_copy(update={"direction": "sideways"}),
+            1.0,
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "direction",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": "sideways",
+        },
+        absent=frozenset({"provided_type"}),
+    ),
 )
 
 # Every row of Decision 17's tables (fit_bernoulli_cusum F1-F16, Monitor

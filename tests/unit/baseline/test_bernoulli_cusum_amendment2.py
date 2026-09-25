@@ -997,17 +997,25 @@ class TestOnlyNumericalFailuresBecomeArlNotComputable:
         [
             np.linalg.LinAlgError("singular matrix"),
             scipy.sparse.linalg.MatrixRankWarning("Matrix is exactly singular"),
-            RuntimeError("Factor is exactly singular"),
         ],
-        ids=["LinAlgError", "MatrixRankWarning_as_error", "SuperLU_RuntimeError"],
+        ids=["LinAlgError", "MatrixRankWarning_as_error"],
     )
     def test_numerical_failures_still_become_f14(
         self, monkeypatch: pytest.MonkeyPatch, error: Exception
     ) -> None:
         """A singular or rank-deficient system is ill-conditioning: F14 on
-        ``achieved_arl``. (``MatrixRankWarning`` is what ``spsolve`` raises when
-        warnings are promoted to errors; SuperLU reports exact singularity as a
-        ``RuntimeError``.) Passes today."""
+        ``achieved_arl``. ``MatrixRankWarning`` is what ``spsolve`` raises for an
+        exactly singular matrix when warnings are promoted to errors. Passes
+        today.
+
+        Review 3, R2: this previously also raised SuperLU's
+        ``RuntimeError("Factor is exactly singular")``. That message comes from
+        ``splu``/``factorized``, which this module never calls -- ``spsolve``
+        signals exact singularity with ``MatrixRankWarning`` and a NaN result --
+        so the ``RuntimeError`` case only reached a branch that is unreachable
+        on scipy >= 1.14 and is being removed. It is replaced by
+        ``test_a_nan_result_becomes_f14`` (the real signal) and
+        ``test_a_runtime_error_mentioning_singular_propagates``."""
         self._raising(monkeypatch, error)
         baseline, _ = binary_baseline(200, 20)
 
@@ -1016,6 +1024,74 @@ class TestOnlyNumericalFailuresBecomeArlNotComputable:
 
         assert excinfo.value.context["reason"] == "arl_not_computable"
         assert excinfo.value.context["figure"] == "achieved_arl"
+
+    def test_a_nan_result_becomes_f14(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """What ``spsolve`` actually returns for an exactly singular system
+        (alongside the ``MatrixRankWarning``): a NaN-filled vector. Passes
+        today."""
+
+        def spsolve(matrix: Any, *_args: Any, **_kwargs: Any) -> Any:
+            return np.full(matrix.shape[0], math.nan)
+
+        monkeypatch.setattr(scipy.sparse.linalg, "spsolve", spsolve)
+        baseline, _ = binary_baseline(200, 20)
+
+        with pytest.raises(DegenerateBaselineError) as excinfo:
+            fit_bernoulli_cusum(baseline, target_arl=_T, direction="lower")
+
+        assert excinfo.value.context["figure"] == "achieved_arl"
+
+    def test_a_runtime_error_mentioning_singular_propagates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review 3, R2: with the message-matching branch removed, every
+        ``RuntimeError`` from the solve propagates as itself -- including one
+        whose text happens to say "singular". Today: the branch turns it into
+        F14."""
+        self._raising(monkeypatch, RuntimeError("Factor is exactly singular"))
+        baseline, _ = binary_baseline(200, 20)
+
+        with pytest.raises(RuntimeError, match="singular") as excinfo:
+            fit_bernoulli_cusum(baseline, target_arl=_T, direction="lower")
+
+        assert not isinstance(excinfo.value, CaliperError)
+
+
+class TestTheSolverIsPinned:
+    """Review 3, R2: ``scipy.sparse.linalg.spsolve`` defaults to
+    ``use_umfpack=True``, so a consumer with ``scikit-umfpack`` installed would
+    silently get a different solver from the one CI tested -- and a tie in
+    ``ARL >= target`` could fall the other way. Every solve must pass
+    ``use_umfpack=False``. Seam: ``scipy.sparse.linalg.spsolve``, looked up at
+    call time."""
+
+    @pytest.mark.parametrize("direction", ["lower", "upper", "two_sided"])
+    # Budget: one fit at m=200 f=20 (~0.02 s measured, two-sided); 60 s bounds
+    # a hang.
+    @pytest.mark.timeout(60)
+    def test_every_solve_disables_umfpack(
+        self, monkeypatch: pytest.MonkeyPatch, direction: str
+    ) -> None:
+        """Covers the one-sided calibration, the coupled bound ``B``, calibration
+        D's bisection and the joint disclosure figures. Today: no call passes
+        ``use_umfpack``."""
+        real = scipy.sparse.linalg.spsolve
+        calls: list[dict[str, Any]] = []
+
+        def spsolve(matrix: Any, rhs: Any, *args: Any, **kwargs: Any) -> Any:
+            calls.append(dict(kwargs))
+            return real(matrix, rhs, *args, **kwargs)  # type: ignore[no-untyped-call]
+
+        monkeypatch.setattr(scipy.sparse.linalg, "spsolve", spsolve)
+        baseline, _ = binary_baseline(200, 20)
+
+        fit_bernoulli_cusum(baseline, target_arl=_T, direction=direction)
+
+        assert calls, "no solve was observed"
+        unpinned = [
+            kwargs for kwargs in calls if kwargs.get("use_umfpack") is not False
+        ]
+        assert unpinned == [], f"{len(unpinned)} of {len(calls)} solves not pinned"
 
 
 # ===========================================================================

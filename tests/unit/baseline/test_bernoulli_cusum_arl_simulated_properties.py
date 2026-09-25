@@ -86,7 +86,8 @@ def _mean_run_length(
 _TOLERANCE = derived_relative_tolerance(_N_RUNS, z=_CONFIDENCE_Z)
 
 
-@pytest.mark.slow
+# On the pull-request gate (review 3, R1): measured 4.1 s / 3.8 s / 16.2 s
+# locally (lower / upper / floored lower), each under 30 s.
 @pytest.mark.parametrize(
     ("m", "f", "direction", "rate_name"),
     [
@@ -123,7 +124,8 @@ def test_the_floored_arm_reports_one_over_p_u() -> None:
     assert chart.achieved_arl == pytest.approx(1.0 / chart.p_u, rel=1e-9)
 
 
-@pytest.mark.slow
+# On the pull-request gate (review 3, R1): measured 5.7 s / 6.7 s / 6.2 s
+# locally (p_L / p_hat / p_U).
 @pytest.mark.parametrize("rate_name", ["p_l", "p_hat", "p_u"])
 # Budget: 1,500 runs x true joint ARL (145.7 / 180.6 / 152.0, independent
 # reference) x ~25 us = 5.5 s / 6.8 s / 5.7 s locally; x3 = 20 s. 180 s stop.

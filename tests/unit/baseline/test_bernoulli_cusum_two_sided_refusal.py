@@ -383,6 +383,55 @@ class TestEqualSplitBound:
         assert deflated, "no coupled-bound (B) solve was observed"
 
 
+class TestEqualSplitBoundOnThePullRequestGate:
+    """Corrigendum C11's search, pinned on small patched-cap cells (review 3, R1).
+
+    The per-PR gate runs ``-m "not slow"``, and its two pinned C11 cells
+    (38,563 and 3,914) do not distinguish two mutants of the equal-split
+    search: ``H(a)`` off by one, and the bisection keeping only its ``lo``
+    candidate. Only the slow refusal cells killed them. These cells are chosen
+    because both mutants move the reported bound there -- measured with the
+    independent reference (``H(a) - 1`` / ``lo`` only):
+
+    - m=200 f=20, joint cap 2,000: 732 (mutants 706 / 603);
+    - m=500 f=50, joint cap 1,000: 296 (mutants 283 / 279).
+
+    Each is a refusal of well under a second (the reference's whole search is
+    0.01 s), so the check costs the PR gate nothing.
+    """
+
+    @pytest.mark.parametrize(
+        ("m", "f", "joint_cap", "expected"),
+        [(200, 20, 2_000, 732), (500, 50, 1_000, 296)],
+        ids=["m200_f20_cap2000", "m500_f50_cap1000"],
+    )
+    # Budget: every chain is under the patched cap; ~0.1 s locally, x3 < 1 s.
+    @pytest.mark.timeout(60)
+    def test_reported_bound_is_the_equal_split_maximum(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        m: int,
+        f: int,
+        joint_cap: int,
+        expected: int,
+    ) -> None:
+        _patch_caps(monkeypatch, joint_cap)
+
+        context = _refusal(m, f, 1e5)
+
+        assert context["reason"] == _JOINT
+        bound = context["max_two_sided_target_arl"]
+        p_u, p_lower = ref.cp_upper(f, m), ref.cp_lower(f, m)
+        assert bound == ref.es_bound(
+            _lattice(ref.lower_arm_design_pair(p_u, 2.0)),
+            _lattice(ref.upper_arm_design_pair(p_lower, 2.0)),
+            p_u,
+            p_lower,
+        )
+        assert bound == expected
+        assert _fit(m, f, float(bound)).requested_arl == float(bound)
+
+
 class TestEqualSplitStateCountIsMonotone:
     """C11 derivation step 1, checked on the independent reference: the ES state
     count is non-decreasing in ``T`` (Hypothesis). Production's bound rests on
