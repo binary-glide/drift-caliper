@@ -1,11 +1,13 @@
 # Choosing a chart
 
-Three charts are implemented. They differ in **what kind of change they are good
-at noticing**, and the choice matters more than any parameter you will tune
+Four charts are implemented: three for continuous scores, and one for pass/fail
+rubrics. The continuous ones differ in **what kind of change they are good at
+noticing**, and the choice matters more than any parameter you will tune
 afterwards.
 
 **If you do not want to think about it, use EWMA.** It is the right default for
-LLM quality monitoring and the rest of this page explains why.
+LLM quality monitoring and the rest of this page explains why. If your judge
+returns pass/fail, see [Binary pass/fail rubrics](#binary-passfail-rubrics).
 
 ---
 
@@ -16,14 +18,16 @@ LLM quality monitoring and the rest of this page explains why.
 | **EWMA** | small, gradual drift | nothing important for this use case | `fit_ewma` |
 | **CUSUM** | a sustained shift of a size you name in advance | shifts much larger or smaller than the one you tuned for | `fit_cusum` |
 | **Shewhart I** | one large, obvious outlier | slow drift, almost entirely | `fit_shewhart` |
+| **Bernoulli CUSUM** | a change in a pass/fail failure rate | nothing, if the baseline has enough failures — see below | `fit_bernoulli_cusum` |
 
-All three take the same first two arguments and all three are calibrated to the
+All four take the same first two arguments and all four are calibrated to the
 ARL₀ you request:
 
 ```python
 fit_ewma(baseline, target_arl=370.0)
 fit_cusum(baseline, target_arl=370.0)
 fit_shewhart(baseline, target_arl=370.0)
+fit_bernoulli_cusum(baseline, target_arl=370.0)  # scores exactly 0.0 or 1.0
 ```
 
 ## Why EWMA is the default
@@ -147,70 +151,118 @@ crossing a limit.
     *rolling* average, that assumption is badly violated — use non-overlapping
     batches instead.
 
-## Binary pass/fail rubrics are not supported
+## Binary pass/fail rubrics
 
-If your judge returns pass/fail rather than a score, none of these three charts
-is appropriate, and Caliper does not offer one.
+If your judge returns pass/fail rather than a score, use the **Bernoulli CUSUM**:
+`fit_bernoulli_cusum`. None of the three continuous charts is appropriate for
+binary data, and you do not need to batch judgements to use it.
 
-A p-chart was evaluated and **rejected**. The reason is worth stating because it
-is the kind of thing a library could easily have got wrong quietly: for binary
-data the control limits are integer counts, so the achievable ARL₀ values are
-**discrete**. You cannot calibrate one to 370 — you get whichever value the
-nearest integer limit happens to give, which might be 250 or 800.
+**Record each judgement as a score of exactly `1.0` (pass) or `0.0` (fail).**
+There is no separate "binary" setting: a baseline whose every score is `0.0` or
+`1.0` is the binary case. A `bool` score is refused with `InvalidParameterError`
+rather than guessed at, and a baseline containing any other value — even a legal
+continuous one — is refused by `fit_bernoulli_cusum`. In Phase II, `Monitor`
+refuses a score that is not exactly `0.0` or `1.0` with
+`InvalidObservationError` (`context["reason"] == "score_not_binary"`).
 
-A randomised signalling rule *can* hit 370 exactly, and was considered. It was
-rejected because it makes the chart non-deterministic: the same data could
-signal on one run and not the next, which is unacceptable for a library whose
-claim is auditability.
+Each judgement is one observation, so the 100-observation Phase I minimum means
+100 judgements, not 100 batches.
 
-⚠️ **The failure is intrinsic to the data type, not to this implementation.**
-For binary data a single observation carries almost no information — at a 10%
-failure rate, one failure is unremarkable. Detecting an acute change therefore
-needs a *window*, and that window is the subgrouping that breaks calibration.
-**The Shewhart role simply is not available for binary data.**
+### What you get
 
-### What will replace it
+- **Two-sided by default.** The lower arm watches for a rising failure rate —
+  degradation. The upper arm watches for a falling one — an improvement, or a
+  sign the baseline no longer describes the agent. Pass `direction="lower"` or
+  `direction="upper"` to check one arm only; the fitted artefact carries only the
+  arms it checks.
+- **An exact ARL₀.** A pass/fail statistic moves in fixed steps, so the chart is a
+  finite Markov chain and its in-control ARL₀ is solved exactly, not
+  approximated. `achieved_arl` is that exact figure, never below the
+  `target_arl` you requested.
+- **Designed at a confidence bound, not the observed rate.** A small baseline's
+  observed failure rate can be low by chance, and a chart designed on it would
+  alarm more often than it promises. Each arm is designed at the one-sided
+  Clopper–Pearson bound on the side that is conservative for it (`p_u` for the
+  lower arm, `p_l` for the upper, each at 90% confidence). For a one-sided
+  chart, the true ARL₀ is then at least `achieved_arl` with at least 90%
+  confidence. For the two-sided chart, `achieved_arl` is a floor on the true
+  ARL₀ at every failure rate between the two bounds — an interval that contains
+  the true failure rate with at least 80% confidence (two one-sided 90% bounds).
+- **`detect_rate_multiple`, default `2.0`,** is the shift the chart is tuned for:
+  a multiple of the failure rate, not of a standard deviation. It must be finite
+  and greater than 1.
 
-**Two charts, and neither needs batching at all:**
+!!! note "Why `achieved_arl` can sit well above your target"
 
-| chart | analogue of | calibrates to a target ARL₀ |
+    A pass/fail chart cannot hit every ARL₀: its decision interval moves in whole
+    lattice steps, so you get the smallest one that meets your target. On a
+    baseline with very few failures there is also a floor. When one failure is
+    enough to signal, the in-control ARL₀ is just the mean wait for one failure,
+    `1/p_u`, whatever you asked for. Caliper fits that chart rather than
+    refusing it, and says so with a `lower_arm_signals_on_first_failure`
+    advisory whose `boundary` is that floor.
+
+### The advisories you may see
+
+The fitted artefact's `advisories` are disclosures, not errors — the chart is
+valid in every case. Each has a `kind`, a `description` and a `boundary`.
+
+| `kind` | means | `boundary` |
 |---|---|---|
-| **Bernoulli EWMA** | EWMA — and likewise the intended default | within ~0.1% |
-| **Bernoulli CUSUM** | CUSUM | within 0.01–1% |
+| `lower_arm_signals_on_first_failure` | every single failure signals, so `achieved_arl` is `1/p_u` | that ARL₀ |
+| `detection_shift_within_design_rate` | `expected_detection_arl` is `None`: see below | the multiple above which it is reported |
+| `improvement_shift_within_design_rate` | the improvement figure is `None`: see below | the multiple above which it is reported |
+| `upper_arm_not_designable` | a two-sided request met a baseline with no failures, so only the lower arm was built and `direction` is reported as `"lower"` | `1.0` |
 
-They calibrate where the p-chart cannot because their levers — λ and *k* — are
-the library's to choose, whereas the p-chart's lever is *n*, which is your data
-rate. Both consume **individual** Bernoulli observations, so the 100-observation
-Phase I minimum means 100 judgements, not 100 batches.
+⚠️ **With few failures in the baseline, the detection figures are `None`.**
+`expected_detection_arl` says how quickly the chart would catch the failure rate
+multiplied by `detect_rate_multiple`; `expected_improvement_detection_arl` does
+the same for an improvement. When the baseline has few failures, the confidence
+bound sits far above the observed rate. A doubled rate is then still one the chart
+is designed to tolerate, and it would take at least as long to signal as a false
+alarm. So the figure is reported as `None` rather than as a large number that
+describes no detection at all.
 
-!!! warning "Neither is implemented yet"
+The ratio depends on the **number** of failures, not on the size of the baseline.
+At the default multiple of 2:
 
-    This is a settled decision, not a shipped capability. Nothing in
-    `drift_caliper` fits a Bernoulli chart today, and `Judge.score()` still
-    rejects a `bool` score rather than guessing what to do with it.
+- three or fewer failures leaves both figures `None`;
+- four or five leaves only the improvement figure `None`;
+- six or more reports both.
 
-    It is stated here because it changes what you should build in the
-    meantime: **a batching pipeline is a workaround you would later unwind**,
-    not a step towards the real answer.
+The advisory's `boundary` is the multiple strictly above which the figure would
+be reported. The remedy is more failures in the baseline, or a larger
+`detect_rate_multiple`. A larger multiple also changes the shift the chart is
+tuned for, so it is a design choice, not a fix.
 
-### What to do today
+`direction="upper"` is refused on a baseline with no failures: there is no
+failure rate for an improvement to fall from.
 
-Aggregate into **non-overlapping batches** and monitor the batch pass rate as a
-continuous score on one of the three charts above.
+### What is not built, and what was rejected
 
-⚠️ **Non-overlapping matters.** A *rolling* pass rate makes consecutive values
-share most of their observations, which violates the independence the
-moving-range sigma estimate assumes — you would leave one silently-wrong chart
-for another.
+**The Bernoulli EWMA is not built.** The Bernoulli CUSUM is the only chart for
+pass/fail data today.
 
-⚠️ The normal approximation also needs **both** `n·p > 5` and `n·(1−p) > 5`.
-With a batch of 20, the second condition excludes pass rates above 0.75 — which
-is to say it excludes the well-behaved agent, the most likely reader.
+A **p-chart** was evaluated and **rejected**. For binary data its control limits
+are integer counts, so the achievable ARL₀ values are **discrete**. You cannot
+calibrate one to 370: you get whichever value the nearest integer limit happens
+to give, which might be 250 or 800. A randomised signalling rule *can* hit 370
+exactly, and was considered. It was rejected because it makes the chart
+non-deterministic: the same data could signal on one run and not the next, which
+is unacceptable for a library whose claim is auditability.
+
+The Bernoulli CUSUM's ARL₀ is discrete too, but its lattice steps are far finer
+than a p-chart's integer limits: at ordinary baselines it lands just above your
+target, and where it cannot (the floor, or a gap above it) an advisory says so.
+
+⚠️ **Do not batch pass/fail judgements into a pass rate** and monitor it on a
+continuous chart. It is no longer needed, and a *rolling* pass rate would also
+break the independence the continuous charts' spread estimate assumes.
 
 See [ADR-001](architecture/adr/001-spc-engine-in-house-with-scipy.md) for the
-full evaluation, the measured ARL figures, and the one question still open:
-where the in-control rate comes from, and whether the baseline-size analysis
-transfers to it.
+p-chart evaluation, and
+[ADR-014](architecture/adr/014-bernoulli-cusum-api-surface-and-fitted-artefact-shape.md)
+for the Bernoulli CUSUM's design.
 
 ## Can I run more than one?
 

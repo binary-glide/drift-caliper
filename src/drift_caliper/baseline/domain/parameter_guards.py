@@ -89,7 +89,9 @@ coverage differs, which is why this is a disclosure, not a refusal."""
 _TARGET_ARL_BELOW_VERIFIED_RANGE_KIND = "target_arl_below_verified_range"
 
 
-def _target_arl_constraint(max_target_arl: float) -> str:
+def _target_arl_constraint(
+    max_target_arl: float, min_target_arl: float = MIN_TARGET_ARL
+) -> str:
     """Build the range description used in every ``target_arl`` error message.
 
     One definition, consolidated under BIN-141 from four byte-identical
@@ -98,7 +100,7 @@ def _target_arl_constraint(max_target_arl: float) -> str:
     untested by design (ADR-008 keeps ``constraint`` human-facing), which
     is precisely why copies of it drift without anything failing.
     """
-    return f"must be a finite float in [{MIN_TARGET_ARL}, {max_target_arl}]"
+    return f"must be a finite float in [{min_target_arl}, {max_target_arl}]"
 
 
 def _require_target_arl(
@@ -216,30 +218,19 @@ def classify_target_arl(
         ``numeric_target_arl`` is not finite, is below ``MIN_TARGET_ARL``,
         or is above ``max_target_arl``.
     """
-    constraint = _target_arl_constraint(max_target_arl)
-    if not math.isfinite(numeric_target_arl) or not (
-        MIN_TARGET_ARL <= numeric_target_arl <= max_target_arl
-    ):
-        raise InvalidParameterError(
-            f"{parameter} is outside the supported range",
-            context={
-                "parameter": parameter,
-                "constraint": constraint,
-                "kind": "invalid",
-                "provided": numeric_target_arl,
-                "min_value": MIN_TARGET_ARL,
-                "max_value": max_target_arl,
-                "min_inclusive": True,
-                "max_inclusive": True,
-            },
-            recovery_hint=(
-                f"Choose a {parameter} within [{MIN_TARGET_ARL}, "
-                f"{max_target_arl}]. Caliper does not fit below "
-                f"{MIN_TARGET_ARL} -- Lucas & Saccucci (1987) tabulate no "
-                "lower in-control ARL0, so there is no published basis to "
-                "calibrate or verify against. Common choices are 370 or 500."
-            ),
-        )
+    require_target_arl_in_range(
+        numeric_target_arl,
+        min_target_arl=MIN_TARGET_ARL,
+        max_target_arl=max_target_arl,
+        parameter=parameter,
+        recovery_hint=(
+            f"Choose a {parameter} within [{MIN_TARGET_ARL}, "
+            f"{max_target_arl}]. Caliper does not fit below "
+            f"{MIN_TARGET_ARL} -- Lucas & Saccucci (1987) tabulate no "
+            "lower in-control ARL0, so there is no published basis to "
+            "calibrate or verify against. Common choices are 370 or 500."
+        ),
+    )
     if numeric_target_arl < VERIFIED_ARL_FLOOR:
         return FittingAdvisory(
             kind=_TARGET_ARL_BELOW_VERIFIED_RANGE_KIND,
@@ -256,6 +247,63 @@ def classify_target_arl(
             boundary=VERIFIED_ARL_FLOOR,
         )
     return None
+
+
+def require_target_arl_in_range(
+    numeric_target_arl: float,
+    *,
+    min_target_arl: float,
+    max_target_arl: float,
+    recovery_hint: str,
+    parameter: str = "target_arl",
+) -> None:
+    """Refuse a ``target_arl`` that is non-finite or outside a closed range.
+
+    The one place every chart's range refusal is built, so its ``context``
+    cannot lose a key at one call site (ADR-014 Decision 17, row F5: the
+    Bernoulli CUSUM's hand-rolled copy lost ``constraint``). Each chart
+    passes its own bounds -- ADR-011's ``MIN_TARGET_ARL`` for the continuous
+    charts, the coherence floor ``1.0`` for the Bernoulli CUSUM, whose ARL0
+    is exact and so has no verification tier to enforce (ADR-014 Decision
+    3) -- and its own ``recovery_hint``.
+
+    Parameters
+    ----------
+    numeric_target_arl
+        The caller's value, already narrowed to a real number by
+        :func:`require_real_number`.
+    min_target_arl, max_target_arl
+        The inclusive bounds, reported as ``min_value``/``max_value`` so they
+        round-trip as accepted inputs (BIN-122 / BIN-134).
+    recovery_hint
+        What the refused engineer should do next.
+    parameter
+        The parameter name, for ``context``.
+
+    Raises
+    ------
+    InvalidParameterError
+        ``numeric_target_arl`` is not finite or lies outside
+        ``[min_target_arl, max_target_arl]``.
+    """
+    if math.isfinite(numeric_target_arl) and (
+        min_target_arl <= numeric_target_arl <= max_target_arl
+    ):
+        return
+    raise InvalidParameterError(
+        f"{parameter} is outside the supported range",
+        context={
+            "parameter": parameter,
+            "constraint": _target_arl_constraint(max_target_arl, min_target_arl),
+            "kind": "invalid",
+            "provided": numeric_target_arl,
+            "min_value": min_target_arl,
+            "max_value": max_target_arl,
+            "min_inclusive": True,
+            "max_inclusive": True,
+        },
+        recovery_hint=recovery_hint,
+    )
 
 
 def require_real_number(value: object, *, parameter: str, constraint: str) -> float:
@@ -440,5 +488,6 @@ __all__ = [
     "classify_target_arl",
     "require_exact_str",
     "require_real_number",
+    "require_target_arl_in_range",
     "require_type",
 ]

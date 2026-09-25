@@ -15,11 +15,17 @@ calibrated control limits from it.
 
 ::: drift_caliper.fit_shewhart
 
+::: drift_caliper.fit_bernoulli_cusum
+
 ::: drift_caliper.FittedEWMA
 
 ::: drift_caliper.FittedCUSUM
 
 ::: drift_caliper.FittedShewhart
+
+::: drift_caliper.FittedBernoulliCUSUM
+
+::: drift_caliper.baseline.BernoulliArmLattice
 
 ::: drift_caliper.FittedControlLimits
 

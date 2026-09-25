@@ -25,13 +25,18 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from drift_caliper.baseline.domain.attribute_probe import invalid_observation_error
+from drift_caliper.baseline.domain.bernoulli_arm_lattice import (
+    BernoulliArmLattice,
+    lattice_integer_violation,
+)
 from drift_caliper.baseline.domain.compare_provenance import compare_provenance
+from drift_caliper.baseline.domain.fitted_bernoulli_cusum import FittedBernoulliCUSUM
 from drift_caliper.baseline.domain.fitted_control_limits import FittedControlLimits
 from drift_caliper.baseline.domain.fitted_cusum import FittedCUSUM
 from drift_caliper.baseline.domain.fitted_ewma import FittedEWMA
 from drift_caliper.baseline.domain.fitted_shewhart import FittedShewhart
 from drift_caliper.baseline.domain.parameter_guards import require_exact_str
-from drift_caliper.errors import InvalidParameterError
+from drift_caliper.errors import InvalidObservationError, InvalidParameterError
 from drift_caliper.measurement import ScoringResult
 from drift_caliper.monitoring.domain.delivery_failure import DeliveryFailure
 from drift_caliper.monitoring.domain.monitoring_result import MonitoringResult
@@ -53,6 +58,68 @@ _VALID_ARTEFACT_DIRECTIONS = _DIRECTIONS_WITH_UPPER_ARM | _DIRECTIONS_WITH_LOWER
 # names what could not be described, rather than a single generic label.
 _UNREPRESENTABLE_RECEIVER = "<unrepresentable receiver>"
 _UNREPRESENTABLE_ARTEFACT = "<unrepresentable artefact>"
+
+
+_LATTICE_INTEGERS = ("denominator", "reference_units", "decision_interval_units")
+
+
+def _checked_lattice(
+    artefact: FittedBernoulliCUSUM, field: str
+) -> tuple[int, int, int]:
+    """Re-validate one arm's lattice at use and return its three integers.
+
+    ADR-014 Decision 14.5 (row M2) and corrigendum C4. The artefact is
+    caller-supplied, and ``model_copy(update=...)``/``model_construct()``
+    skip ``BernoulliArmLattice``'s validators, so each integer is re-checked
+    with the same rule before ``Monitor`` steps it. A missing lattice, or
+    anything that is not a ``BernoulliArmLattice``, reports only its type
+    (``provided_type``), as does a non-exact ``int``; an exact ``int`` out of
+    bounds reports its value (``provided``) -- corrigendum C6/C12.2.
+    """
+    lattice = getattr(artefact, field)
+    if not isinstance(lattice, BernoulliArmLattice):
+        raise _lattice_refusal(
+            field,
+            "must be a BernoulliArmLattice when direction checks this arm",
+            {"provided_type": type(lattice).__name__},
+        )
+    values: dict[str, int] = {}
+    for attribute in _LATTICE_INTEGERS:
+        value = getattr(lattice, attribute)
+        violation = lattice_integer_violation(
+            attribute, value, denominator=values.get("denominator", 0)
+        )
+        if violation is not None:
+            constraint, detail = violation
+            raise _lattice_refusal(f"{field}.{attribute}", constraint, detail)
+        values[attribute] = value
+    return (
+        values["denominator"],
+        values["reference_units"],
+        values["decision_interval_units"],
+    )
+
+
+def _lattice_refusal(
+    field: str, constraint: str, detail: dict[str, object]
+) -> InvalidParameterError:
+    return InvalidParameterError(
+        "the fitted Bernoulli CUSUM's lattice is not a chart Monitor can run",
+        context={
+            "parameter": "artefact",
+            "constraint": constraint,
+            "kind": "invalid",
+            "field": field,
+            **detail,
+        },
+        recovery_hint=(
+            "Construct Monitor from the artefact fit_bernoulli_cusum() "
+            "returned, or from FittedBernoulliCUSUM.model_validate() of its "
+            "model_dump() -- both carry a validated lattice for every arm the "
+            "chart checks. An artefact edited with model_copy(update=...) or "
+            "built with model_construct() skips that validation."
+        ),
+    )
 
 
 def _safe_repr(obj: object, *, fallback: str) -> str:
@@ -129,8 +196,10 @@ def _describe_exception(exc: Exception) -> str:
 class Monitor:
     """Records Phase II observations against one fitted control-limit artefact.
 
-    Constructed from exactly one ``FittedControlLimits``-satisfying artefact
-    (``FittedEWMA``, ``FittedCUSUM``, or ``FittedShewhart``). ``record()``
+    Constructed from exactly one supported fitted artefact --
+    ``FittedEWMA``, ``FittedCUSUM``, ``FittedShewhart`` (each satisfying
+    ``FittedControlLimits``), or ``FittedBernoulliCUSUM`` (which satisfies
+    only ``HasProvenance`` -- ADR-014 section 6a; BIN-133). ``record()``
     checks the observation's provenance against the artefact's (reusing
     ``compare_provenance()``, BIN-68, unmodified) before any chart-specific
     comparison runs, then returns a ``MonitoringResult`` -- never raising for
@@ -140,7 +209,7 @@ class Monitor:
 
     def __init__(
         self,
-        artefact: FittedControlLimits,
+        artefact: FittedControlLimits | FittedBernoulliCUSUM,
         *,
         retain_history: bool = True,
         receivers: Sequence[SignalReceiver] = (),
@@ -150,11 +219,11 @@ class Monitor:
         Parameters
         ----------
         artefact
-            The fitted control-limit artefact -- the result of
-            ``fit_ewma()``, ``fit_cusum()``, or ``fit_shewhart()`` -- this
-            monitor records Phase II observations against. Referenced,
-            never copied or mutated; remains immutable for this monitor's
-            entire lifetime.
+            The fitted artefact -- the result of ``fit_ewma()``,
+            ``fit_cusum()``, ``fit_shewhart()``, or ``fit_bernoulli_cusum()``
+            -- this monitor records Phase II observations against.
+            Referenced, never copied or mutated; remains immutable for this
+            monitor's entire lifetime.
         retain_history
             Whether successfully recorded ``MonitoringResult``s are
             retained on ``.history``. Defaults to ``True``. **Risk:** a
@@ -174,18 +243,19 @@ class Monitor:
         Raises
         ------
         InvalidParameterError
-            ``artefact`` is not one of the three concrete fitted artefact
+            ``artefact`` is not one of the four concrete fitted artefact
             types this monitor knows how to check (``FittedEWMA``,
-            ``FittedCUSUM``, ``FittedShewhart``) -- including an object
-            that satisfies the ``FittedControlLimits`` protocol
-            structurally but is none of the three (BIN-120).
+            ``FittedCUSUM``, ``FittedShewhart``, ``FittedBernoulliCUSUM``)
+            -- including an object that satisfies the
+            ``FittedControlLimits`` protocol structurally but is none of
+            them (BIN-120).
         """
-        # BIN-120: narrowed to the three concrete chart types rather than
+        # BIN-120: narrowed to the concrete chart types rather than
         # `isinstance(artefact, FittedControlLimits)`. That protocol check
         # alone let any structurally conforming object through the
         # constructor -- `@runtime_checkable` verifies attribute names, not
         # chart identity -- and `_check()` below only knows how to dispatch
-        # on these three concrete types. A third-party artefact that merely
+        # on these concrete types. A third-party artefact that merely
         # satisfied the protocol was accepted here and then failed on its
         # first `record()` call with a raw `AssertionError`, which is not a
         # `CaliperError` and is stripped entirely under `python -O`. This is
@@ -194,25 +264,34 @@ class Monitor:
         # protocol) -- do not widen this back to the protocol check without
         # first giving `FittedControlLimits` a genuine polymorphic
         # detection operation, which ADR-004 rejected for R1.
-        if not isinstance(artefact, (FittedEWMA, FittedCUSUM, FittedShewhart)):
+        #
+        # Widened to a fourth concrete type, `FittedBernoulliCUSUM`, under
+        # BIN-133 (ADR-014 section 6a) -- that type does not itself satisfy
+        # `FittedControlLimits` (it satisfies only `HasProvenance`), so this
+        # is a genuine widening of the accepted-type tuple, not a narrowing
+        # to a stricter protocol.
+        if not isinstance(
+            artefact, (FittedEWMA, FittedCUSUM, FittedShewhart, FittedBernoulliCUSUM)
+        ):
             raise InvalidParameterError(
-                "artefact must be one of the three fitted control-limit "
-                "artefact types Monitor supports",
+                "artefact must be one of the fitted artefact types Monitor supports",
                 context={
                     "parameter": "artefact",
                     "constraint": (
-                        "must be a fitted control-limit artefact -- the return "
-                        "value of fit_ewma(), fit_cusum(), or fit_shewhart()"
+                        "must be a fitted artefact -- the return value of "
+                        "fit_ewma(), fit_cusum(), fit_shewhart(), or "
+                        "fit_bernoulli_cusum()"
                     ),
                     "kind": "invalid",
                     "provided": _describe_artefact(artefact),
                 },
                 recovery_hint=(
                     "Construct Monitor from the return value of fit_ewma(), "
-                    "fit_cusum(), or fit_shewhart() -- not a bare value, and "
-                    "not a custom object that merely satisfies the "
-                    "FittedControlLimits protocol structurally. Monitor only "
-                    "knows how to check EWMA, CUSUM, and Shewhart artefacts."
+                    "fit_cusum(), fit_shewhart(), or fit_bernoulli_cusum() "
+                    "-- not a bare value, and not a custom object that "
+                    "merely satisfies the FittedControlLimits protocol "
+                    "structurally. Monitor only knows how to check EWMA, "
+                    "CUSUM, Shewhart, and Bernoulli CUSUM artefacts."
                 ),
             )
 
@@ -225,9 +304,20 @@ class Monitor:
         # read from or written to the fitted artefact (ADR-009 section 1;
         # docs/domain-model.md Object Map -- Monitor, invariant 3). Left
         # unused for Shewhart, which is memoryless by design (BR-4).
-        self._ewma_statistic: float = artefact.baseline_mean
+        # `FittedBernoulliCUSUM` has no `baseline_mean` (ADR-014 section
+        # 6a), so the EWMA accumulator -- unused for this chart type in any
+        # case -- cannot be initialised from it; 0.0 is an inert value never
+        # read on that path.
+        self._ewma_statistic: float = (
+            0.0
+            if isinstance(artefact, FittedBernoulliCUSUM)
+            else artefact.baseline_mean
+        )
         self._cusum_s_hi: float = 0.0
         self._cusum_s_lo: float = 0.0
+        # Integer lattice units, never floats (ADR-014 Decision 14.4).
+        self._bernoulli_s_lower: int = 0
+        self._bernoulli_s_upper: int = 0
 
     @property
     def history(self) -> tuple[MonitoringResult, ...]:
@@ -254,9 +344,13 @@ class Monitor:
 
         Enforces, in order: that ``observation`` is a complete
         ``ScoringResult``; that its provenance matches this monitor's
-        fitted artefact (``compare_provenance()``, BIN-68). Only once both
-        checks pass does the chart-specific comparison run and the
-        accumulator (if any) update.
+        fitted artefact (``compare_provenance()``, BIN-68); and, only when
+        this monitor was constructed from a ``FittedBernoulliCUSUM``, that
+        ``observation.score`` is exactly ``0.0`` or ``1.0`` (ADR-014
+        Decision 2; BIN-133) -- a legal, finite, in-range continuous score
+        that every other chart type accepts is outside the domain a binary
+        chart can interpret. Only once every check passes does the
+        chart-specific comparison run and the accumulator (if any) update.
 
         On a genuine signal (``is_in_control is False``), every configured
         receiver is then invoked, in order, with the result -- each inside
@@ -285,7 +379,11 @@ class Monitor:
         Raises
         ------
         InvalidObservationError
-            ``observation`` is not a complete ``ScoringResult``.
+            ``observation`` is not a complete ``ScoringResult``; or this
+            monitor's fitted artefact is a ``FittedBernoulliCUSUM`` and
+            ``observation.score`` is not exactly ``0.0`` or ``1.0``
+            (``context["reason"] == "score_not_binary"``, ADR-014
+            Decision 2).
         ProvenanceMismatchError
             ``observation.provenance`` differs from the fitted artefact's
             baseline provenance on either dimension.
@@ -294,6 +392,28 @@ class Monitor:
             raise invalid_observation_error(observation)
 
         compare_provenance(observation, self._artefact)
+
+        if isinstance(self._artefact, FittedBernoulliCUSUM):
+            score = observation.score
+            if score != 0.0 and score != 1.0:
+                raise InvalidObservationError(
+                    "a Phase II observation checked against a "
+                    "FittedBernoulliCUSUM must have a score that is "
+                    "exactly 0.0 or 1.0",
+                    context={
+                        "reason": "score_not_binary",
+                        "missing_fields": (),
+                    },
+                    recovery_hint=(
+                        "This monitor was constructed from a "
+                        "FittedBernoulliCUSUM, which can only interpret a "
+                        "pass (1.0) or fail (0.0) score -- not a continuous "
+                        "value. No tolerance band is applied near either "
+                        "boundary. Score the observation with a rubric "
+                        "that returns exactly 0.0 or 1.0, or record it "
+                        "against a continuous chart type instead."
+                    ),
+                )
 
         is_in_control, direction = self._check(observation.score)
         provisional = MonitoringResult(
@@ -384,9 +504,11 @@ class Monitor:
             return self._check_ewma(artefact, score)
         if isinstance(artefact, FittedCUSUM):
             return self._check_cusum(artefact, score)
+        if isinstance(artefact, FittedBernoulliCUSUM):
+            return self._check_bernoulli_cusum(artefact, score)
         # BIN-120: genuinely unreachable now that the constructor narrows
-        # `artefact` to these same three concrete types -- kept only as a
-        # typed fallback for the type checker's exhaustiveness requirement
+        # `artefact` to these same concrete types -- kept only as a typed
+        # fallback for the type checker's exhaustiveness requirement
         # (`_check` must return a tuple on every path). Previously a raw
         # `AssertionError`: not a `CaliperError` (no `category`, no
         # `context`), and `assert` statements are stripped entirely under
@@ -396,23 +518,24 @@ class Monitor:
         # foreign exception type as the only thing standing between a
         # future defect and an unhandled crash.
         raise InvalidParameterError(  # pragma: no cover
-            "artefact must be one of the three fitted control-limit "
-            "artefact types Monitor supports",
+            "artefact must be one of the fitted artefact types Monitor supports",
             context={
                 "parameter": "artefact",
                 "constraint": (
-                    "must be a fitted control-limit artefact -- the return "
-                    "value of fit_ewma(), fit_cusum(), or fit_shewhart()"
+                    "must be a fitted artefact -- the return value of "
+                    "fit_ewma(), fit_cusum(), fit_shewhart(), or "
+                    "fit_bernoulli_cusum()"
                 ),
                 "kind": "invalid",
                 "provided": _describe_artefact(artefact),
             },
             recovery_hint=(
                 "Construct Monitor from the return value of fit_ewma(), "
-                "fit_cusum(), or fit_shewhart() -- not a bare value, and "
-                "not a custom object that merely satisfies the "
-                "FittedControlLimits protocol structurally. Monitor only "
-                "knows how to check EWMA, CUSUM, and Shewhart artefacts."
+                "fit_cusum(), fit_shewhart(), or fit_bernoulli_cusum() -- "
+                "not a bare value, and not a custom object that merely "
+                "satisfies the FittedControlLimits protocol structurally. "
+                "Monitor only knows how to check EWMA, CUSUM, Shewhart, "
+                "and Bernoulli CUSUM artefacts."
             ),
         )
 
@@ -524,4 +647,89 @@ class Monitor:
             return False, "upper"
         if direction in _DIRECTIONS_WITH_LOWER_ARM and self._cusum_s_lo > h:
             return False, "lower"
+        return True, None
+
+    def _check_bernoulli_cusum(
+        self, artefact: FittedBernoulliCUSUM, score: float
+    ) -> tuple[bool, str | None]:
+        """Step each checked arm's integer lattice, exactly as the fit solved it.
+
+        Notes
+        -----
+        The artefact's ``lattice_lower``/``lattice_upper`` are the chart
+        (ADR-014 Decision 14): each arm's statistic is an ``int`` in units of
+        ``1/denominator``, stepped by exactly the transitions whose
+        absorption time the fit reports as ``achieved_arl``. The derived float
+        fields are never read -- accumulating them in binary floating point
+        ran a different chart, which signalled earlier than the reported one
+        (Amendment 2 section 0, defect 3). Per Decision 14.4:
+
+        - failure (``score == 0.0``): ``s_lo += N_lo - r_lo``;
+          ``s_up = max(0, s_up - r_up)``
+        - success (``score == 1.0``): ``s_lo = max(0, s_lo - r_lo)``;
+          ``s_up += N_up - r_up``
+
+        Only the arms ``direction`` checks accumulate (corrigendum C3). A
+        signal is a statistic strictly exceeding its ``decision_interval_units``
+        (ADR-009 section 5 / BIN-112). Everything read from the
+        caller-supplied artefact is validated before any state changes
+        (Decision 14.5, corrigendum C4, BIN-143).
+        """
+        # 🚨 Same BIN-143 hazard `_check_cusum` guards against -- `artefact`
+        # is caller-supplied, and `in` on a frozenset hashes it before any
+        # comparison happens.
+        constraint = f"must be one of {sorted(_VALID_ARTEFACT_DIRECTIONS)}"
+        direction = require_exact_str(
+            artefact.direction, parameter="direction", constraint=constraint
+        )
+        # An unrecognised direction selects neither arm, and the chart would
+        # report in control forever -- a drift signal nobody receives. The
+        # value is an exact `str` by now, so it is safe to carry.
+        if direction not in _VALID_ARTEFACT_DIRECTIONS:
+            raise InvalidParameterError(
+                "the fitted Bernoulli CUSUM's direction is not a recognised value",
+                context={
+                    "parameter": "direction",
+                    "constraint": constraint,
+                    "kind": "invalid",
+                    "provided": direction,
+                },
+                recovery_hint=(
+                    "Construct Monitor from the artefact fit_bernoulli_cusum() "
+                    f"returned: its direction is always one of "
+                    f"{sorted(_VALID_ARTEFACT_DIRECTIONS)}. An artefact edited "
+                    "with model_copy(update=...) skips that validation."
+                ),
+            )
+        lower = (
+            _checked_lattice(artefact, "lattice_lower")
+            if direction in _DIRECTIONS_WITH_LOWER_ARM
+            else None
+        )
+        upper = (
+            _checked_lattice(artefact, "lattice_upper")
+            if direction in _DIRECTIONS_WITH_UPPER_ARM
+            else None
+        )
+
+        failed = score == 0.0
+        if lower is not None:
+            n, r, _ = lower
+            self._bernoulli_s_lower = (
+                self._bernoulli_s_lower + (n - r)
+                if failed
+                else max(0, self._bernoulli_s_lower - r)
+            )
+        if upper is not None:
+            n, r, _ = upper
+            self._bernoulli_s_upper = (
+                max(0, self._bernoulli_s_upper - r)
+                if failed
+                else self._bernoulli_s_upper + (n - r)
+            )
+
+        if lower is not None and self._bernoulli_s_lower > lower[2]:
+            return False, "lower"
+        if upper is not None and self._bernoulli_s_upper > upper[2]:
+            return False, "upper"
         return True, None

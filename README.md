@@ -136,13 +136,14 @@ drift: lower
 The lifecycle, in full:
 
 ```text
-  score            collect            fit                 monitor
-  ─────            ───────            ───                 ───────
-  judge.score()  → Baseline.record  → fit_ewma      → Monitor.record()
-                   (Phase I)          fit_cusum       (Phase II)
-                                      fit_shewhart          │
-                   ≥100 observations  calibrated to         ▼
-                   required           your target_arl   receivers
+  score            collect            fit                       monitor
+  ─────            ───────            ───                       ───────
+  judge.score()  → Baseline.record  → fit_ewma            → Monitor.record()
+                   (Phase I)          fit_cusum             (Phase II)
+                                      fit_shewhart                │
+                                      fit_bernoulli_cusum         │
+                   ≥100 observations  calibrated to               ▼
+                   required           your target_arl         receivers
 ```
 
 ## What it does not do
@@ -158,20 +159,45 @@ It detects drift. It plugs into what you already use.
 
 ## What is implemented
 
-Three charts, all calibrated against published ARL tables:
+Four charts, each calibrated to the false alarm rate you ask for:
 
 | Chart | Detects | Fit with |
 |---|---|---|
 | **EWMA** | gradual drift — the default | `fit_ewma` |
 | **CUSUM** | sustained shifts of a known size | `fit_cusum` |
 | **Shewhart I** | large, abrupt single-point failures | `fit_shewhart` |
+| **Bernoulli CUSUM** | a change in the failure rate of a pass/fail rubric | `fit_bernoulli_cusum` |
 
-Binary pass/fail rubrics are **not supported yet**. A p-chart was evaluated and
-**rejected** — its control limits are integer counts, so the achievable false
-alarm rates are discrete and it cannot be calibrated to a target you choose.
-**Bernoulli EWMA and Bernoulli CUSUM are the decided replacement**, and neither
-is built. See [ADR-001's 2026-09-13 amendment](docs/architecture/adr/001-spc-engine-in-house-with-scipy.md)
-for the full evaluation.
+The three continuous charts are calibrated against published ARL tables.
+
+**Binary pass/fail rubrics use the Bernoulli CUSUM.** Record each judgement as a
+score of exactly `1.0` (pass) or `0.0` (fail) — a `bool` is refused rather than
+guessed at — and call `fit_bernoulli_cusum(baseline, target_arl=370.0)`. There
+is nothing to declare: a baseline whose every score is `0.0` or `1.0` is the
+binary case. Each judgement is one observation, so no batching is needed.
+
+- It is **two-sided by default**: one arm watches for a rising failure rate,
+  the other for a falling one — an improvement, or a sign the baseline no
+  longer describes the agent.
+- Its in-control ARL₀ is **exact**, solved on a finite Markov chain rather than
+  approximated. It is designed at a confidence bound on your baseline's failure
+  rate rather than the observed rate, so the `achieved_arl` it reports is a
+  floor on the true ARL₀, not an estimate of it: with at least 90% confidence
+  for a one-sided chart, and, for the two-sided one, at every rate between the
+  two bounds — an interval that contains the true failure rate with at least
+  80% confidence (two one-sided 90% bounds). `achieved_arl` is never below the `target_arl` you asked for,
+  and can sit well above it — the fitted artefact's `advisories` say why.
+- A baseline with **few failures** cannot tell a doubling of its failure rate
+  from normal variation. The detection figures (`expected_detection_arl`,
+  `expected_improvement_detection_arl`) are then `None` rather than a
+  meaningless number, with an advisory giving the `detect_rate_multiple` above
+  which they would be reported. At the default multiple of 2, three or fewer
+  failures in the baseline blanks both.
+
+The **Bernoulli EWMA is not built.** A p-chart was evaluated and **rejected** —
+its control limits are integer counts, so the achievable false alarm rates are
+discrete and it cannot be calibrated to a target you choose. See
+[Choosing a chart](docs/charts.md) for the binary case in full.
 
 **The judge model version is a required parameter.** A missing or blank one
 raises `InvalidParameterError`; it does not warn and it does not default. Every

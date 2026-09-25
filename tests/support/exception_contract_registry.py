@@ -67,16 +67,23 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+# 🚨 BIN-133: does not exist in `drift_caliper.baseline` yet -- the expected red.
 from drift_caliper.baseline import (
     DEFAULT_SUFFICIENCY_THRESHOLD,
     Baseline,
     FittingAdvisory,
     compare_provenance,
+    fit_bernoulli_cusum,
     fit_cusum,
     fit_ewma,
     fit_shewhart,
 )
+from drift_caliper.baseline.domain.ewma_fitting import MAX_MEANINGFUL_ARL
 from drift_caliper.errors import (
+    DegenerateBaselineError,
+    InsufficientBaselineError,
+    InvalidObservationError,
+    InvalidParameterError,
     JudgeRefusalError,
     MalformedResponseError,
     ProviderError,
@@ -126,6 +133,29 @@ _FITTED_EWMA = fit_ewma(_BASELINE, target_arl=370.0)
 # BIN-143: the only artefact carrying a `direction`, and therefore the only
 # one whose Phase II check membership-tests a caller-supplied value.
 _FITTED_CUSUM = fit_cusum(_BASELINE, target_arl=370.0)
+
+
+def _binary_baseline(count: int, *, num_failures: int) -> Baseline:
+    """A sufficient baseline of exactly-0.0/1.0 scores -- BIN-133's binary probe.
+
+    Mirrors `probe_baseline()`'s "ordinary, unremarkable, fittable" role
+    (`tests/support/baseline_strategies.py`) but for a Bernoulli CUSUM,
+    which requires every score to be exactly `0.0` or `1.0`
+    (ADR-014 Decision 1) -- `FITTABLE_PROBE_SCORES` (cycling 0.0-4.0) is not
+    usable here.
+    """
+    provenance = ProvenanceFactory()
+    baseline = Baseline()
+    for i in range(count):
+        score = 0.0 if i < num_failures else 1.0
+        baseline.record(ScoringResultFactory(provenance=provenance, score=score))
+    return baseline
+
+
+_BERNOULLI_BASELINE = _binary_baseline(
+    DEFAULT_SUFFICIENCY_THRESHOLD + 5, num_failures=10
+)
+_FITTED_BERNOULLI_CUSUM = fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=370.0)
 
 
 def _hash_hostile_baseline() -> Baseline:
@@ -1086,6 +1116,20 @@ _MONITOR_CASES = (
         ),
         kind=InputKind.REGRESSION_ANCHOR,
     ),
+    # BIN-133/ADR-014 Decision 2: a legal, finite, in-range continuous score
+    # -- accepted by every other chart type -- is outside the domain a
+    # FittedBernoulliCUSUM can interpret. This is what moves OUT_OF_RANGE_VALUE
+    # from Monitor's `_MONITOR_NA` (below) into an exercised case: before this
+    # chart existed, record() took no parameter with a bounded legal range.
+    HostileCase(
+        "record_non_binary_score_against_bernoulli_cusum",
+        lambda: Monitor(_FITTED_BERNOULLI_CUSUM).record(
+            ScoringResultFactory(
+                provenance=_BERNOULLI_BASELINE.provenance_signature, score=0.42
+            )
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
 )
 
 _MONITOR_NA: Mapping[InputKind, str] = {
@@ -1102,13 +1146,6 @@ _MONITOR_NA: Mapping[InputKind, str] = {
         "as non-finite before Monitor.record() ever sees it (ADR-006 "
         "OQ-2). Monitor's chart-specific arithmetic operates on "
         "already-validated ScoringResult.score values."
-    ),
-    InputKind.OUT_OF_RANGE_VALUE: (
-        "Takes no bounded numeric parameter. retain_history is a bool "
-        "(configuration, not an SPC quantity); receivers is a sequence "
-        "of callables. Neither has a range to fall outside. The "
-        "artefact's own parameters (ARL, sigma, etc.) are already "
-        "validated at fit time."
     ),
     InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
         "Monitor.__init__'s isinstance check narrows the artefact to "
@@ -1401,6 +1438,165 @@ _FIT_CUSUM_NA: Mapping[InputKind, str] = {
     ),
 }
 
+_FIT_BERNOULLI_CUSUM_CASES = (
+    HostileCase(
+        "wrong_type_baseline",
+        lambda: fit_bernoulli_cusum(
+            "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            target_arl=370.0,
+        ),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "missing_target_arl",
+        lambda: fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=None),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "nan_target_arl",
+        lambda: fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=math.nan),
+        kind=InputKind.NON_FINITE_FLOAT,
+    ),
+    HostileCase(
+        "wrong_type_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl=370.0,
+            detect_rate_multiple="not a float",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        # p_U * multiple >= 1 -- not a valid design-point probability.
+        "unattainable_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=1e6
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        "wrong_type_direction",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl=370.0,
+            direction=123,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        kind=InputKind.WRONG_TYPE,
+    ),
+    HostileCase(
+        "invalid_direction",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, direction="bogus"
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    # BIN-143's class: `direction` is compared against a fixed set here too
+    # (ADR-012's vocabulary, shared with fit_cusum) -- `in` on a frozenset
+    # hashes the caller's object before comparing anything.
+    HostileCase(
+        "hash_raising_str_subclass_direction",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl=370.0,
+            direction=_HashRaisingStr("two_sided"),
+        ),
+        kind=InputKind.HASH_RAISES,
+    ),
+    HostileCase(
+        # ADR-014 Decision 1: a legal, finite, in-range CONTINUOUS score is
+        # exactly the hostile case this entry point's own validation exists
+        # to catch -- not adversarial in the BIN-121 sense, but the specific
+        # boundary this chart adds beyond every other fit_* entry point.
+        "score_not_binary_in_baseline",
+        lambda: fit_bernoulli_cusum(
+            baseline_from_scores([0.0, 1.0, 0.42] + [0.0, 1.0] * 60), target_arl=370.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    # --- ADR-014 amendment Decisions 9/10b: resource-bound refusals ---
+    HostileCase(
+        # Decision 9: target_arl ceiling at MAX_MEANINGFUL_ARL.
+        "target_arl_above_ceiling",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=MAX_MEANINGFUL_ARL + 1.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        # Negative detect_rate_multiple -- not a valid shift lever.
+        "negative_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=-1.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        # Zero detect_rate_multiple -- not a valid shift lever.
+        "zero_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=0.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        # Positive infinity detect_rate_multiple.
+        "inf_detect_rate_multiple",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=math.inf
+        ),
+        kind=InputKind.NON_FINITE_FLOAT,
+    ),
+    # ADR-014 corrigendum C2, reproduced on PR #29 by the coordinator: a
+    # multiple of exactly 1 divides by zero in the reference-value formula
+    # (``ZeroDivisionError``), and one below 1 takes the log of a negative
+    # number (``ValueError``). Both must be F16. (``M = 1.0000001`` -- the
+    # third reproduction, a hang -- is deliberately NOT a case here: this
+    # audit has no timeout, so it lives in
+    # test_bernoulli_cusum_detect_rate_multiple.py behind one.)
+    HostileCase(
+        "detect_rate_multiple_exactly_one",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=1.0
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+    HostileCase(
+        "detect_rate_multiple_below_one",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=0.5
+        ),
+        kind=InputKind.OUT_OF_RANGE_VALUE,
+    ),
+)
+
+_FIT_BERNOULLI_CUSUM_NA: Mapping[InputKind, str] = {
+    InputKind.EMPTY_STRING: (
+        "Takes Baseline, floats, and a direction string from a fixed set "
+        "('two_sided'/'upper'/'lower'). direction is validated against a "
+        "membership set, not as freeform text -- an empty string is "
+        "rejected the same way 'bogus' is (invalid_direction above), which "
+        "is OUT_OF_RANGE_VALUE, not EMPTY_STRING."
+    ),
+    InputKind.ATTRIBUTE_ACCESS_RAISES: (
+        "baseline is narrowed to Baseline via require_type() before any "
+        "attribute is accessed. target_arl and detect_rate_multiple are "
+        "scalar floats; direction is a str checked against a fixed set. No "
+        "duck-typed object survives to have its attributes probed."
+    ),
+    InputKind.ATTRIBUTE_RETURNS_HOSTILE: (
+        "Same as ATTRIBUTE_ACCESS_RAISES -- no attribute of a caller-supplied "
+        "duck-typed object is read. All parameters are concrete types "
+        "validated before use."
+    ),
+    InputKind.COMPARISON_RAISES: (
+        "fit_bernoulli_cusum() compares nothing caller-supplied against "
+        "another caller-supplied object. Numeric comparisons are against "
+        "constants; direction is compared against a frozenset of string "
+        "literals -- the HASH_RAISES case above is the one that actually "
+        "reaches the caller's object (BIN-143's class), not __eq__/__ne__."
+    ),
+}
+
 _FIT_SHEWHART_CASES = (
     # BIN-149. `_has_zero_variance` calls `set(scores)`, hashing every
     # caller-supplied score. Shared by all three charts via spc_numerics, so
@@ -1488,6 +1684,9 @@ EXERCISABLE: tuple[ExercisableEntryPoint, ...] = (
     ExercisableEntryPoint("fit_ewma", _FIT_EWMA_CASES, _FIT_EWMA_NA),
     ExercisableEntryPoint("fit_cusum", _FIT_CUSUM_CASES, _FIT_CUSUM_NA),
     ExercisableEntryPoint("fit_shewhart", _FIT_SHEWHART_CASES, _FIT_SHEWHART_NA),
+    ExercisableEntryPoint(
+        "fit_bernoulli_cusum", _FIT_BERNOULLI_CUSUM_CASES, _FIT_BERNOULLI_CUSUM_NA
+    ),
 )
 
 # ---------------------------------------------------------------------------
@@ -1611,6 +1810,17 @@ EXCLUDED: tuple[ExcludedEntryPoint, ...] = (
         "is exercised directly above).",
     ),
     ExcludedEntryPoint(
+        "FittedBernoulliCUSUM",
+        "An output artefact type -- see FittedEWMA's reason "
+        "(fit_bernoulli_cusum() is exercised directly above). Unlike the "
+        "three continuous artefacts it does not satisfy FittedControlLimits "
+        "(ADR-014 Decision 6a) -- it satisfies only HasProvenance, which is "
+        "itself excluded below for the same Protocol reason as "
+        "FittedControlLimits. That narrower conformance does not change why "
+        "this type is excluded here: it is still an output value object, "
+        "not a caller-invoked operation.",
+    ),
+    ExcludedEntryPoint(
         "JudgeProviderPort",
         "A `@runtime_checkable` typing.Protocol implemented by "
         "provider-adapter authors, not called directly by an engineer -- "
@@ -1669,3 +1879,609 @@ EXCLUDED: tuple[ExcludedEntryPoint, ...] = (
 
 _EXCLUDED_NAMES = frozenset(entry.name for entry in EXCLUDED)
 _EXERCISABLE_NAMES = frozenset(entry.name for entry in EXERCISABLE)
+
+
+# ---------------------------------------------------------------------------
+# ADR-014 Decision 17 -- the Bernoulli CUSUM refusal contract, row by row
+# ---------------------------------------------------------------------------
+#
+# The BIN-121 audit above asks one question of every hostile case: "if it
+# raised, was it a well-formed CaliperError?" Decision 17 asks a stronger one
+# of every *emission site* in fit_bernoulli_cusum and Monitor's Bernoulli
+# branch: "does it carry its COMPLETE context key set, and does every bound it
+# reports round-trip?" The shipped code missed three required keys and the
+# amendment found a fourth, each because the rows were hand-rolled and nobody
+# asserted the full set. This table is the whole contract (Decision 17,
+# extended by Decision 19.5's F15, corrigendum C2's F16, C4's missing-lattice
+# M2 variant, C6/C12.2's provided/provided_type split and C10's three F14
+# figures); ``tests/unit/baseline/test_bernoulli_cusum_refusal_contract.py``
+# drives every row through the public API.
+#
+# Each row names its contract values exactly, or ``PRESENT`` where only the
+# key's presence is contracted (``constraint`` prose, a hostile object's
+# ``provided``). ``absent`` lists keys whose ABSENCE is the contract -- F3 has
+# no ``provided``, F10/F15 carry no round-trip key, the ``require_exact_str``
+# family reports ``provided_type`` and never the value.
+
+
+class _Present:
+    """Sentinel: the key must be present; its value is not contracted."""
+
+    def __repr__(self) -> str:
+        return "PRESENT"
+
+
+PRESENT: Any = _Present()
+
+
+@dataclass(frozen=True)
+class RefusalContractRow:
+    """One Decision 17 emission site, driven through the public API."""
+
+    row: str
+    invoke: Callable[[], object]
+    error_type: type[Exception]
+    expected: Mapping[str, object]
+    absent: frozenset[str] = frozenset()
+    round_trip: Callable[[Mapping[str, Any]], object] | None = None
+
+
+def _binary(m: int, f: int) -> Baseline:
+    return _binary_baseline(m, num_failures=f)
+
+
+def _with_caps(joint_cap: int, action: Callable[[], object]) -> object:
+    """Run ``action`` with the Decision 10b/13.3 caps shrunk consistently
+    (``_MAX_DECISION_INTERVAL_UNITS = _MAX_JOINT_STATES - 1``), so a cap
+    refusal is reached on small, fast chains (Decision 18 item 12: never drive
+    a real chain to a real cap)."""
+    from unittest import mock
+
+    from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting
+
+    with (
+        mock.patch.object(fitting, "_MAX_JOINT_STATES", joint_cap),
+        mock.patch.object(fitting, "_MAX_DECISION_INTERVAL_UNITS", joint_cap - 1),
+    ):
+        return action()
+
+
+def _with_poisoned_solves(rate: float, action: Callable[[], object]) -> object:
+    """Run ``action`` with every solve of a chain moving w.p. ``rate`` returning
+    NaN (Decision 13.4's postcondition must catch it). Seam: production solves
+    through ``scipy.sparse.linalg.spsolve``, looked up at call time."""
+    from unittest import mock
+
+    import numpy as np
+    import scipy.sparse.linalg
+
+    real = scipy.sparse.linalg.spsolve
+
+    def spsolve(matrix: Any, rhs: Any, *args: Any, **kwargs: Any) -> Any:
+        entries = np.abs(np.asarray(matrix.tocsc().data))
+        if np.any(np.isclose(entries, rate, rtol=1e-9, atol=0.0)):
+            return np.full(matrix.shape[0], math.nan)
+        return real(matrix, rhs, *args, **kwargs)  # type: ignore[no-untyped-call]
+
+    with mock.patch.object(scipy.sparse.linalg, "spsolve", spsolve):
+        return action()
+
+
+def _bernoulli_monitor_record(artefact: object, score: float) -> object:
+    provenance = _BERNOULLI_BASELINE.provenance_signature
+    assert provenance is not None
+    return Monitor(artefact).record(  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ScoringResultFactory(provenance=provenance, score=score)
+    )
+
+
+def _with_lattice(field_name: str, attribute: str | None, value: object) -> object:
+    """The registry's two-sided artefact with one lattice integer replaced (or,
+    with ``attribute=None``, the whole lattice replaced) via
+    ``model_copy(update=...)``, which skips validation -- the caller-supplied
+    route Decision 14.5 guards."""
+    lattice = getattr(_FITTED_BERNOULLI_CUSUM, field_name)
+    replacement = (
+        value if attribute is None else lattice.model_copy(update={attribute: value})
+    )
+    return _FITTED_BERNOULLI_CUSUM.model_copy(update={field_name: replacement})
+
+
+def _upper_ceiling_fit(multiple: float) -> object:
+    return fit_bernoulli_cusum(
+        _binary(200, 20),
+        target_arl=1.0,
+        direction="upper",
+        detect_rate_multiple=multiple,
+    )
+
+
+def _upper_ceiling() -> float:
+    """Corrigendum C15.2's ``U = p_L x 2**53`` at m=200 f=20."""
+    chart = _upper_ceiling_fit(2.0)
+    p_l: float = getattr(chart, "p_l")  # noqa: B009 -- a typed read of a float
+    return p_l * 2.0**53
+
+
+def _with_refusing_finder(action: Callable[[], object]) -> object:
+    """Run ``action`` with every arm unconstructible (C15.2 item 34's seam:
+    ``bernoulli_cusum_fitting._arm_lattice``)."""
+    from unittest import mock
+
+    from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting
+
+    with mock.patch.object(fitting, "_arm_lattice", lambda _p0, _p1: None):
+        return action()
+
+
+_P_HAT_M300_F3 = 0.01  # p_hat at m=300 f=3, the F14 cells
+_P_U_M300_F3 = 0.022132940895274917  # p_U at m=300 f=3 (ADR-013's bound)
+
+
+def _fit_target(value: float) -> object:
+    return fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=value)
+
+
+def _fit_multiple(value: float) -> object:
+    return fit_bernoulli_cusum(
+        _BERNOULLI_BASELINE, target_arl=370.0, detect_rate_multiple=value
+    )
+
+
+def _f5_row(label: str, value: float) -> RefusalContractRow:
+    def round_trip(context: Mapping[str, Any]) -> object:
+        return tuple(
+            fit_bernoulli_cusum(
+                _BERNOULLI_BASELINE, target_arl=context[key], direction="lower"
+            )
+            for key in ("min_value", "max_value")
+        )
+
+    return RefusalContractRow(
+        f"F5_{label}",
+        lambda: _fit_target(value),
+        InvalidParameterError,
+        {
+            "parameter": "target_arl",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": PRESENT,
+            "min_value": 1.0,
+            "max_value": MAX_MEANINGFUL_ARL,
+            "min_inclusive": True,
+            "max_inclusive": True,
+        },
+        absent=frozenset({"provided_type"}),
+        round_trip=round_trip,
+    )
+
+
+def _f7_row(label: str, value: float) -> RefusalContractRow:
+    return RefusalContractRow(
+        f"F7_{label}",
+        lambda: _fit_multiple(value),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": PRESENT,
+        },
+        absent=frozenset({"min_value", "min_inclusive", "provided_type"}),
+    )
+
+
+def _f12_row(direction: str) -> RefusalContractRow:
+    def fit_at(target: float) -> object:
+        return _with_caps(
+            51,
+            lambda: fit_bernoulli_cusum(
+                _binary(200, 20), target_arl=target, direction=direction
+            ),
+        )
+
+    return RefusalContractRow(
+        f"F12_{direction}",
+        lambda: fit_at(1e6),
+        InvalidParameterError,
+        {
+            "parameter": "target_arl",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": 1e6,
+            "max_attainable_arl": PRESENT,
+            "direction": direction,
+        },
+        absent=frozenset({"provided_type"}),
+        round_trip=lambda context: fit_at(context["max_attainable_arl"]),
+    )
+
+
+def _f14_row(figure: str, direction: str, rate: float) -> RefusalContractRow:
+    return RefusalContractRow(
+        f"F14_{figure}",
+        lambda: _with_poisoned_solves(
+            rate,
+            lambda: fit_bernoulli_cusum(
+                _binary(300, 3),
+                target_arl=370.0,
+                direction=direction,
+                detect_rate_multiple=3.0,
+            ),
+        ),
+        DegenerateBaselineError,
+        {
+            "reason": "arl_not_computable",
+            "chart_type": "bernoulli_cusum",
+            "figure": figure,
+        },
+    )
+
+
+def _f16_row(reason: str, multiple: float) -> RefusalContractRow:
+    return RefusalContractRow(
+        f"F16_{reason}",
+        lambda: fit_bernoulli_cusum(
+            _binary(200, 20), target_arl=370.0, detect_rate_multiple=multiple
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": multiple,
+            "reason": reason,
+            "min_value": PRESENT,
+            "min_inclusive": True,
+        },
+        absent=frozenset({"provided_type"}),
+        round_trip=lambda context: fit_bernoulli_cusum(
+            _binary(200, 20),
+            target_arl=1.0,
+            detect_rate_multiple=context["min_value"],
+        ),
+    )
+
+
+def _f13_fit(target: float) -> object:
+    return _with_caps(
+        2_000,
+        lambda: fit_bernoulli_cusum(
+            _binary(1000, 1), target_arl=target, direction="two_sided"
+        ),
+    )
+
+
+BERNOULLI_REFUSAL_CONTRACT: tuple[RefusalContractRow, ...] = (
+    RefusalContractRow(
+        "F1",
+        lambda: fit_bernoulli_cusum(
+            "not a baseline",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            target_arl=370.0,
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "baseline",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": PRESENT,
+        },
+        absent=frozenset({"provided_type"}),
+    ),
+    RefusalContractRow(
+        "F2",
+        lambda: fit_bernoulli_cusum(
+            baseline_from_scores([0.0, 1.0, 0.42] + [0.0, 1.0] * 60),
+            target_arl=370.0,
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "baseline",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": PRESENT,
+            "reason": "score_not_binary",
+            "invalid_score": 0.42,
+            "position": 2,
+        },
+        absent=frozenset({"provided_type"}),
+    ),
+    RefusalContractRow(
+        "F3",
+        lambda: fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=None),
+        InvalidParameterError,
+        {"parameter": "target_arl", "constraint": PRESENT, "kind": "missing"},
+        absent=frozenset({"provided", "provided_type"}),
+    ),
+    RefusalContractRow(
+        "F4_not_a_number",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl="370",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "target_arl",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": "370",
+        },
+        absent=frozenset({"provided_type"}),
+    ),
+    RefusalContractRow(
+        "F4_bool",
+        lambda: fit_bernoulli_cusum(_BERNOULLI_BASELINE, target_arl=True),
+        InvalidParameterError,
+        {
+            "parameter": "target_arl",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": True,
+        },
+        absent=frozenset({"provided_type"}),
+    ),
+    _f5_row("nan", math.nan),
+    _f5_row("below_one", 0.5),
+    _f5_row("above_ceiling", MAX_MEANINGFUL_ARL + 1.0),
+    RefusalContractRow(
+        "F6",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl=370.0,
+            detect_rate_multiple="2",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": "2",
+        },
+        absent=frozenset({"provided_type"}),
+    ),
+    _f7_row("nan", math.nan),
+    _f7_row("inf", math.inf),
+    RefusalContractRow(
+        "F8_not_a_str",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE,
+            target_arl=370.0,
+            direction=123,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "direction",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided_type": "int",
+        },
+        absent=frozenset({"provided"}),
+    ),
+    RefusalContractRow(
+        "F8_unknown",
+        lambda: fit_bernoulli_cusum(
+            _BERNOULLI_BASELINE, target_arl=370.0, direction="sideways"
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "direction",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": "sideways",
+        },
+        absent=frozenset({"provided_type"}),
+    ),
+    RefusalContractRow(
+        "F9",
+        lambda: fit_bernoulli_cusum(_binary(99, 10), target_arl=370.0),
+        InsufficientBaselineError,
+        {"have": 99, "need": DEFAULT_SUFFICIENCY_THRESHOLD},
+    ),
+    RefusalContractRow(
+        "F10",
+        lambda: fit_bernoulli_cusum(_binary(105, 105), target_arl=370.0),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": 2.0,
+            "reason": "all_baseline_judgements_failed",
+        },
+        absent=frozenset({"max_detect_rate_multiple", "provided_type"}),
+    ),
+    RefusalContractRow(
+        "F11",
+        lambda: _fit_multiple(1e6),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": 1e6,
+            "max_detect_rate_multiple": PRESENT,
+        },
+        absent=frozenset({"provided_type"}),
+        round_trip=lambda context: _fit_multiple(context["max_detect_rate_multiple"]),
+    ),
+    RefusalContractRow(
+        # Corrigendum C15.2: F11 extended to the upper arm, whose ceiling is
+        # U = p_L x 2**53 (the upper design point 1 - p_L/M must be < 1).
+        "F11_upper_ceiling",
+        lambda: _upper_ceiling_fit(4.0 * _upper_ceiling()),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": PRESENT,
+            "max_detect_rate_multiple": PRESENT,
+        },
+        absent=frozenset({"reason", "provided_type"}),
+        round_trip=lambda context: _upper_ceiling_fit(
+            context["max_detect_rate_multiple"]
+        ),
+    ),
+    _f12_row("lower"),
+    _f12_row("upper"),
+    RefusalContractRow(
+        "F13",
+        lambda: _f13_fit(2_000.0),
+        InvalidParameterError,
+        {
+            "parameter": "target_arl",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": 2_000.0,
+            "reason": "joint_state_count_exceeded",
+            "joint_state_count": PRESENT,
+            "max_joint_states": 2_000,
+            "max_two_sided_target_arl": PRESENT,
+        },
+        absent=frozenset({"max_attainable_arl", "provided_type"}),
+        round_trip=lambda context: _f13_fit(float(context["max_two_sided_target_arl"])),
+    ),
+    _f14_row("achieved_arl", "lower", _P_U_M300_F3),
+    # Corrigendum C13 (point 6): a disclosure figure is F14 only as a defect
+    # guard OUTSIDE its structural condition, so these rows use M = 3
+    # (p_hat x 3 > p_U; p_hat / 3 < p_L at m=300 f=3). At M = 2 both figures
+    # are None and nothing is solved.
+    _f14_row("expected_detection_arl", "lower", _P_HAT_M300_F3 * 3.0),
+    _f14_row("expected_improvement_detection_arl", "two_sided", _P_HAT_M300_F3 / 3.0),
+    RefusalContractRow(
+        "F15",
+        lambda: fit_bernoulli_cusum(
+            _binary(1000, 0), target_arl=370.0, direction="upper"
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "direction",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": "upper",
+            "reason": "no_baseline_failures",
+        },
+        absent=frozenset(
+            {"min_value", "max_value", "max_detect_rate_multiple", "provided_type"}
+        ),
+    ),
+    _f16_row("no_shift_to_detect", 1.0),
+    _f16_row("shift_below_numerical_resolution", 1.0 + 1e-10),
+    RefusalContractRow(
+        # Corrigendum C15.2: nothing constructible in (request, C] -- measured
+        # unreachable, so reached through an always-refusing finder. No
+        # min_value and no round-trip key (mirrors F10).
+        "F16_no_valid_multiple",
+        lambda: _with_refusing_finder(
+            lambda: fit_bernoulli_cusum(
+                _binary(200, 20), target_arl=1.0, detect_rate_multiple=1.5
+            )
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "detect_rate_multiple",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": 1.5,
+            "reason": "no_valid_multiple",
+        },
+        absent=frozenset({"min_value", "min_inclusive", "provided_type"}),
+    ),
+    RefusalContractRow(
+        "M1",
+        lambda: _bernoulli_monitor_record(_FITTED_BERNOULLI_CUSUM, 0.42),
+        InvalidObservationError,
+        {"reason": "score_not_binary", "missing_fields": ()},
+    ),
+    RefusalContractRow(
+        "M2_not_an_exact_int",
+        lambda: _bernoulli_monitor_record(
+            _with_lattice("lattice_upper", "reference_units", True), 1.0
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "artefact",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "field": "lattice_upper.reference_units",
+            "provided_type": "bool",
+        },
+        absent=frozenset({"provided"}),
+    ),
+    RefusalContractRow(
+        "M2_out_of_bounds",
+        lambda: _bernoulli_monitor_record(
+            _with_lattice("lattice_lower", "reference_units", 0), 1.0
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "artefact",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "field": "lattice_lower.reference_units",
+            "provided": 0,
+        },
+        absent=frozenset({"provided_type"}),
+    ),
+    RefusalContractRow(
+        "M2_C4_missing_lattice",
+        lambda: _bernoulli_monitor_record(
+            _with_lattice("lattice_upper", None, None), 1.0
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "artefact",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "field": "lattice_upper",
+            "provided_type": "NoneType",
+        },
+        absent=frozenset({"provided"}),
+    ),
+    RefusalContractRow(
+        "M3",
+        # A non-``str`` direction, reaching Monitor through
+        # ``model_copy(update=...)``, which skips validation. Not a ``str``
+        # subclass: ``require_exact_str`` deliberately *accepts* those,
+        # normalising type not content (BIN-139/143;
+        # ``test_legitimate_str_subclass_is_accepted``) -- this row previously
+        # used ``_HashRaisingStr`` and so demanded the tempting wrong fix.
+        lambda: _bernoulli_monitor_record(
+            _FITTED_BERNOULLI_CUSUM.model_copy(update={"direction": 123}),
+            1.0,
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "direction",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided_type": "int",
+        },
+        absent=frozenset({"provided"}),
+    ),
+    RefusalContractRow(
+        # Review 3, R4: an exact str that is not a recognised direction.
+        # require_exact_str accepts it; before this row nothing refused it, and
+        # Monitor reported in control forever. Shape follows F8's
+        # unknown-string path: the value itself in `provided`.
+        "M3_unknown_value",
+        lambda: _bernoulli_monitor_record(
+            _FITTED_BERNOULLI_CUSUM.model_copy(update={"direction": "sideways"}),
+            1.0,
+        ),
+        InvalidParameterError,
+        {
+            "parameter": "direction",
+            "constraint": PRESENT,
+            "kind": "invalid",
+            "provided": "sideways",
+        },
+        absent=frozenset({"provided_type"}),
+    ),
+)
+
+# Every row of Decision 17's tables (fit_bernoulli_cusum F1-F16, Monitor
+# M1-M3). The refusal-contract test asserts the registry covers each one.
+BERNOULLI_CONTRACT_ROWS = frozenset(
+    {f"F{number}" for number in range(1, 17)} | {"M1", "M2", "M3"}
+)
