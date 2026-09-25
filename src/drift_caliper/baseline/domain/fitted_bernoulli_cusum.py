@@ -105,14 +105,25 @@ class FittedBernoulliCUSUM(FittedArtefactBase):
     calibration D (ADR-014 corrigendum C5). No approximate path exists."""
 
     advisories: tuple[FittingAdvisory, ...] = ()
-    """Non-raising disclosures (ADR-011's vehicle). Two kinds are produced for
-    this chart: ``"lower_arm_signals_on_first_failure"`` when the lower arm is
-    at its floor -- every single failure signals, so the achieved ARL0 is
-    ``1/p_u`` whatever was requested (ADR-014 Decision 12; ``boundary`` is
-    that ARL0) -- and ``"upper_arm_not_designable"`` when a two-sided request
-    met a zero-failure baseline and only the lower arm could be built
-    (Decision 19.2; ``boundary`` is ``1.0``, the smallest failure count at
-    which the improvement arm can be designed)."""
+    """Non-raising disclosures (ADR-011's vehicle), in this order. Four kinds
+    are produced for this chart:
+
+    - ``"lower_arm_signals_on_first_failure"``: the lower arm is at its floor
+      -- every single failure signals, so the achieved ARL0 is ``1/p_u``
+      whatever was requested (ADR-014 Decision 12). ``boundary`` is that
+      ARL0.
+    - ``"detection_shift_within_design_rate"``: ``expected_detection_arl`` is
+      ``None`` because the degradation it would describe lies at or inside
+      ``p_u`` (corrigendum C13). ``boundary`` is ``p_u / observed_failure_rate``;
+      any strictly larger ``detect_rate_multiple`` reports the figure.
+    - ``"improvement_shift_within_design_rate"``: the same for the improvement
+      figure, at or inside ``p_l`` -- ``expected_improvement_detection_arl``
+      for ``"two_sided"``, ``expected_detection_arl`` for ``"upper"``.
+      ``boundary`` is ``observed_failure_rate / p_l``.
+    - ``"upper_arm_not_designable"``: a two-sided request met a zero-failure
+      baseline and only the lower arm could be built (Decision 19.2).
+      ``boundary`` is ``1.0``, the smallest failure count at which the
+      improvement arm can be designed."""
 
     # -- Bernoulli-specific design surface --
     detect_rate_multiple: float

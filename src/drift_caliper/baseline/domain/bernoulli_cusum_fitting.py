@@ -184,14 +184,15 @@ _UPPER_ARM_CEILING_FACTOR = 2.0**53
 #   raised as an exception when a caller promotes warnings to errors.
 # - ArithmeticError: FloatingPointError under a caller's np.errstate(all=
 #   "raise"), plus ZeroDivisionError/OverflowError from the same arithmetic.
-# SuperLU's exact-singularity RuntimeError is matched by message below,
-# because RuntimeError itself is far broader than numerics.
+# SuperLU itself (spsolve's pinned path) reports an exactly singular system
+# by warning MatrixRankWarning and returning NaNs, which the finiteness check
+# below turns into the sentinel. No RuntimeError is caught: it is far broader
+# than numerics, and spsolve raises none for a singular matrix.
 _NUMERICAL_SOLVE_FAILURES = (
     np.linalg.LinAlgError,
     spla.MatrixRankWarning,
     ArithmeticError,
 )
-_SUPERLU_SINGULAR = "singular"
 
 _ALL_FAILED_REASON = "all_baseline_judgements_failed"
 _SCORE_NOT_BINARY_REASON = "score_not_binary"
@@ -518,15 +519,17 @@ def _solve_absorbing_chain(
         - transient
     ).tocsc()
     try:
-        steps = spla.spsolve(system, np.ones(n_states))  # type: ignore[no-untyped-call]
+        # 🚨 `use_umfpack=False` pins SuperLU. spsolve otherwise switches to
+        # UMFPACK whenever scikit-umfpack happens to be installed, so a
+        # consumer's environment would pick a different solver from the one
+        # every published-value, reference-solver and simulated-ARL test
+        # verified. The exactness this module claims rests on that verified
+        # solver: a different one can round an `ARL >= target` tie the other
+        # way and move a calibrated interval.
+        steps = spla.spsolve(  # type: ignore[no-untyped-call]
+            system, np.ones(n_states), use_umfpack=False
+        )
     except _NUMERICAL_SOLVE_FAILURES:
-        return _ILL_CONDITIONED_ARL_SENTINEL
-    except RuntimeError as error:
-        # SuperLU reports an exactly singular factor as a bare RuntimeError
-        # ("Factor is exactly singular"); every other RuntimeError is not a
-        # statement about this chain and propagates as itself.
-        if _SUPERLU_SINGULAR not in str(error):
-            raise
         return _ILL_CONDITIONED_ARL_SENTINEL
     steps_array = np.asarray(steps).reshape(-1)
     if steps_array.shape[0] != n_states:

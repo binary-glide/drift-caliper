@@ -176,10 +176,10 @@ class TestANonNumericalRuntimeErrorPropagates:
     def test_is_not_relabelled_as_arl_not_computable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Only SuperLU's exact-singularity ``RuntimeError`` is numerical
-        (covered in ``test_bernoulli_cusum_amendment2.py``); any other
-        ``RuntimeError`` raised inside the solve says nothing about the chain
-        and must reach the caller as itself, not as F14."""
+        """A ``RuntimeError`` raised inside the solve says nothing about the
+        chain and must reach the caller as itself, not as F14 (the pinned
+        SuperLU path reports singularity as NaN, never as a ``RuntimeError``:
+        review 3, R2)."""
 
         def spsolve(*_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError("the worker pool was shut down")

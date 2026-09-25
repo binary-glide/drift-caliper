@@ -678,11 +678,29 @@ class Monitor:
         # 🚨 Same BIN-143 hazard `_check_cusum` guards against -- `artefact`
         # is caller-supplied, and `in` on a frozenset hashes it before any
         # comparison happens.
+        constraint = f"must be one of {sorted(_VALID_ARTEFACT_DIRECTIONS)}"
         direction = require_exact_str(
-            artefact.direction,
-            parameter="direction",
-            constraint=f"must be one of {sorted(_VALID_ARTEFACT_DIRECTIONS)}",
+            artefact.direction, parameter="direction", constraint=constraint
         )
+        # An unrecognised direction selects neither arm, and the chart would
+        # report in control forever -- a drift signal nobody receives. The
+        # value is an exact `str` by now, so it is safe to carry.
+        if direction not in _VALID_ARTEFACT_DIRECTIONS:
+            raise InvalidParameterError(
+                "the fitted Bernoulli CUSUM's direction is not a recognised value",
+                context={
+                    "parameter": "direction",
+                    "constraint": constraint,
+                    "kind": "invalid",
+                    "provided": direction,
+                },
+                recovery_hint=(
+                    "Construct Monitor from the artefact fit_bernoulli_cusum() "
+                    f"returned: its direction is always one of "
+                    f"{sorted(_VALID_ARTEFACT_DIRECTIONS)}. An artefact edited "
+                    "with model_copy(update=...) skips that validation."
+                ),
+            )
         lower = (
             _checked_lattice(artefact, "lattice_lower")
             if direction in _DIRECTIONS_WITH_LOWER_ARM
