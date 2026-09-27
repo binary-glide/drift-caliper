@@ -39,6 +39,7 @@ from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from drift_caliper.baseline import FittedBernoulliCUSUM, fit_bernoulli_cusum
+from drift_caliper.baseline.domain import bernoulli_arm_lattice
 from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting_module
 from drift_caliper.errors import InvalidParameterError
 from tests.support import bernoulli_reference as ref
@@ -184,6 +185,21 @@ class TestTheOneSidedCapIsDecoupledFromTheJointCap:
     19 made an f=0 upper arm undesignable (F15); today m=3,000,000 f=0 "lower"
     at T=10^6 fits at ``h = 1``. It is not reproducible, so it is not pinned.
     """
+
+    # Budget: reads three module attributes; no solve. 10 s is a hang guard.
+    @pytest.mark.timeout(10)
+    def test_the_caps_hold_their_ruled_values_independently(self) -> None:
+        """ADR-016 Q1 (b): "joint cap 400,000, one-sided cap unchanged at
+        999,999". Each cap is pinned to its own ruled value, so an import-time
+        re-tie (``_MAX_DECISION_INTERVAL_UNITS = _MAX_JOINT_STATES - 1``) fails
+        here on the pull-request gate. The patching test below cannot see such a
+        tie -- it patches after import -- and the behavioural 460,645-unit fit
+        is ``slow``. The fitting module's search cap must also be the lattice
+        value object's own cap, or a fit could calibrate an interval the
+        artefact then refuses to hold."""
+        assert fitting_module._MAX_JOINT_STATES == _JOINT_CAP
+        assert fitting_module._MAX_DECISION_INTERVAL_UNITS == _ONE_SIDED_CAP
+        assert bernoulli_arm_lattice.MAX_DECISION_INTERVAL_UNITS == _ONE_SIDED_CAP
 
     # Budget: patched caps keep every chain under ~4,000 states; well under
     # 1 s locally. 60 s is a hang guard.
