@@ -36,6 +36,11 @@ from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 
 from drift_caliper.baseline import Baseline, FittedBernoulliCUSUM, fit_bernoulli_cusum
+from drift_caliper.baseline.domain import bernoulli_cusum_fitting as fitting
+from drift_caliper.baseline.domain.clopper_pearson import (
+    clopper_pearson_lower_bound,
+    clopper_pearson_upper_bound,
+)
 from drift_caliper.errors import InvalidParameterError
 from tests.support import bernoulli_reference as ref
 from tests.support.bernoulli_surface import triplet
@@ -361,7 +366,7 @@ def _baseline(m: int, f: int) -> Baseline:
 def _refused_multiples_at_or_above_two(m: int, f: int) -> tuple[float, ...]:
     """C14's own sweep, via the independent reference: the multiples >= 2 on a
     3,000-point log grid of ``M - 1`` in ``[1e-6, 1e3]`` at which the upper arm
-    is not constructible (m=3,000,000 f=1: 10 of them; m=10,000,000 f=1: 100+;
+    is not constructible (m=3,000,000 f=1: 10 of them; m=10,000,000 f=1: 83;
     f=2: 1)."""
     p_lower = ref.cp_lower(f, m)
     grid = (1.0 + 10.0 ** (-6.0 + 9.0 * i / 2999) for i in range(3000))
@@ -437,51 +442,81 @@ class TestUnconstructibleUpperArmAtOrdinaryMultiples:
         ) / _ORDINARY_UNCONSTRUCTIBLE_MULTIPLE
         assert relative_move < 1e-6
 
-    # Budget: measured 0.6 s per target-1 fit on the 3,000,000-observation
-    # baseline (its score scan dominates), three fits per draw: 3 draws ~6 s
-    # locally (29.7 s for 5 draws in the full covered run), x3 = 18 s.
-    @pytest.mark.timeout(90)
-    @settings(
-        max_examples=3,
-        deadline=None,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    @given(position=st.floats(min_value=0.0, max_value=1.0, exclude_max=True))
-    def test_refused_multiples_above_two_at_m_3_million(self, position: float) -> None:
-        """Item 29 on the cheapest qualifying baseline (m=3,000,000 f=1, p_L =
-        3.5e-8): for a refused ``M >= 2``, ``min_value >= M``, is constructible,
-        and the float below it is not."""
-        refused = _refused_multiples_at_or_above_two(3_000_000, 1)
-        assert refused
-        requested = refused[int(position * len(refused))]
-
-        _assert_min_value_is_the_nearest_constructible(3_000_000, 1, requested)
-
-    @pytest.mark.slow
-    # Budget: measured 2.0 s per target-1 fit at m=10,000,000 (0.6 s at
-    # 3,000,000) plus ~2.7 s to build each 10M baseline once; 20 draws x 3
-    # fits -> ~2 min locally, x3 = 6 min.
-    @pytest.mark.timeout(600)
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    @given(
-        which=st.sampled_from(_TINY_P_L_BASELINES),
-        position=st.floats(min_value=0.0, max_value=1.0, exclude_max=True),
-    )
-    def test_every_refused_multiple_above_two_gets_the_nearest_constructible_minimum(
-        self, which: tuple[int, int], position: float
+    # Budget: measured locally, without coverage / under coverage (BIN-169):
+    # 1.2 s / 2.0 s on 3.13 and 1.3 s / 2.6 s on 3.11 -- no baseline is built
+    # and nothing scans observations. x3 on the slowest leg (3.11 covered,
+    # ~1.9x slower in CI) = 15 s; 60 s leaves room for xdist contention.
+    @pytest.mark.timeout(60)
+    @pytest.mark.parametrize(("m", "f"), _TINY_P_L_BASELINES)
+    def test_production_search_on_every_refused_multiple_above_two(
+        self, m: int, f: int
     ) -> None:
-        """Item 29: for any refused ``M >= 2`` on a baseline with ``p_L < 1e-7``,
-        ``min_value >= M``, is constructible, and the float below it is not."""
-        m, f = which
+        """Item 29, exhaustively rather than sampled: for **every** multiple
+        ``>= 2`` on C14's 3,000-point grid at which the independent reference
+        refuses the upper arm (10 at m=3,000,000 f=1; 83 at m=10,000,000 f=1;
+        1 at m=10,000,000 f=2 -- all ``p_L < 1e-7``), production also refuses
+        it, and production's ``min_value`` search returns a multiple ``>= M``
+        that both implementations can construct, with the float below it
+        constructible by neither.
+
+        Driven through production's own design helpers
+        (``_designed_lattices``/``_nearest_constructible_multiple``, the code
+        F16 raises from) because a public fit re-scans all ``m`` observations
+        on every call: at m=10,000,000 under CI's coverage tracing that cost
+        ~50 s per sampled draw on Python 3.11 and timed out the nightly run
+        twice (BIN-169). The public path is pinned at m=3,000,000 by
+        ``test_pinned_regression_at_m_3_million`` and at m=10,000,000 by the slow
+        test below.
+
+        This replaces a 3-draw Hypothesis sample of the same m=3,000,000
+        refused multiples through ``fit_bernoulli_cusum`` (33 s locally under
+        coverage on 3.11, within 2x of its 90 s budget on CI): all ten of them
+        are now checked here, each against the independent reference too."""
+        p_u = clopper_pearson_upper_bound(failures=f, observations=m, alpha=0.10)
+        p_lower = clopper_pearson_lower_bound(failures=f, observations=m, alpha=0.10)
+        assert p_lower == pytest.approx(ref.cp_lower(f, m), rel=1e-12)
+        assert p_lower < 1e-7
+        arms = ("upper",)
+
+        def constructible(multiple: float) -> bool:
+            production = fitting._designed_lattices(arms, p_u, p_lower, multiple)
+            reference = ref.exact_lattice(*ref.upper_arm_design_pair(p_lower, multiple))
+            assert (production is None) == (reference is None), multiple
+            return production is not None
+
         refused = _refused_multiples_at_or_above_two(m, f)
         assert refused, f"no refused multiple >= 2 at m={m} f={f}"
-        requested = refused[int(position * len(refused))]
+        for requested in refused:
+            assert not constructible(requested), requested
+            minimum = fitting._nearest_constructible_multiple(
+                arms, p_u, p_lower, requested
+            )
+            assert minimum is not None, requested
+            assert minimum >= requested
+            assert constructible(minimum), (requested, minimum)
+            below = math.nextafter(minimum, 0.0)
+            if below >= requested:
+                assert not constructible(below), (requested, minimum)
 
-        _assert_min_value_is_the_nearest_constructible(m, f, requested)
+    @pytest.mark.slow
+    # Budget: BIN-169. One 10,000,000-observation build plus three target-1
+    # fits, each fit re-scanning every observation. Measured locally under
+    # coverage (CI's configuration): Python 3.11 48.6 s; 3.13 29.8 s (7.2 s /
+    # 6.4 s without coverage). CI runs ~1.9x slower than local and 3.11 is the
+    # slowest leg: ~92 s there, x3 = 277 s. 600 s leaves a further ~2x for
+    # BIN-155's parallel nightly run (-n auto) contending for the same cores.
+    @pytest.mark.timeout(600)
+    def test_public_path_at_m_10_million(self) -> None:
+        """Item 29 end to end at the largest baseline: a refused multiple >= 2
+        at m=10,000,000 f=1 (the reference's first on the grid) raises F16 from
+        ``fit_bernoulli_cusum``, and its ``min_value`` is ``>= M``, round-trips,
+        and the float below it is refused. One deterministic cell replaces the
+        former 20-draw Hypothesis property, which rebuilt the same public path
+        up to 60 times at this size and timed out on Python 3.11 (BIN-169);
+        every refused multiple is covered exhaustively above."""
+        requested = _refused_multiples_at_or_above_two(10_000_000, 1)[0]
+
+        _assert_min_value_is_the_nearest_constructible(10_000_000, 1, requested)
 
 
 # ===========================================================================
