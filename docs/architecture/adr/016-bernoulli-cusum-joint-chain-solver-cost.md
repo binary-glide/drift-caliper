@@ -25,6 +25,10 @@ edited.
 > 0.71–9.4 GB at 1M states depending on the baseline** (m=300 f=3: 9.4 GB
 > and 18.5 min per solve), not the ≈0.9 GB the cap was ratified on
 > (Finding 0, Q1). Recommendation for Q1: a joint cap of 400,000.
+>
+> ✅ *Ruled 2026-09-27 (see Status): the joint cap **is** lowered to 400,000 and
+> the one-sided cap decoupled at 999,999. "The cap stays at 1,000,000" above
+> describes the state before the ruling.*
 
 ---
 
@@ -239,6 +243,8 @@ memory; times are job 2's.
 So the premise *"~950 bytes/state ⇒ 1M states ≈ 0.9 GB"* holds for the chain
 it was measured on and not for the one calibration D now solves. This is
 **Question Q1** for the product owner below; this ADR does not change the cap.
+⚠️ *Superseded by the Q1 ruling (2026-09-27, see Status): the joint cap is now
+400,000.*
 
 ---
 
@@ -454,6 +460,9 @@ changes memory per state materially. Whether the cap itself should move is
 Q1, which is open (MMD_ATA ≤ 7%; ILU none; the
 unpreconditioned solver cannot be adopted). ⚠️ But see Finding 0: the cap's
 *memory figure* is wrong for the coupled chain, which is Q1.
+⚠️ *Q1 has since been ruled (2026-09-27, see Status): the joint cap is
+400,000. Decision 4 stands for the solver options — none of them changes the
+cap — and the cap moved for Finding 0's reason instead.*
 
 ---
 
