@@ -92,7 +92,7 @@ References
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from fractions import Fraction
 from typing import NamedTuple
 
@@ -146,14 +146,24 @@ DEFAULT_DETECT_RATE_MULTIPLE = 2.0
 # picked) as the largest epsilon below the detection-penalty jump at 0.30.
 _EPSILON = 0.25
 
-# ADR-014 Amendment 1 Decision 10b: the joint two-sided state count cap,
-# ~950 bytes per state of peak RSS. Read at call time, so tests can shrink it.
-_MAX_JOINT_STATES = 1_000_000
+# The joint two-sided state count cap: 400,000 (ADR-016 Q1, ruled
+# 2026-09-27), lowered from ADR-014 Amendment 1 Decision 10b's 1,000,000. That
+# cap was ratified on ~950 bytes of peak RSS per state, measured on the
+# two-outcome joint chain; the three-outcome coupled chain calibration D now
+# solves fills in far more, peaking at 0.71-9.4 GB at 1,000,000 states
+# depending on the baseline (ADR-016 Finding 0, measured on Linux). 400,000 is
+# the largest cap with measured evidence of staying under ~0.9 GB on every
+# reachable shape measured (worst 0.77-0.78 GB). A state-count cap bounds
+# memory only for the shapes fits reach, not for every constructible chain.
+# Read at call time, so tests can shrink it.
+_MAX_JOINT_STATES = 400_000
 
-# ADR-014 Amendment 2 Decision 13.3: `_MAX_JOINT_STATES - 1`, so no single
-# solve, one-sided or joint, exceeds the joint budget. A module attribute read
-# at call time (tests shrink it together with `_MAX_JOINT_STATES`); the
-# lattice value object enforces the ratified value itself.
+# The one-sided decision-interval cap: 999,999 units (ADR-014 Amendment 2
+# Decision 13.3), deliberately NOT tied to `_MAX_JOINT_STATES` any more.
+# ADR-016 Q1 decoupled them: a one-sided chain costs ~958 bytes per state
+# (~0.96 GB at the cap), and tying it to the lowered joint cap would refuse
+# measured one-sided fits. A module attribute read at call time, so tests can
+# shrink it; the lattice value object enforces the ratified value itself.
 _MAX_DECISION_INTERVAL_UNITS = MAX_DECISION_INTERVAL_UNITS
 
 _MIN_DECISION_INTERVAL_UNITS = 1
@@ -675,10 +685,16 @@ def _calibrate_one_sided_decision_interval_units(
 
 
 class _TwoSidedCalibration(NamedTuple):
-    """Calibration D's outcome: the intervals, or the state count refused."""
+    """Calibration D's outcome: the intervals, or the state count refused.
+
+    ``bound`` is ``B`` at the chosen intervals -- the search's own solve, which
+    becomes ``achieved_arl`` rather than being solved a second time (ADR-016
+    Decision 2) -- or ``None`` when refused.
+    """
 
     intervals: tuple[int, int] | None
     joint_state_count: int
+    bound: float | None = None
 
 
 def _calibrate_two_sided(
@@ -701,6 +717,9 @@ def _calibrate_two_sided(
     ``joint_state_count`` is the chart's state count when it fits, and a
     lower bound on the count D would need -- still over the cap -- when it
     does not (row F13).
+
+    The search for ``h_up`` is ADR-016 Decision 2's: only *how* the answer is
+    found changes, never the answer (see :func:`_smallest_meeting_bound`).
     """
     joint_cap, arm_cap = _MAX_JOINT_STATES, _MAX_DECISION_INTERVAL_UNITS
     h_lo = _smallest_decision_interval_units(lower, p_u, 2.0 * target, arm_cap)
@@ -715,19 +734,69 @@ def _calibrate_two_sided(
     )
     top = h_up_cap if top is None else top
 
+    solved: dict[int, float] = {}
+
     def bound_at(h_up: int) -> float:
-        return _coupled_arl_in_units((*lower, h_lo), (*upper, h_up), p_l, p_u)
+        # Memoised: no design is ever solved twice, and the answer's B is
+        # always in here when the search ends.
+        if h_up not in solved:
+            solved[h_up] = _coupled_arl_in_units(
+                (*lower, h_lo), (*upper, h_up), p_l, p_u
+            )
+        return solved[h_up]
 
     if bound_at(top) < target:
         return refused
-    lo, hi = 0, top
+    # ADR-016 Decision 2, fact 1: on every path the coupled chart stops no
+    # later than its upper arm alone, which sees a success with probability
+    # 1 - p_l -- so B(h) <= A_up(h), and the answer is at least the smallest h
+    # whose one-sided upper-arm ARL meets T. B(top) >= T, so A_up(top) >= T
+    # and that h exists within [1, top].
+    smallest = _smallest_decision_interval_units(upper, 1.0 - p_l, target, top)
+    h_up = _smallest_meeting_bound(bound_at, target, (smallest or 1) - 1, top)
+    return _TwoSidedCalibration((h_lo, h_up), (h_lo + 1) * (h_up + 1), solved[h_up])
+
+
+def _smallest_meeting_bound(
+    bound_at: Callable[[int], float], target: float, lo: int, hi: int
+) -> int:
+    """Find the smallest ``h`` in ``(lo, hi]`` with ``bound_at(h) >= target``.
+
+    ADR-016 Decision 2: a safeguarded regula falsi (Illinois variant) on
+    ``B(h) - T``. Its loop invariant is bisection's -- ``B(lo) < T <= B(hi)``,
+    with ``lo`` either 0 or known below ``T`` -- and every probe is clamped
+    strictly inside the bracket, so the returned ``h`` is the smallest meeting
+    the target however good or bad the interpolation is. The interpolation
+    only decides how few probes it takes: ``B`` is close to linear in ``h``
+    over the bracket, so it closes in 4-7 coupled solves where bisection took
+    11-13 near the cap (Finding 2). When a repeated end would stall the
+    interpolation, that end's weight is halved (the Illinois step); when the
+    two ends' values are equal, the probe falls back to the midpoint.
+
+    Ported from the ADR's own prototype, including its solve of ``B(lo)`` for
+    a positive ``lo`` -- the value the first interpolation starts from.
+    """
+    b_lo = bound_at(lo) if lo >= 1 else 1.0
+    b_hi = bound_at(hi)
+    side = 0
     while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if bound_at(mid) >= target:
-            hi = mid
+        if b_hi == b_lo:
+            guess = (lo + hi) // 2
         else:
-            lo = mid
-    return _TwoSidedCalibration((h_lo, hi), (h_lo + 1) * (hi + 1))
+            guess = lo + round((target - b_lo) * (hi - lo) / (b_hi - b_lo))
+        guess = min(max(guess, lo + 1), hi - 1)
+        value = bound_at(guess)
+        if value >= target:
+            hi, b_hi = guess, value
+            if side == 1:
+                b_lo = target - (target - b_lo) / 2.0
+            side = 1
+        else:
+            lo, b_lo = guess, value
+            if side == -1:
+                b_hi = target + (b_hi - target) / 2.0
+            side = -1
+    return hi
 
 
 # ===========================================================================
@@ -1220,9 +1289,9 @@ def _two_sided_design(
         )
     h_lo, h_up = calibration.intervals
     lower_arm, upper_arm = (*lower, h_lo), (*upper, h_up)
-    achieved = _reported_arl(
-        _coupled_arl_in_units(lower_arm, upper_arm, p_l, p_u), "achieved_arl"
-    )
+    # The search's own solve of B at these intervals (ADR-016 Decision 2):
+    # the same chain on the same matrix, so solving it again changes nothing.
+    achieved = _reported_arl(calibration.bound or math.nan, "achieved_arl")
     detection = (
         None
         if degradation_within

@@ -24,8 +24,9 @@ failure.
   never raise it; either collapses the arm into a one-directional walk.
 - ``1 <= decision_interval_units <= MAX_DECISION_INTERVAL_UNITS`` -- the
   calibration search starts at one unit, and Decision 13.3 caps every arm at
-  999,999 units so no single solve exceeds the ratified 1,000,000-state
-  memory budget (Decision 10b).
+  999,999 units, about 0.96 GB for a one-sided chain. ADR-016 Q1 decoupled
+  this from the joint two-sided cap (400,000 states), which is lower because
+  the coupled chain fills in more per state.
 - **No upper bound on ``denominator``** (Decision 13.2; corrigendum C9):
   state counts depend on ``h_units``, not on ``N``, and ``N`` legitimately
   reaches 3,364,300 at m=300,000 f=1.
@@ -43,8 +44,9 @@ from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
 
 from drift_caliper.errors import InvalidParameterError
 
-# ADR-014 Decision 13.3: one below the joint-state cap (Decision 10b), so a
-# one-sided chain (h_units + 1 states) never exceeds 1,000,000 states either.
+# ADR-014 Decision 13.3's value, kept at 999,999 when ADR-016 Q1 lowered the
+# joint two-sided cap to 400,000 and decoupled the two: a one-sided chain
+# (h_units + 1 states) costs ~958 bytes per state, ~0.96 GB here.
 MAX_DECISION_INTERVAL_UNITS = 999_999
 
 MIN_DENOMINATOR = 2
