@@ -17,9 +17,15 @@ changes solver, move the seam, not the assertions.
 **Caps are monkeypatched, never driven for real** where a test is about the
 refusal path rather than a published cell (Decision 18 item 12: "Tests must
 not drive a zero-drift chain to a real cap: monkeypatch the cap"). When they
-are patched, ``_MAX_DECISION_INTERVAL_UNITS`` is kept at
-``_MAX_JOINT_STATES - 1``, the relationship Decision 13.3 fixes and Decision
-16's proof relies on.
+are patched, ``_MAX_DECISION_INTERVAL_UNITS`` is set to
+``_MAX_JOINT_STATES - 1``, the relationship Decision 13.3 fixed and the
+patched cells were computed under. ADR-016 Q1 decouples the two real caps
+(joint 400,000, one-sided 999,999); patching both keeps these cells' figures
+valid, and Decision 16's route (a per-arm cap hit is F13) still holds with the
+per-arm cap above the joint one.
+
+**Published cells use the 400,000-state joint cap** (ADR-016 Q1). Figures
+that predate it are re-based and say so.
 """
 
 from __future__ import annotations
@@ -198,6 +204,7 @@ def _check_c11_cell(
     pinned: int,
 ) -> int:
     assert context["reason"] == _JOINT
+    assert context["max_joint_states"] == ref.MAX_JOINT_STATES
     bound = context["max_two_sided_target_arl"]
     assert bound == pinned
     assert bound == ref.es_bound(
@@ -219,6 +226,12 @@ class TestEqualSplitBound:
     ``floor(T_ES)`` from the independent reference and C11's published value,
     it round-trips under D (production refits there) and under ES (the
     reference's equal-split design at that target fits the joint cap).
+
+    ADR-016 Q1 (re-based; figure predates the 400k cap): C11's values were
+    computed at the 1,000,000-state cap. Each is re-computed at 400,000 with
+    the independent reference (``es_bound``) and, where the ADR tabulates the
+    cell, checked against ADR-016 Q1's table; the two m=300,000 cells are
+    unchanged by the cap.
     """
 
     @pytest.mark.parametrize(
@@ -257,18 +270,24 @@ class TestEqualSplitBound:
     @pytest.mark.slow
     @pytest.mark.parametrize(
         ("m", "f", "multiple", "target", "pinned", "measured_seconds"),
+        # ADR-016 Q1 (re-based; figure predates the 400k cap): 21,634 -> 4,759,
+        # 249 -> 106, 1,700 -> 808, 1,471 -> 650. The M=2 cells are ADR-016's
+        # own table; the other two are the independent reference's es_bound at
+        # 400,000. ``measured_seconds`` is refusal + round-trip, measured
+        # locally with production's cap patched to 400,000 (``prodcost.py``).
         [
-            (1000, 5, 2.0, 1e6, 21_634, 19.9),
-            (200, 20, 1.001, 370.0, 249, 16.4),
-            (1000, 1, 2.0, 1e6, 1_700, 44.3),
-            (1000, 5, 1.01, 1e5, 1_471, 104.2),
+            (1000, 5, 2.0, 1e6, 4_759, 5.7 + 16.5),
+            (200, 20, 1.001, 370.0, 106, 4.1 + 11.9),
+            (1000, 1, 2.0, 1e6, 808, 7.0 + 23.5),
+            (1000, 5, 1.01, 1e5, 650, 27.3 + 17.6),
         ],
         ids=["m1000_f5", "m200_f20_M1.001", "m1000_f1", "m1000_f5_M1.01"],
     )
-    # Budget: C11's measured end-to-end refusal times (k3_refusal_time.py,
-    # "total" column) are in ``measured_seconds``; the worst is 104.2 s, and
-    # the round-trip fit at the bound is the D feasibility check again
-    # (<= 95.5 s). (104.2 + 95.5) x 3 = 599 s.
+    # Budget: measured locally only, at the 400,000 cap under today's
+    # bisection (Decision 2 only shortens it): the worst cell is 44.9 s;
+    # x 1.9 (ADR-015's CI factor) x 3 = 256 s. 900 s is kept because the red
+    # run still pays the 1,000,000-cap refusal (<= 104.2 s, C11's
+    # k3_refusal_time.py) before its bound assertion fails.
     @pytest.mark.timeout(900)
     def test_slow_refusal_cells(
         self,
@@ -280,8 +299,8 @@ class TestEqualSplitBound:
         measured_seconds: float,
     ) -> None:
         """These four are C11's expensive corners -- the cost is the fit's own
-        per-solve cost near the 999,999-unit cap, which C11 leaves to the
-        iterative-solver ticket and does not budget."""
+        per-solve cost near the joint cap, which ADR-016 bounds by lowering the
+        cap to 400,000 and cutting calibration D's solves (Decision 2)."""
         del measured_seconds  # recorded for the budget comment above
         context = _refusal(m, f, target, multiple=multiple)
         p_u, p_lower = ref.cp_upper(f, m), ref.cp_lower(f, m)
