@@ -7,6 +7,13 @@ raised to 3× the CI-measured duration, the measurement cited beside it (Q2);
 the nightly full run goes parallel too, after the pre-merge full-suite
 `workflow_dispatch` run in Verification item 7 (Q3); the ticket text is
 corrected (Q4).
+> ⚠️ **Amendment 1 (2026-09-27, ACCEPTED) is at the end of this ADR.** The
+> pre-merge full-suite run failed on all three legs. Amendment 1 re-measures on
+> CI and **supersedes** Decisions 2 and 6 and the Q2 and Q3 answers above: the
+> nightly/dispatch run is serial, the test job caps BLAS threads, and hang-guard
+> budgets follow the "≥ 3× slowest CI leg" rule. Read it before relying on any
+> of those.
+
 **Date:** 2026-09-25
 **Deciders:** system-architect (proposal); product owner (ratification pending)
 **Refs:** BIN-155, BIN-133, BIN-124, BIN-89, BIN-154, ADR-007, ADR-014 (C11)
@@ -786,3 +793,382 @@ where the largest fits live (m = 3,000,000 cells, ADR-014 Decision 13).
 **The first nightly run after merge is its first parallel run.** The
 implementer should trigger one by `workflow_dispatch` on the PR branch
 before merge, and record its result (Verification item 7).
+
+---
+
+## Amendment 1 (2026-09-27): measured on CI
+
+**Status:** ✅ **ACCEPTED — ratified by the product owner 2026-09-27.**
+QA1: the job-level BLAS caps are a permanent part of the CI contract. QA2: the
+seven new budgets and the "≥ 3× slowest CI leg" rule replace Q2. QA3: the
+nightly/dispatch run is serial. QA4: 3× stands for now, **to be re-checked
+against the `--durations=30` CI logs once about two weeks of runs exist** — the
+runner hardware is heterogeneous, and the margin was sized on one observed
+part.
+**Why:** the pre-merge full-suite `workflow_dispatch` run failed on all three
+legs (Verification item 7).
+
+### What ADR-015 got wrong
+
+**1. The slow set was never run under xdist.** The original ADR said so itself
+("Not covered: the `slow` set… under xdist"). It then recommended the parallel
+nightly anyway (Q3), treating the gap as something to confirm rather than as
+missing evidence. The confirmation run is what failed.
+
+**2. A 10-core Mac is not a 4-vCPU runner.** Every contention figure in
+Decisions 2 and 6 was measured locally:
+
+- the ~1.2× median slowdown;
+- the 2.1× worst headroom;
+- the ~300–360 s CI estimate.
+
+`-n 4` on 10 cores leaves six cores idle to absorb child processes and OS
+work. The runner has none spare. The "workers-equal-cores" ×1.2 factor used
+in the CI estimate was taken from the Mac's ×10 run, and CI contradicts it
+(below).
+
+**3. The CI speed factor was borrowed, not measured.** The ~1.9× CI-vs-local
+factor came from a test's budget note. CI did not publish per-test durations
+at the time, so no CI duration backed any headroom figure.
+
+### The failing run: 36330900057 (branch `ci/BIN-155/parallel-shuffled-tests` at `0828937`)
+
+The run used `-n auto --dist worksteal -m "not wall_clock"` on 4 workers,
+with the full suite including `slow`. Compared with the last green serial
+full-suite run, 36326491650 (dispatch at `c16949f`):
+
+| leg (job) | tests that hit their timeout | parallel session | serial session (36326491650) | change |
+|---|---|---|---|---|
+| 3.11 (108652492543) | both `TestJointStateCountCap` (60 s); `test_pinned_regression_at_m_3_million` (60 s); `test_one_sided_simulated_mean_run_length_matches_achieved_arl[floored_lower_m1000_f0]` (180 s); `TestLatticeFinderAtTheEdgeOfDoublePrecision::test_an_unrealisable_design_at_an_ordinary_multiple_is_f16_with_a_minimum` (60 s) | 1496.1 s | 1570.5 s | −5% |
+| 3.12 (108652492364) | both `TestJointStateCountCap` (60 s) | 1118.7 s | 1201.5 s | −7% |
+| 3.13 (108652492423) | both `TestJointStateCountCap` (60 s) | 1926.8 s | 1427.7 s | **+35%** |
+
+Four workers on four vCPUs made the full suite **no faster**, and on 3.13
+slower. According to code-reviewer's reading of the logs, unmarked
+Hypothesis tests reached 430–440 s on 3.13, and `test_slow_refusal_cells[m1000_f1]`
+reached 546 s on 3.12 (timeout 900). ADR-015's local model predicted about
+1.2× slowdown. That model is wrong for this runner.
+
+### Experiment 1: run 36333444223 (branch `exp/ci-parallel-measure-1`)
+
+**Setup.** The experiment branch forked `0828937` and changed two things:
+
+- **The CI `test` job.** It became a matrix of Python version (3.11, 3.12,
+  3.13) × five configurations, each on its own fresh 4-vCPU runner:
+
+  | config | command | BLAS/OpenMP thread caps |
+  |---|---|---|
+  | `ns-serial` | `pytest -m "not slow"` | none |
+  | `ns-serial-capped` | the same | `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1` |
+  | `ns-par` | the PR pair: `-n auto --dist worksteal -m "not slow and not wall_clock" --cov-report=`, then `-m "wall_clock and not slow" --cov-append --cov-report=xml` | none |
+  | `ns-par-capped` | the same pair | caps as above |
+  | `full-par-capped` | the nightly pair, without `not slow` | caps as above |
+
+  Every command added `--durations=0 --durations-min=2`.
+- **A `tests/conftest.py` shim.** It multiplied every `timeout` marker by 10,
+  so a test that would trip its hang guard runs to completion and reports
+  its real duration.
+
+Each job also recorded:
+
+- `nproc`, `free -m` and the CPU model;
+- `threadpoolctl.threadpool_info()`, taken after importing numpy, scipy and
+  `scipy.sparse.linalg`;
+- a `free -m` sample every 20 s;
+- its `coverage.xml`, printed into the log so it could be compared line by
+  line.
+
+**Which BLAS, and whether the cap takes effect.** `threadpoolctl` finds two
+OpenBLAS pools, both using the `pthreads` threading layer, not OpenMP:
+
+- numpy's bundled `libscipy_openblas64_` (0.3.34.106.0);
+- scipy's bundled `libscipy_openblas` (0.3.31.dev).
+
+Uncapped, each pool starts `num_threads = 4`, one per vCPU. So four xdist
+workers can each run two 4-thread pools on four vCPUs. With the caps set,
+both pools report `num_threads = 1`. `OPENBLAS_NUM_THREADS` is the variable
+that governs pthreads OpenBLAS. `OMP_NUM_THREADS` is its fallback, and MKL is
+not present. Setting all three costs nothing and stays correct if a future
+wheel changes its BLAS.
+
+**The runners are not uniform hardware, and this matters more than the
+Python version.** Each job printed its CPU:
+
+- most were `AMD EPYC 7763`;
+- some were `INTEL(R) XEON(R) PLATINUM 8573C`, and those were markedly
+  faster.
+
+`ns-serial` 3.13 ran on the Intel part, which likely explains why "3.13" was
+the fastest serial leg. The failing run's 3.13 leg (+35%) may equally be a
+hardware draw; that run's CPU model was not logged. Every duration below is
+tagged with its CPU.
+
+#### Results, experiment 1
+
+Every job passed. "pytest session" is the time pytest reports for each
+step; parallel configurations add the serial `wall_clock` step.
+
+| config | py | job | CPU | pytest session(s) | max mem MB | coverage (lines/branches) | coverage diff vs `ns-serial`, same Python |
+|---|---|---|---|---|---|---|---|
+| full-par-capped | py3.11 | 108659677101 | AMD EPYC 7763 | 826 + 11 | 4111 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| full-par-capped | py3.12 | 108659677084 | AMD EPYC 7763 | 871 + 11 | 4995 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| full-par-capped | py3.13 | 108659677093 | AMD EPYC 7763 | 675 + 10 | 4710 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-par | py3.11 | 108659677120 | Intel(R) Xeon(R) 6973P-C | 1495 + 7 | 3059 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-par | py3.12 | 108659677114 | AMD EPYC 7763 | 966 + 11 | 2531 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-par | py3.13 | 108659677045 | AMD EPYC 7763 | 1006 + 10 | 2494 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-par-capped | py3.11 | 108659677067 | AMD EPYC 7763 | 313 + 11 | 2822 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-par-capped | py3.12 | 108659677053 | AMD EPYC 7763 | 294 + 11 | 2675 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-par-capped | py3.13 | 108659677089 | AMD EPYC 7763 | 262 + 10 | 2504 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-serial | py3.11 | 108659677018 | AMD EPYC 7763 | 643 | 1716 | 1556/297 (0.9962/0.99) | — |
+| ns-serial | py3.12 | 108659677033 | AMD EPYC 7763 | 607 | 2001 | 1556/297 (0.9962/0.99) | — |
+| ns-serial | py3.13 | 108659677079 | INTEL(R) XEON(R) PLATINUM 8573C | 440 | 2354 | 1556/297 (0.9962/0.99) | — |
+| ns-serial-capped | py3.11 | 108659677007 | AMD EPYC 7763 | 625 | 1888 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-serial-capped | py3.12 | 108659677024 | AMD EPYC 7763 | 576 | 2178 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+| ns-serial-capped | py3.13 | 108659677147 | INTEL(R) XEON(R) PLATINUM 8573C | 481 | 1990 | 1556/297 (0.9962/0.99) | 0 lines/branches differ |
+
+Every parallel configuration's `coverage.xml` matched its serial counterpart
+exactly. "0 differ" means every line's hit/miss and every branch's
+`condition-coverage` matched `ns-serial` on the same Python. The totals are
+1556/1562 lines and 297/300 branches everywhere, so Codecov's figures are
+unchanged.
+
+**What experiment 1 shows:**
+
+1. **Uncapped threads are the cause of the failure. Capping fixes the
+   suite-level problem.**
+   - Uncapped `ns-par` took 966–1495 s, *slower* than serial at 440–643 s.
+   - Capped `ns-par-capped` took 262–313 s, about **2.1× faster than
+     serial** on the same AMD hardware.
+   - The victims of oversubscription are the dense-linear-algebra Hypothesis
+     tests, which do many small `np.linalg.solve` calls through
+     `ewma_numerics`. Uncapped in parallel, the BIN-124 guard
+     (`test_baseline_scores_strategy_never_draws_a_baseline_the_library_rejects`,
+     6.6 s serially on the Mac) took **742 s** on 3.11 and 459 s on 3.13.
+     `test_affine_transform_…`, `test_fit_ewma_handles_structured_large_magnitudes`
+     and `test_ewma_delivers_the_requested_arl0_…` took 146–463 s each.
+   - `ns-par` 3.11 drew an `Intel Xeon 6973P-C` runner and was still the
+     slowest job of all (1495 s). So this is not a hardware artefact.
+   - This confirms code-reviewer's hypothesis.
+2. **Capping costs nothing serially.** `ns-serial-capped` vs `ns-serial` on
+   the same hardware: 625 vs 643 s (3.11) and 576 vs 607 s (3.12). The
+   suite's BLAS work is too small for four threads to help. So the caps can
+   be set for every test step, not only the parallel one.
+3. **Even capped, four workers on four vCPUs slow each heavy test by
+   1.6–2.6×.** This is far more than the ~1.2× measured on the 10-core Mac.
+   The sparse solves (SuperLU, single-threaded) and memory bandwidth are
+   shared, and a 4-vCPU runner is likely 2 cores with SMT; the CPU topology
+   was not captured. **This is why the hang guards trip even with the cap.**
+   See the next table.
+4. **Memory is not a constraint.**
+   - Peak `used` was 2.5–2.8 GB for the not-slow parallel runs and 4.1–5.0 GB
+   for the full suite, on a 16 GB runner.
+   - Serial runs peaked at 1.7–2.4 GB.
+5. **The full suite, capped and parallel, took 675–871 s**, against 1201–1570 s
+   for the last green serial run (36326491650). That is about 1.8× faster,
+   and every test passed, but only with timeouts stretched ×10. See Decision
+   A2 for what it would take at real budgets.
+
+#### Hang guards within 3× of their timeout: CI durations, experiment 1
+
+Durations are the `setup` + `call` + `teardown` totals from `--durations=0`,
+with timeouts stretched ×10 so every test finished. `serial` is `ns-serial`
+(3.11 AMD, 3.12 AMD, 3.13 Intel).
+
+| test | timeout | `ns-serial` 3.11 / 3.12 / 3.13 | `ns-par-capped` 3.11 / 3.12 / 3.13 | `full-par-capped` 3.11 / 3.12 / 3.13 | worst headroom |
+|---|---|---|---|---|---|
+| `TestJointStateCountCap::test_raises_with_joint_state_count_exceeded_context` | 60 | 42.5 / 39.7 / 28.0 | **73.5** / 68.5 / 61.3 | 67.2 / 69.0 / 62.8 | **0.82×** |
+| `TestJointStateCountCap::test_max_two_sided_target_arl_round_trips` | 60 | 42.6 / 40.5 / 28.4 | 67.7 / 49.3 / 66.2 | 67.7 / **71.2** / 67.6 | **0.84×** |
+| `TestUnconstructibleUpperArmAtOrdinaryMultiples::test_pinned_regression_at_m_3_million` | 60 | 21.9 / 19.1 / 10.6 | **39.2** / 36.9 / 28.0 | 38.9 / 36.9 / 27.2 | 1.53× |
+| `TestLatticeFinderAtTheEdgeOfDoublePrecision::test_an_unrealisable_design_at_an_ordinary_multiple_is_f16_with_a_minimum` | 60 | 22.3 / 19.1 / 10.7 | 37.4 / **38.5** / 27.5 | 38.7 / 34.7 / 26.6 | 1.55× |
+| `test_one_sided_simulated_mean_run_length_matches_achieved_arl[floored_lower_m1000_f0]` | 180 | 73.7 / 56.5 / 41.2 | 99.8 / 111.8 / 107.5 | 128.8 / **153.7** / 95.4 | 1.17× |
+| `TestLatticeFinderAtTheEdgeOfDoublePrecision::test_the_forward_walk_finds_the_ratified_lattice` | 60 | 13.7 / 12.7 / 7.4 | 15.4 / 25.5 / 19.9 | **26.1** / 22.8 / 17.9 | 2.30× |
+| `TestEqualSplitBound::test_slow_refusal_cells[m1000_f5_M1.01]` (`slow`) | 900 | not in `ns-serial` | — | 329.7 / **424.1** / 274.3 | 2.12× |
+
+⚠️ **The two `TestJointStateCountCap` tests are over the ratified Q2
+threshold even serially on CI.** They take 42.5 s on AMD 3.11, and Q2's
+threshold is 40 s of 60. Their budget was always too tight for CI. The
+parallel run only made that visible.
+
+### Experiment 2: run 36335148663 (branch `exp/ci-parallel-measure-2`)
+
+Experiment 2 answered three questions with the same shim, caps and
+`--durations`:
+
+- Does the capped parallel result replicate? Two more `ns-par-capped` runs,
+  `-a` and `-b`.
+- Would three workers relieve the per-test contention? `ns-par3-capped`,
+  using `-n 3`.
+- What does a second capped serial run give? `ns-serial-capped`.
+
+Every job passed. Coverage is again identical to the capped serial run on
+the same Python, with 0 differing lines or branches.
+
+| config | py | job | CPU | pytest session (s) | max mem MB |
+|---|---|---|---|---|---|
+| `ns-par-capped-a` | 3.11 | 108664475821 | AMD EPYC 7763 | 303 + 10 | 2818 |
+| `ns-par-capped-a` | 3.12 | 108664475777 | AMD EPYC 7763 | 304 + 11 | 2644 |
+| `ns-par-capped-a` | 3.13 | 108664475829 | AMD EPYC 7763 | 285 + 10 | 2875 |
+| `ns-par-capped-b` | 3.11 | 108664475771 | AMD EPYC 7763 | 293 + 10 | 2101 |
+| `ns-par-capped-b` | 3.12 | 108664475790 | AMD EPYC 7763 | 308 + 11 | 2622 |
+| `ns-par-capped-b` | 3.13 | 108664475745 | AMD EPYC 9V45 | 131 + 5 | 2403 |
+| `ns-par3-capped` | 3.11 | 108664475886 | Intel Xeon Platinum 8573C | 289 + 10 | 2224 |
+| `ns-par3-capped` | 3.12 | 108664475721 | AMD EPYC 9V74 | 297 + 10 | 2628 |
+| `ns-par3-capped` | 3.13 | 108664475825 | AMD EPYC 7763 | 277 + 10 | 2549 |
+| `ns-serial-capped` | 3.11 | 108664475722 | AMD EPYC 9V74 | 588 | 1737 |
+| `ns-serial-capped` | 3.12 | 108664475871 | AMD EPYC 9V74 | 431 | 1562 |
+| `ns-serial-capped` | 3.13 | 108664475834 | AMD EPYC 7763 | 546 | 1766 |
+
+**Replication.** On the common `AMD EPYC 7763` runner, the capped parallel
+not-slow session was 262–313 s across all eight such legs in experiments 1
+and 2. Capped or uncapped serial on the same CPU was 546–643 s. That is a
+**steady ~2× gain**. The one `AMD EPYC 9V45` draw finished in 131 s, which
+shows how much runner hardware alone moves these numbers.
+
+**`-n 3` is not better.** It took 277–297 s against 285–313 s for `-n auto`
+(4), within the hardware noise. The `TestJointStateCountCap` tests still
+reached 68.4 s on a 7763 under `-n 3`. A spare vCPU does not rescue the
+tightest guards, so `-n auto` stays.
+
+**The `wall_clock` step on CI.**
+`test_refusal_completes_within_the_measured_budget` took 4.6–5.5 s across
+every CI job in both experiments, serial or not, against its `<= 15.0`
+assertion. That is about 3× headroom, as ADR-015 intended. The separate
+serial step works.
+
+**Why the Mac did not show any of this.** Locally, numpy and scipy link
+Apple's **Accelerate**, confirmed with `np.show_config()`.
+`threadpoolctl` does not see Accelerate, and Accelerate did not
+oversubscribe in the local runs. The Linux wheels bundle **pthreads
+OpenBLAS**, which starts one thread per vCPU per library. The local
+measurements could not have revealed the failure mode, so it had to be
+measured on CI.
+
+### Decisions (Amendment 1)
+
+**A1. PR/push stays parallel, with BLAS threads capped.**
+
+- The `test` job sets these at **job level**, so every test step, parallel
+  or serial, runs capped:
+
+  ```yaml
+  env:
+    OMP_NUM_THREADS: "1"
+    OPENBLAS_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+  ```
+
+- `OPENBLAS_NUM_THREADS` is the one that matters for today's wheels:
+  pthreads OpenBLAS in both numpy and scipy, per `threadpoolctl`.
+  `OMP_NUM_THREADS` is OpenBLAS's fallback and covers an OpenMP build.
+  `MKL_NUM_THREADS` covers an MKL build. All three are inert when unused.
+- Measured cost of capping serially: none (experiment 1, finding 2).
+- Measured gain of capping in parallel: 966–1495 s → 262–313 s.
+- The PR step pair from ADR-015 Decision 2 is unchanged:
+  `-n auto --dist worksteal -m "not slow and not wall_clock" --cov-report=`,
+  then `-m "wall_clock and not slow" --cov-append --cov-report=xml`.
+- Expected not-slow session: ~290 s on the common runner, against ~600 s
+  serial. With job overhead that is ~6 min, against today's ~11 min.
+
+**A2. Nightly/dispatch goes back to serial. The evidence agrees with the
+product owner's direction.**
+
+- It is one step: `uv run pytest --cov-report=xml --durations=30`, capped by
+  the job-level env like everything else. The `wall_clock` split is not
+  needed when nothing runs in parallel.
+- There is a measured case *for* parallel: `full-par-capped` passed in
+  675–871 s against 1201–1570 s serial, about 1.8× faster. It is outweighed
+  on three counts:
+  1. The nightly run is on nobody's critical path. Twelve minutes saved
+     overnight buys nothing.
+  2. Under four workers, each heavy slow test runs 1.6–2.6× longer than it
+     would serially. `test_slow_refusal_cells[m1000_f5_M1.01]` reached
+     424 s of its 900 s. The slow tests' budgets (ADR-014) were set from
+     serial measurements. Running them in parallel would mean re-deriving
+     them from a single CI run each.
+  3. The nightly run is the only place the `slow` tests run. Running them
+     the way they were measured keeps a timeout there meaning "the library
+     got slower", not "the runner was busy".
+- Reversal Q3 is therefore confirmed on evidence. This is not a guess, and
+  it can be reopened with the numbers above if nightly time ever matters.
+
+**A3. New hang-guard budgets: at least 3× the slowest CI duration under the
+configuration that runs the test.**
+
+- Each figure is the maximum over **18 CI measurements**: nine capped
+  parallel legs (experiment 1, 2a and 2b) and nine serial legs (experiments
+  1 and 2, capped and uncapped).
+- The new value is 3× that maximum, rounded up to a multiple of 30 s.
+- The comment beside each marker must cite this amendment, the run id and
+  the slowest leg, as the existing budget notes do.
+
+| test (file) | old | slowest CI duration (run, job, CPU) | new |
+|---|---|---|---|
+| `TestJointStateCountCap::test_raises_with_joint_state_count_exceeded_context` (`test_bernoulli_cusum_lattice_fix.py`) | 60 | 73.5 s (36333444223, 108659677067, EPYC 7763, parallel) | **240** |
+| `TestJointStateCountCap::test_max_two_sided_target_arl_round_trips` (same) | 60 | 70.3 s (36335148663, 108664475771, EPYC 7763, parallel) | **240** |
+| `test_one_sided_simulated_mean_run_length_matches_achieved_arl` (`test_bernoulli_cusum_arl_simulated_properties.py`; the marker covers every parameter, and `floored_lower_m1000_f0` sets it) | 180 | 134.9 s (36335148663, 108664475821, EPYC 7763, parallel) | **420** |
+| `TestUnconstructibleUpperArmAtOrdinaryMultiples::test_pinned_regression_at_m_3_million` (`test_bernoulli_cusum_detect_rate_multiple.py`) | 60 | 39.2 s (36333444223, 108659677067, EPYC 7763, parallel) | **120** |
+| `TestLatticeFinderAtTheEdgeOfDoublePrecision::test_an_unrealisable_design_at_an_ordinary_multiple_is_f16_with_a_minimum` (`test_bernoulli_cusum_defensive_paths.py`) | 60 | 39.0 s (36335148663, 108664475821, EPYC 7763, parallel) | **120** |
+| `TestLatticeFinderAtTheEdgeOfDoublePrecision::test_the_forward_walk_finds_the_ratified_lattice` (same file) | 60 | 25.5 s (36333444223, 108659677053, EPYC 7763, parallel) | **90** |
+| `test_two_sided_simulated_mean_run_length_is_at_least_the_coupled_bound` (`test_bernoulli_cusum_arl_simulated_properties.py`; `[p_hat]` sets it) | 180 | 62.7 s (36335148663, 108664475777, EPYC 7763, parallel) | **210** |
+
+- No other not-slow test with a `timeout` marker came within 3× of its
+  budget in any of the 18 measurements.
+- **The ratified Q2 rule is superseded.** The "raise if above 40 s of 60"
+  trigger assumed the tests were comfortably inside their budget on CI.
+  They were not: 42.5 s serially, uncapped, on the 7763.
+- The replacement rule is general: **a hang guard's budget is at least 3×
+  its slowest measured CI duration under the configuration that runs it.**
+  New guards follow the same rule.
+- **`slow` tests are not re-budgeted here.** Under A2 they run serially, as
+  before, where the last full serial run (36326491650) was green. Their
+  serial CI durations were never logged. The nightly run's `--durations=30`
+  now records them, and any within 3× gets the same treatment in a
+  follow-up.
+
+**A4. What else changes.**
+
+- **`CONTRIBUTING.md`.** On Linux, a local `-n auto` run should set
+  `OPENBLAS_NUM_THREADS=1`, or it will oversubscribe the same way CI did:
+
+  ```bash
+  OPENBLAS_NUM_THREADS=1 uv run pytest -n auto --dist worksteal -m "not slow"
+  ```
+
+  macOS (Accelerate) did not need it in any measurement.
+- **The `ci.yml` comment** must record why the caps exist, citing this
+  amendment and the 966–1495 s vs 262–313 s figures, so nobody removes them
+  as unexplained.
+- **Verification before merge:**
+  1. A CI run of the PR pair on the implementing branch shows no timeout
+     tripped and coverage matching serial.
+  2. A `workflow_dispatch` run of the (now serial) full suite passes on all
+     three legs.
+
+  Both run ids go in the PR description.
+
+### Experiment branches
+
+`exp/ci-parallel-measure-1` (`6dea470`) and `exp/ci-parallel-measure-2`
+(`57bf8ec`) were created from `0828937` and carry no ticket ID. They
+changed only `.github/workflows/ci.yml` and `tests/conftest.py` (the ×10
+timeout shim), plus `scripts/exp_cov_dump.sh`, and none of those changes is
+merged. Both branches were deleted once the measurements were read. No
+pull request was opened from either.
+
+### Questions for the product owner (Amendment 1) — ✅ all answered 2026-09-27 (see its Status)
+
+**QA1.** Accept the job-level BLAS caps (A1) as a permanent part of the CI
+contract, documented in `ci.yml` and `CONTRIBUTING.md`?
+
+**QA2.** Accept the seven new budgets (A3) and the general
+"≥ 3× slowest CI leg" rule in place of Q2's 40-of-60 trigger?
+
+**QA3.** Nightly serial (A2) accepted with the evidence above, or run it
+capped and parallel at ~1.8× (which would then require re-budgeting the
+slow set from parallel measurements)?
+
+**QA4.** The runners are heterogeneous. Across these two experiments alone
+they included `EPYC 7763`, `EPYC 9V45`, `EPYC 9V74`, `Xeon Platinum 8573C`
+and `Xeon 6973P-C`. The 3× margin was sized on the common, slowest part
+(7763). Is 3× enough, given that an unlucky draw of a slower part has not
+been observed but cannot be ruled out?
