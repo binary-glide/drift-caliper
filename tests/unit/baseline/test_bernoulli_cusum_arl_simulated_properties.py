@@ -96,10 +96,11 @@ _TOLERANCE = derived_relative_tolerance(_N_RUNS, z=_CONFIDENCE_Z)
     ids=["lower_m200_f20", "upper_m300_f3_at_p_l", "floored_lower_m1000_f0"],
 )
 # Budget (ADR-015 Amendment 1 A3): the marker covers every parameter;
-# floored_lower_m1000_f0 sets it. Slowest CI duration 134.9 s, run 36335148663
-# job 108664475821 (py3.11, EPYC 7763, capped parallel); x3 rounded up to 30 s
-# = 420 s.
-@pytest.mark.timeout(420)
+# floored_lower_m1000_f0 sets it. Slowest CI duration 140.32 s, run 36337816114
+# job 108671934038 (py3.13, capped parallel; PR #32's own run), which
+# supersedes A3's 134.9 s (run 36335148663 job 108664475821, py3.11, EPYC 7763,
+# capped parallel); x3 = 421 s, rounded up to 30 s = 450 s.
+@pytest.mark.timeout(450)
 def test_one_sided_simulated_mean_run_length_matches_achieved_arl(
     m: int, f: int, direction: str, rate_name: str
 ) -> None:
