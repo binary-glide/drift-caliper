@@ -149,5 +149,6 @@ nav:
       - 013 GICP baseline calibration: architecture/adr/013-gicp-supersedes-the-provisional-baseline-floor.md
       - 014 Bernoulli CUSUM API surface: architecture/adr/014-bernoulli-cusum-api-surface-and-fitted-artefact-shape.md
       - 015 Parallel, shuffled tests: architecture/adr/015-parallel-shuffled-test-execution-and-sorted-dependency-lists.md
+      - 016 Joint-chain solver cost: architecture/adr/016-bernoulli-cusum-joint-chain-solver-cost.md
   - Domain model: domain-model.md
   - Changelog: changelog.md

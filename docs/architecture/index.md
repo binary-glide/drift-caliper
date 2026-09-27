@@ -28,6 +28,7 @@ It tells you the question was asked.
 | [013](adr/013-gicp-supersedes-the-provisional-baseline-floor.md) | ✅ *Accepted.* Guaranteed In-Control Performance (Clopper–Pearson) replaces plug-in calibration for the Bernoulli CUSUM baseline, and a derived `α` |
 | [014](adr/014-bernoulli-cusum-api-surface-and-fitted-artefact-shape.md) | ✅ *Accepted.* The Bernoulli CUSUM's API surface, Phase II input contract, and why its fitted artefact does not conform to `FittedControlLimits` |
 | [015](adr/015-parallel-shuffled-test-execution-and-sorted-dependency-lists.md) | The test suite runs in parallel and in shuffled order on CI, timing assertions get the machine to themselves, and dependency lists are kept alphabetical |
+| [016](adr/016-bernoulli-cusum-joint-chain-solver-cost.md) | 🟡 *Proposed.* The Bernoulli CUSUM's joint-chain solves: keep SuperLU's default ordering, cut calibration D's coupled solves, reject an iterative solver — and a finding that the coupled chain breaks the 1M cap's memory basis |
 
 ## Three that are worth reading even if you never touch the code
 
