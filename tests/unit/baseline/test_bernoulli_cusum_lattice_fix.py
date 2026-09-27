@@ -622,6 +622,7 @@ class TestBoundedTimeWorstCorner:
     """Decision 11 items 3 and 8: the worst legal corner completes in bounded
     time — it must either produce a result or raise, never hang."""
 
+    @pytest.mark.wall_clock  # ADR-015 Decision 2: runs serially in CI
     @pytest.mark.timeout(30)
     def test_worst_corner_completes_or_raises_within_budget(self) -> None:
         """m=10,000, f=0, target_arl=MAX_MEANINGFUL_ARL, direction=two_sided.

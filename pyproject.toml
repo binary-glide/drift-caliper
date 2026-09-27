@@ -154,6 +154,10 @@ markers = [
   "unit: fast, isolated tests",
   "integration: tests requiring real infrastructure",
   "slow: tests taking more than 1 second",
+  # ADR-015 Decision 2 (BIN-155): a test that asserts on elapsed time. CI runs
+  # these serially after the parallel run, because parallel load can falsify
+  # a timing measurement. A hang guard uses @pytest.mark.timeout instead.
+  "wall_clock: asserts on elapsed wall-clock time; run serially, never under -n",
 ]
 
 [tool.coverage.run]
