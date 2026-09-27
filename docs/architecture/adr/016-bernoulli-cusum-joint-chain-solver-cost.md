@@ -592,6 +592,50 @@ The options, with their measured consequences:
     ≈958 bytes/state (≈0.96 GB at 999,999, Decision 13), so **(b) should
     decouple them: joint cap 400,000, one-sided cap unchanged at 999,999.**
     This table was computed that way.
+
+    > ⚠️ **Correction (2026-09-28) — the example above does not hold today;
+    > the decoupling it supports does.** The 742,099-unit figure is from
+    > ADR-014 Amendment 2's Decision 13 table, where it was the **f=0 upper**
+    > arm, measured before Decision 19 made an upper arm undesignable at
+    > f = 0 (`"upper"` is refused there, F15; `"two_sided"` builds the lower
+    > arm alone). The f=0 **lower** arm at m=3,000,000, T=10⁶ fits at
+    > `h_units = 1`, floored at `1/p_U` = 1,302,884 (re-checked here through
+    > production; backend-test-writer, who reported it, found the same in
+    > `tests/support/bernoulli_reference.py`).
+    >
+    > **Current, reproducible examples** of one-sided fits above 400,000
+    > units (production's `_smallest_decision_interval_units`, M=2,
+    > `onesided_cap.py`; each `h` is the smallest meeting T: ARL at `h` ≥ T >
+    > ARL at `h − 1`):
+    >
+    > | fit | lattice (N, k) | `h_units` | ARL at h / at h − 1 |
+    > |---|---|---|---|
+    > | `"upper"`, m=300,000 f=1, T=5×10⁵ | (3364300, 3364299) | **460,645** | 500,001.03 / 499,999.85 |
+    > | `"upper"`, m=300,000 f=1, T=10⁶ | (3364300, 3364299) | 857,041 | 1,000,001.19 / 999,999.84 |
+    > | `"upper"`, m=1,000,000 f=1, T=10⁶ | (11214332, 11214331) | 950,750 | 1,000,000.84 / 999,999.74 |
+    > | `"upper"`, m=3,000,000 f=1, T=10⁶ | (33642995, 33642994) | **982,840** | 1,000,000.51 / 999,999.48 |
+    > | `"lower"`, m=3,800,000 f=1, T=10⁶ | (577148, 1) | 577,147 | 3,166,871.8 / 976,934.4 |
+    > | `"lower"`, m=5,200,000 f=2, T=10⁶ | (577197, 1) | 577,196 | 3,167,142.9 / 977,017.8 |
+    >
+    > So a one-sided cap of 400,000 would refuse ordinary one-sided fits at
+    > large clean baselines; keeping it at 999,999 stands.
+    >
+    > **Is 999,999 still ever reached by a designable fit? Not in anything
+    > measured, and for the upper arm only at impractical sizes.** Every
+    > upper lattice measured has `k = N − 1`: the statistic rises by exactly
+    > one unit per success, so the chart needs at least `h + 1` steps to
+    > exceed `h`, ARL(h) ≥ h + 1, and the smallest `h` meeting `T ≤ 10⁶` is
+    > at most `⌈T⌉ − 1 ≤ 999,999`. It equals 999,999 only if ARL(999,998) <
+    > 10⁶, which needs `p_L ≲ 2×10⁻¹²` — a baseline of roughly 5×10¹⁰
+    > observations with one failure. The largest measured is 982,840 above.
+    > The lower arm peaks just below its floor boundary at `h = N − 1`
+    > (≈ 577,000 at T=10⁶, where `1/p_U` crosses T), and above that boundary
+    > floors at `h = 1`. So F12's search-cap refusal is a guard that no
+    > measured designable fit reaches; the cap stays as a memory bound
+    > (≈ 0.96 GB, Decision 13), not as a binding limit. Not proven for
+    > upper lattices with `k < N − 1`; none appeared in any cell measured for
+    > this ADR (including m=100 f=10, (19, 18), and m=200 f=20, (17, 16), whose
+    > upper arm reaches ARL 2×10⁶ at 324 units).
 - **(c) Cap on predicted memory rather than state count** — not available:
   SuperLU exposes no symbolic-only factorisation through scipy, and fill-in
   is not predictable from the state count or step sizes (Finding 0).
