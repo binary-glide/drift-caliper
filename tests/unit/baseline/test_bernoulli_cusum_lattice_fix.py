@@ -495,11 +495,12 @@ class TestJointStateCountCap:
     19.2 turns a zero-failure two-sided request into a lower-only fit, so
     m=1000 f=0 no longer reaches the joint cap at all. m=300,000 f=30 refuses
     with ``max_two_sided_target_arl = 3,914`` (corrigendum C11's table).
-    Budget: C11 measured 3.3 s end to end for the refusal (k3_refusal_time.py);
-    the round-trip fit adds the D feasibility check again (2.6 s). x3 = 18 s.
     """
 
-    @pytest.mark.timeout(60)
+    # Budget (ADR-015 Amendment 1 A3): slowest CI duration 73.5 s, run
+    # 36333444223 job 108659677067 (py3.11, EPYC 7763, capped parallel);
+    # x3 rounded up to 30 s = 240 s.
+    @pytest.mark.timeout(240)
     def test_raises_with_joint_state_count_exceeded_context(self) -> None:
         baseline = _bernoulli_baseline(300_000, num_failures=30)
         with pytest.raises(InvalidParameterError) as excinfo:
@@ -516,7 +517,10 @@ class TestJointStateCountCap:
         assert isinstance(max_t, (int, float))
         assert max_t >= 1.0
 
-    @pytest.mark.timeout(60)
+    # Budget (ADR-015 Amendment 1 A3): slowest CI duration 70.3 s, run
+    # 36335148663 job 108664475771 (py3.11, EPYC 7763, capped parallel);
+    # x3 rounded up to 30 s = 240 s.
+    @pytest.mark.timeout(240)
     def test_max_two_sided_target_arl_round_trips(self) -> None:
         """BIN-122 rule: passing the reported max back must succeed."""
         baseline = _bernoulli_baseline(300_000, num_failures=30)
@@ -622,6 +626,7 @@ class TestBoundedTimeWorstCorner:
     """Decision 11 items 3 and 8: the worst legal corner completes in bounded
     time — it must either produce a result or raise, never hang."""
 
+    @pytest.mark.wall_clock  # ADR-015 Decision 2: runs serially in CI
     @pytest.mark.timeout(30)
     def test_worst_corner_completes_or_raises_within_budget(self) -> None:
         """m=10,000, f=0, target_arl=MAX_MEANINGFUL_ARL, direction=two_sided.

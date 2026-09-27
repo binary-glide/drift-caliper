@@ -27,8 +27,35 @@ uv run ty check --error-on-warning
 uv run mypy
 ```
 
-The hooks run the last three. The test suite is not a hook: it takes about a
-minute, and a gate that slow gets bypassed. CI runs it on 3.11, 3.12 and 3.13.
+The hooks run the last three. The test suite is not a hook: a gate that slow
+gets bypassed. CI runs it on 3.11, 3.12 and 3.13.
+
+`uv run pytest` runs **everything**, including the tests marked `slow`, serially.
+That takes about seventeen minutes on a 10-core Mac. For the pre-commit check,
+skip `slow` and run in parallel:
+
+```bash
+uv run pytest -n auto --dist worksteal -m "not slow"   # about 1.5 minutes on 10 cores
+```
+
+**On Linux, cap the BLAS threads when you run in parallel:**
+
+```bash
+OPENBLAS_NUM_THREADS=1 uv run pytest -n auto --dist worksteal -m "not slow"
+```
+
+The Linux numpy and scipy wheels each bundle an OpenBLAS that starts one thread
+per CPU, so every worker competes with every other worker's thread pools. On a
+4-vCPU CI runner that made the parallel run slower than a serial one, and the
+cap made it about twice as fast (ADR-015, Amendment 1). CI sets the cap for
+every test step. macOS uses Accelerate, which did not need it in any
+measurement.
+
+The serial not-slow run, `uv run pytest -m "not slow"`, takes about six minutes on
+the same machine. Serial stays the default because `pdb`, `-x` and readable
+tracebacks work best in one process; `-n auto` is the fast path, not the gate.
+CI runs the parallel form on pull requests, and the full suite serially each
+night (ADR-015).
 
 **Always pass `--no-cache` to ruff.** Ruff caches results per file, and its
 import-sorting rules classify a module as first- or third-party by whether it
@@ -175,6 +202,9 @@ friction is recorded as a cost.
   pin from memory.
 - Do not add a runtime dependency speculatively. An unused dependency is a real
   cost to everyone who installs the library.
+- Keep every dependency list in `pyproject.toml` alphabetical by normalised
+  name (lowercase, with `-`, `_` and `.` treated alike). A comment directly
+  above an entry belongs to that entry and moves with it.
 
 ## Tests
 
@@ -185,6 +215,11 @@ friction is recorded as a cost.
 - Name tests `test_<verb>_<expected>_when_<condition>`.
 - Tests must be deterministic — no reliance on wall-clock time, network, or
   execution order.
+- A test that asserts on elapsed time (`time.monotonic()`, `perf_counter()`)
+  carries `@pytest.mark.wall_clock`. CI runs those serially, after the parallel
+  run, so parallel load cannot falsify a timing claim. A test that only needs to
+  *terminate* uses `@pytest.mark.timeout` with a note on how its budget was
+  measured, and stays in the parallel run.
 - Coverage has an enforced floor, but treat it as a signal for finding untested
   paths, not a target. Mutation testing (`mutmut`) is the stronger signal on
   numerical modules.
@@ -203,6 +238,43 @@ in a coverage report:
   strategy outward will not find them; assert that the legal region is coherent
   — for instance, that any bound the library reports is accepted back as input.
 
+### Test order is shuffled on every run
+
+`pytest-randomly` shuffles the order of modules, classes and tests on every run,
+and reseeds `random`, numpy's global generator, factory-boy and Faker before each
+test. The run's header prints the seed:
+
+```text
+Using --randomly-seed=1234567890
+```
+
+To reproduce a failure, rerun with that seed:
+
+```bash
+uv run pytest -p randomly --randomly-seed=<n>    # the same order, serially
+uv run pytest -p randomly --randomly-seed=last   # the previous run's seed (needs the pytest cache)
+uv run pytest -p no:randomly                     # file order, to bisect a suspected order dependency
+```
+
+- **Reproduce serially first**, even if the failure appeared under `-n auto`.
+  `worksteal` does not give each worker the same tests on every run, so a
+  parallel rerun may not put the same tests together again.
+- **An order-dependent failure is a defect to fix, never a seed to pin.**
+- **A Hypothesis failure reproduces by Hypothesis's own seed, not randomly's.**
+  `pytest-randomly` does not seed Hypothesis. The randomly seed restores only
+  the order; the data comes from the `@reproduce_failure` line or falsifying
+  example Hypothesis prints, or from its local database in `.hypothesis/`.
+- **Never add `pytest-rerunfailures` to the gate.** A retry turns a test that
+  fails for a real reason on some runs into a green check — a test that passes
+  for the wrong reason, which is the failure mode above. To find out whether a
+  test is flaky, repeat it without adding a dependency:
+
+  ```bash
+  uv run --with pytest-repeat pytest <nodeid> --count 50 -x
+  ```
+
+  Each repetition gets its own node id, so each is reseeded differently.
+
 ## What is enforced for you
 
 Some rules fail the build. The rest rely on you having read this file.
@@ -218,6 +290,7 @@ Some rules fail the build. The rest rely on you having read this file.
 | Every `pragma: no cover` justified | `tests/unit/test_structural_invariants.py` |
 | Only `CaliperError` escapes a public entry point | `tests/support/exception_contract_registry.py` |
 | Published examples actually run | `tests/unit/test_documentation_examples.py` |
+| Dependency lists are alphabetical | `tests/unit/test_pyproject_dependency_order.py` |
 | Everything else here | You |
 
 The structural checks catch only the spellings someone anticipated. They do not

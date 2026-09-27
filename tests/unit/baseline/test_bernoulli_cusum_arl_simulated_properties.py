@@ -86,8 +86,6 @@ def _mean_run_length(
 _TOLERANCE = derived_relative_tolerance(_N_RUNS, z=_CONFIDENCE_Z)
 
 
-# On the pull-request gate (review 3, R1): measured 4.1 s / 3.8 s / 16.2 s
-# locally (lower / upper / floored lower), each under 30 s.
 @pytest.mark.parametrize(
     ("m", "f", "direction", "rate_name"),
     [
@@ -97,10 +95,12 @@ _TOLERANCE = derived_relative_tolerance(_N_RUNS, z=_CONFIDENCE_Z)
     ],
     ids=["lower_m200_f20", "upper_m300_f3_at_p_l", "floored_lower_m1000_f0"],
 )
-# Budget: 1,500 runs x mean run length (110 / 100 / 435, independent
-# reference) x ~25 us per Monitor.record = 4 s / 4 s / 16 s locally; x3 = 48 s
-# at worst. 180 s hard stop.
-@pytest.mark.timeout(180)
+# Budget (ADR-015 Amendment 1 A3): the marker covers every parameter;
+# floored_lower_m1000_f0 sets it. Slowest CI duration 140.32 s, run 36337816114
+# job 108671934038 (py3.13, capped parallel; PR #32's own run), which
+# supersedes A3's 134.9 s (run 36335148663 job 108664475821, py3.11, EPYC 7763,
+# capped parallel); x3 = 421 s, rounded up to 30 s = 450 s.
+@pytest.mark.timeout(450)
 def test_one_sided_simulated_mean_run_length_matches_achieved_arl(
     m: int, f: int, direction: str, rate_name: str
 ) -> None:
@@ -124,12 +124,11 @@ def test_the_floored_arm_reports_one_over_p_u() -> None:
     assert chart.achieved_arl == pytest.approx(1.0 / chart.p_u, rel=1e-9)
 
 
-# On the pull-request gate (review 3, R1): measured 5.7 s / 6.7 s / 6.2 s
-# locally (p_L / p_hat / p_U).
 @pytest.mark.parametrize("rate_name", ["p_l", "p_hat", "p_u"])
-# Budget: 1,500 runs x true joint ARL (145.7 / 180.6 / 152.0, independent
-# reference) x ~25 us = 5.5 s / 6.8 s / 5.7 s locally; x3 = 20 s. 180 s stop.
-@pytest.mark.timeout(180)
+# Budget (ADR-015 Amendment 1 A3): [p_hat] sets it. Slowest CI duration
+# 62.7 s, run 36335148663 job 108664475777 (py3.12, EPYC 7763, capped
+# parallel); x3 rounded up to 30 s = 210 s.
+@pytest.mark.timeout(210)
 def test_two_sided_simulated_mean_run_length_is_at_least_the_coupled_bound(
     rate_name: str,
 ) -> None:

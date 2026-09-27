@@ -73,9 +73,10 @@ def _fit(
 class TestLatticeFinderAtTheEdgeOfDoublePrecision:
     """Corrigendum C12.4's finder, on cells where floating point bites."""
 
-    # Budget: a 3,000,000-observation baseline builds in ~0.8 s and the fit is
-    # at target 1.0 (h_units = 1); ~1 s locally, x3 = 3 s.
-    @pytest.mark.timeout(60)
+    # Budget (ADR-015 Amendment 1 A3): slowest CI duration 25.5 s, run
+    # 36333444223 job 108659677053 (py3.12, EPYC 7763, capped parallel);
+    # x3 rounded up to 30 s = 90 s.
+    @pytest.mark.timeout(90)
     def test_the_forward_walk_finds_the_ratified_lattice(self) -> None:
         chart = _fit(
             3_000_000,
@@ -91,9 +92,10 @@ class TestLatticeFinderAtTheEdgeOfDoublePrecision:
         assert lattice[:2] == ref.exact_lattice(p0, p1)
         assert ref.lattice_invariants_hold(lattice[0], lattice[1], p0, p1)
 
-    # Budget: the refusal's search is ~60 probes of the O(log N) finder, and
-    # the round-trip fit is at target 1.0 -- ~1.5 s locally with the baseline.
-    @pytest.mark.timeout(60)
+    # Budget (ADR-015 Amendment 1 A3): slowest CI duration 39.0 s, run
+    # 36335148663 job 108664475821 (py3.11, EPYC 7763, capped parallel);
+    # x3 rounded up to 30 s = 120 s.
+    @pytest.mark.timeout(120)
     def test_an_unrealisable_design_at_an_ordinary_multiple_is_f16_with_a_minimum(
         self,
     ) -> None:

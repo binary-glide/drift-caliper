@@ -416,9 +416,10 @@ class TestUnconstructibleUpperArmAtOrdinaryMultiples:
     anchor at 2) -- already what 3bd013d does, so these pass today; they pin
     the ratified behaviour."""
 
-    # Budget: a 3,000,000-observation baseline (~0.8 s, measured) and three
-    # target-1 fits; ~1.5 s locally, x3 = 4.5 s.
-    @pytest.mark.timeout(60)
+    # Budget (ADR-015 Amendment 1 A3): slowest CI duration 39.2 s, run
+    # 36333444223 job 108659677067 (py3.11, EPYC 7763, capped parallel);
+    # x3 rounded up to 30 s = 120 s.
+    @pytest.mark.timeout(120)
     def test_pinned_regression_at_m_3_million(self) -> None:
         """Item 28: ``"upper"`` at m=3,000,000 f=1, ``M ~ 4.1957`` raises F16
         (``"shift_below_numerical_resolution"``); ``min_value`` is above the

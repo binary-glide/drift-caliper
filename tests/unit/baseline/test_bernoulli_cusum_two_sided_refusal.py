@@ -315,6 +315,7 @@ class TestEqualSplitBound:
             == second["context"]["max_two_sided_target_arl"]
         )
 
+    @pytest.mark.wall_clock  # ADR-015 Decision 2: runs serially in CI
     # Budget: C11's measured refusal at this cell is 3.3 s end to end
     # (k3_refusal_time.py). C11's ratified overhead budget is <= 30 s *locally*
     # and is deliberately not enforced at 30 s here; the assertion is the
