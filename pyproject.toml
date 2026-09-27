@@ -60,11 +60,11 @@ classifiers = [
 # tested against the floor itself. Revisit when BIN-84 exercises scipy for real.
 dependencies = [
   "numpy>=2.0",
-  "scipy>=1.14",
   # Domain types are Pydantic BaseModel with ConfigDict(frozen=True), per the
   # house standard and architecture/references/ddd.md. Validation lives in
   # @field_validator on the value object, so no construction path bypasses it.
   "pydantic>=2.13",
+  "scipy>=1.14",
 ]
 
 [project.urls]
@@ -76,33 +76,39 @@ Repository = "https://github.com/binary-glide/drift-caliper"
 # (the judge provider sits behind JudgeProviderPort, faked in tests) and has no
 # async surface. Add them with the story that first needs one.
 dev = [
-  "pytest>=9.1",
-  "pytest-bdd>=8.1",
-  "pytest-cov>=7.1",
-  "pytest-mock>=3.15",
-  "hypothesis>=6.168",
-  "factory-boy>=3.3",
-  "freezegun>=1.5",
-  "dirty-equals>=0.11",
-  "mutmut>=3.7",
-  "mypy>=2.3",
-  "ty>=0.0.80",
   # Dev-only runtime type enforcement over the numerical internals (BIN-109).
   # Never a runtime dependency: it is applied by an import hook in
   # tests/conftest.py, so it instruments nothing in the shipped wheel.
   "beartype>=0.22",
-  "ruff>=0.16.7",
-  # Commit-time gates (BIN-89). `pre-commit` drives them; `zizmor` audits the
-  # workflow files, and lives here rather than being invoked via `uvx` so that
-  # the version is pinned by uv.lock like every other tool -- an unpinned
-  # security auditor is the one tool whose result must be reproducible.
-  "pre-commit>=4.6.2",
-  "zizmor>=1.30.1",
+  "dirty-equals>=0.11",
+  "factory-boy>=3.3",
+  "freezegun>=1.5",
   # Changelog generation (BIN-90). Pinned by uv.lock rather than invoked via
   # `uvx` so the tool that produces a release artefact is the same version for
   # everyone: `uv run git-cliff -o CHANGELOG.md`.
   "git-cliff>=2.13.1",
+  "hypothesis>=6.168",
+  "mutmut>=3.7",
+  "mypy>=2.3",
+  # Drives the commit-time gates (BIN-89).
+  "pre-commit>=4.6.2",
+  "pytest>=9.1",
+  "pytest-bdd>=8.1",
+  "pytest-cov>=7.1",
+  "pytest-mock>=3.15",
+  # Shuffles test order on every run (BIN-155, ADR-015 Decision 3).
+  "pytest-randomly>=5.0",
   "pytest-timeout>=2.4",
+  # Parallel test execution on CI; the local default stays serial (BIN-155,
+  # ADR-015 Decision 1).
+  "pytest-xdist>=3.8",
+  "ruff>=0.16.7",
+  "ty>=0.0.80",
+  # Audits the workflow files (BIN-89). Lives here rather than being invoked via
+  # `uvx` so that the version is pinned by uv.lock like every other tool -- an
+  # unpinned security auditor is the one tool whose result must be
+  # reproducible.
+  "zizmor>=1.30.1",
 ]
 
 # Documentation stack (BIN-86). Chosen deliberately, not inherited: the ticket

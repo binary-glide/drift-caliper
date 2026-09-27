@@ -148,13 +148,31 @@ jobs:
       # locally the terminal report is what anyone reads, and writing a
       # coverage.xml into the working tree on every `uv run pytest` is noise.
       # Pull requests and trunk pushes skip `slow`; the nightly schedule and a
-      # manual dispatch run everything. Two steps with `if:` rather than one
-      # step splicing an expression into the command line, which is the shape
-      # zizmor's template-injection audit exists to catch.
+      # manual dispatch run everything. Separate steps with `if:` rather than
+      # one step splicing an expression into the command line, which is the
+      # shape zizmor's template-injection audit exists to catch.
+      #
+      # ADR-015. Each event runs a pair of steps:
+      # 1. Everything except `wall_clock`, in parallel (`-n auto --dist
+      #    worksteal`) and in pytest-randomly's shuffled order. `worksteal`
+      #    rebalances as it goes, which matters because a few Bernoulli CUSUM
+      #    tests dominate the suite's cost. `--cov-report=` (empty) writes no
+      #    report yet, so no partial coverage.xml exists.
+      # 2. The `wall_clock` tests -- the ones asserting elapsed time -- serially,
+      #    with the runner to themselves, since parallel load can falsify a
+      #    timing claim. `--cov-append` adds to step 1's data, so the
+      #    coverage.xml Codecov reads covers both steps and matches a serial
+      #    run line for line and branch for branch.
+      # `--durations=30` lists the slowest tests, so a hang guard running close
+      # to its timeout is visible in the log.
       - if: github.event_name == 'pull_request' || github.event_name == 'push'
-        run: uv run pytest -m "not slow" --cov-report=xml
+        run: uv run pytest -n auto --dist worksteal -m "not slow and not wall_clock" --cov-report= --durations=30
+      - if: github.event_name == 'pull_request' || github.event_name == 'push'
+        run: uv run pytest -m "wall_clock and not slow" --cov-append --cov-report=xml --durations=30
       - if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: uv run pytest --cov-report=xml
+        run: uv run pytest -n auto --dist worksteal -m "not wall_clock" --cov-report= --durations=30
+      - if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: uv run pytest -m wall_clock --cov-append --cov-report=xml --durations=30
       # Uploaded from one matrix leg only. All three run the same suite over
       # the same source, so three uploads would be three identical reports
       # racing to be the one Codecov reports on.
