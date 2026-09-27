@@ -126,6 +126,21 @@ jobs:
   test:
     name: test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # ADR-015 Amendment 1, A1: BLAS/OpenMP thread caps for every test step,
+    # parallel or serial. The Linux numpy and scipy wheels each bundle their own
+    # pthreads OpenBLAS, and each starts one thread per vCPU -- so four xdist
+    # workers on a 4-vCPU runner run up to eight 4-thread pools at once. Measured
+    # on CI (runs 36333444223 and 36335148663, AMD EPYC 7763): the parallel
+    # not-slow suite took 966-1495 s uncapped, slower than serial, and
+    # 262-313 s capped, about 2x faster than serial. Capping costs nothing
+    # serially. OPENBLAS_NUM_THREADS is the one today's wheels read;
+    # OMP_NUM_THREADS (OpenBLAS's fallback, and any OpenMP build) and
+    # MKL_NUM_THREADS (an MKL build) keep the cap correct if a future wheel
+    # changes its BLAS. Do not remove these as unexplained.
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -152,7 +167,7 @@ jobs:
       # one step splicing an expression into the command line, which is the
       # shape zizmor's template-injection audit exists to catch.
       #
-      # ADR-015. Each event runs a pair of steps:
+      # ADR-015. Pull requests and pushes run a pair of steps:
       # 1. Everything except `wall_clock`, in parallel (`-n auto --dist
       #    worksteal`) and in pytest-randomly's shuffled order. `worksteal`
       #    rebalances as it goes, which matters because a few Bernoulli CUSUM
@@ -163,6 +178,11 @@ jobs:
       #    timing claim. `--cov-append` adds to step 1's data, so the
       #    coverage.xml Codecov reads covers both steps and matches a serial
       #    run line for line and branch for branch.
+      # The nightly schedule and a manual dispatch run the full suite in one
+      # serial step (ADR-015 Amendment 1, A2): the `slow` tests' budgets were
+      # measured serially, and under four workers each heavy test runs
+      # 1.6-2.6x longer, so a timeout there would mean "the runner was busy"
+      # rather than "the library got slower". It is still shuffled.
       # `--durations=30` lists the slowest tests, so a hang guard running close
       # to its timeout is visible in the log.
       - if: github.event_name == 'pull_request' || github.event_name == 'push'
@@ -170,9 +190,7 @@ jobs:
       - if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: uv run pytest -m "wall_clock and not slow" --cov-append --cov-report=xml --durations=30
       - if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: uv run pytest -n auto --dist worksteal -m "not wall_clock" --cov-report= --durations=30
-      - if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: uv run pytest -m wall_clock --cov-append --cov-report=xml --durations=30
+        run: uv run pytest --cov-report=xml --durations=30
       # Uploaded from one matrix leg only. All three run the same suite over
       # the same source, so three uploads would be three identical reports
       # racing to be the one Codecov reports on.

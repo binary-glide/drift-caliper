@@ -38,10 +38,24 @@ skip `slow` and run in parallel:
 uv run pytest -n auto --dist worksteal -m "not slow"   # about 1.5 minutes on 10 cores
 ```
 
+**On Linux, cap the BLAS threads when you run in parallel:**
+
+```bash
+OPENBLAS_NUM_THREADS=1 uv run pytest -n auto --dist worksteal -m "not slow"
+```
+
+The Linux numpy and scipy wheels each bundle an OpenBLAS that starts one thread
+per CPU, so every worker competes with every other worker's thread pools. On a
+4-vCPU CI runner that made the parallel run slower than a serial one, and the
+cap made it about twice as fast (ADR-015, Amendment 1). CI sets the cap for
+every test step. macOS uses Accelerate, which did not need it in any
+measurement.
+
 The serial not-slow run, `uv run pytest -m "not slow"`, takes about six minutes on
 the same machine. Serial stays the default because `pdb`, `-x` and readable
 tracebacks work best in one process; `-n auto` is the fast path, not the gate.
-CI runs the parallel form (ADR-015).
+CI runs the parallel form on pull requests, and the full suite serially each
+night (ADR-015).
 
 **Always pass `--no-cache` to ruff.** Ruff caches results per file, and its
 import-sorting rules classify a module as first- or third-party by whether it
