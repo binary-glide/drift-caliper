@@ -1179,6 +1179,13 @@ Decision 7 in place, the invariant holds and the cap is a safety net.
 
 **10b. Joint two-sided state count cap.**
 
+> ⚠️ **Superseded 2026-09-27 by ADR-016 (Q1).** The 1,000,000 cap below was
+> ratified on the two-outcome joint chain's ≈0.9 GB. The three-outcome coupled
+> chain that calibration D solves peaks at 0.71–9.4 GB at 1M states on Linux,
+> depending on the baseline. The joint cap is now **400,000**; the one-sided
+> cap is decoupled and stays at 999,999. Read ADR-016 before relying on any
+> cap, memory or `max_two_sided_target_arl` figure here.
+
 **Measurement method and a correction.** The original draft measured memory
 with Python's `tracemalloc`. **Those figures were wrong** for two reasons:
 (1) tracing overhead inflated solve time by roughly 3x, and (2)

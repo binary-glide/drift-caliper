@@ -47,6 +47,7 @@ What each piece implements:
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from fractions import Fraction
 
@@ -63,8 +64,11 @@ ALPHA = 0.10
 EPSILON = 0.25
 # ADR-014 Amendment 2 Decision 13.3: one-sided search cap, 999,999 units.
 MAX_DECISION_INTERVAL_UNITS = 999_999
-# ADR-014 Amendment 1 Decision 10b: the joint two-sided state cap.
-MAX_JOINT_STATES = 1_000_000
+# The joint two-sided state cap: ADR-016 Q1 (ruled 2026-09-27) lowered it from
+# ADR-014 Amendment 1 Decision 10b's 1,000,000 to 400,000 -- the largest cap
+# with measured evidence of peaking under ~0.9 GB on every reachable coupled
+# chain measured on Linux. The one-sided cap above is decoupled and stays.
+MAX_JOINT_STATES = 400_000
 # ADR-014 Amendment 1 Decision 9 (the continuous charts' MAX_MEANINGFUL_ARL).
 MAX_TARGET_ARL = 1_000_000.0
 
@@ -425,8 +429,8 @@ def es_bound(
     """Corrigendum C11: ``floor(T_ES)``, capped at ``MAX_TARGET_ARL``.
 
     ``T_ES = max over a >= 1 of min(A_lo(a), A_up(H(a))) / 2`` with
-    ``H(a) = floor(1e6 / (a + 1)) - 1``. A solve beyond double resolution is
-    read as ``+inf`` (BIN-140's rule), never reported.
+    ``H(a) = floor(MAX_JOINT_STATES / (a + 1)) - 1``. A solve beyond double
+    resolution is read as ``+inf`` (BIN-140's rule), never reported.
     """
     (nl, kl), (nu, ku) = lower, upper
 
@@ -454,3 +458,80 @@ def es_bound(
                 hi = mid
         best = max(min(a_lo(lo), a_up(lo)), min(a_lo(hi), a_up(hi)))
     return float(min(math.floor(best / 2.0), MAX_TARGET_ARL))
+
+
+def calibration_d_searches(
+    lower: tuple[int, int, int],
+    upper: tuple[int, int],
+    p_u: float,
+    p_l: float,
+    target: float,
+    top: int,
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Calibration D's upper-interval search, both ways, counting coupled solves.
+
+    Returns ``((h_up, solves), (h_up, solves))`` for:
+
+    - **bisection** as production did before ADR-016: ``B(top)``, then halving
+      ``[0, top]``;
+    - **ADR-016 Decision 2**: ``B(top)``, then a safeguarded regula falsi
+      (Illinois) on the bracket ``(L - 1, top]``, where ``L`` is the smallest
+      ``h`` whose one-sided upper-arm ARL at ``1 - p_L`` meets ``target`` (a
+      proven lower bound: the coupled chart stops no later than the upper arm
+      alone). Ported from the ADR's own prototype (``proto_d.py``).
+
+    Both count *distinct* coupled solves (memoised by ``h_up``); both return
+    the smallest ``h_up`` in ``[1, top]`` with ``B >= target``, which is what
+    makes Decision 2 a pure performance change. ``lower`` is the lower arm's
+    full ``(N, k, h_lo)``; ``upper`` is the upper arm's ``(N, k)``.
+    """
+    nu, ku = upper
+
+    def searcher() -> tuple[Callable[[int], float], dict[int, float]]:
+        cache: dict[int, float] = {}
+
+        def bound(h_up: int) -> float:
+            if h_up not in cache:
+                cache[h_up] = coupled_arl(lower, (nu, ku, h_up), p_l, p_u)
+            return cache[h_up]
+
+        return bound, cache
+
+    bound, cache = searcher()
+    if bound(top) < target:
+        raise ValueError("the design does not fit: B(top) < target")
+    lo, hi = 0, top
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if bound(mid) >= target:
+            hi = mid
+        else:
+            lo = mid
+    bisection = (hi, len(cache))
+
+    bound, cache = searcher()
+    bound(top)
+    smallest = calibrate(nu, ku, 1.0 - p_l, target)
+    assert smallest is not None and smallest <= top
+    lo, hi = smallest - 1, top
+    b_lo = bound(lo) if lo >= 1 else 1.0
+    b_hi = bound(hi)
+    side = 0
+    while hi - lo > 1:
+        if b_hi == b_lo:
+            guess = (lo + hi) // 2
+        else:
+            guess = lo + round((target - b_lo) * (hi - lo) / (b_hi - b_lo))
+        guess = min(max(guess, lo + 1), hi - 1)
+        value = bound(guess)
+        if value >= target:
+            hi, b_hi = guess, value
+            if side == 1:
+                b_lo = target - (target - b_lo) / 2.0
+            side = 1
+        else:
+            lo, b_lo = guess, value
+            if side == -1:
+                b_hi = target + (b_hi - target) / 2.0
+            side = -1
+    return bisection, (hi, len(cache))

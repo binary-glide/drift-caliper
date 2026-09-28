@@ -17,7 +17,8 @@ Sources cited in assertions:
     - ADR-014 amendment Decision 8: independent per-arm lattices
     - ADR-014 amendment Decision 9: MAX_MEANINGFUL_ARL ceiling
     - ADR-014 amendment Decision 10a: search-cap enforcement
-    - ADR-014 amendment Decision 10b: joint state cap = 1,000,000
+    - ADR-014 amendment Decision 10b: joint state cap, 1,000,000 as ratified;
+      400,000 since ADR-016 Q1
     - ADR-014 amendment Decision 11: verification bar
 """
 
@@ -481,20 +482,23 @@ class TestTargetArlCeiling:
 # ---------------------------------------------------------------------------
 # Item 6: Joint state count cap — refusal with correct context keys
 #
-# Decision 10b. Cap = 1,000,000 states. Context must include:
+# Decision 10b, cap re-based by ADR-016 Q1: 400,000 states (was 1,000,000).
+# Context must include:
 #   reason = "joint_state_count_exceeded"
 #   max_two_sided_target_arl (round-trips as accepted input)
 # ---------------------------------------------------------------------------
 
 
 class TestJointStateCountCap:
-    """Decision 10b: a configuration exceeding 1,000,000 joint states is
-    refused with the correct context.
+    """Decision 10b: a configuration exceeding the joint state cap is refused
+    with the correct context. ADR-016 Q1 (re-based; figure predates the 400k
+    cap): the cap is 400,000, not 1,000,000.
 
     Cell moved from m=1000 f=0 to m=300,000 f=30 at T=10^6: ADR-014 Decision
     19.2 turns a zero-failure two-sided request into a lower-only fit, so
     m=1000 f=0 no longer reaches the joint cap at all. m=300,000 f=30 refuses
-    with ``max_two_sided_target_arl = 3,914`` (corrigendum C11's table).
+    with ``max_two_sided_target_arl = 3,914`` (corrigendum C11's table; the
+    independent reference gives the same value at the 400,000 cap).
     """
 
     # Budget (ADR-015 Amendment 1 A3): slowest CI duration 73.5 s, run
@@ -512,6 +516,8 @@ class TestJointStateCountCap:
 
         error = excinfo.value
         assert error.context["reason"] == "joint_state_count_exceeded"
+        assert error.context["max_joint_states"] == 400_000
+        assert error.context["joint_state_count"] > 400_000
         assert "max_two_sided_target_arl" in error.context
         max_t = error.context["max_two_sided_target_arl"]
         assert isinstance(max_t, (int, float))
