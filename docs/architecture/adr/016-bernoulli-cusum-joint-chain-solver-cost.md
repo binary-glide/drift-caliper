@@ -358,8 +358,16 @@ In every cell the answer's `B` was already in the search's cache.
 
 ⚠️ **Coverage, stated.** The sweep was stopped after 25 of its ~180 cells
 (the remainder, m ∈ {1000, 10000} and larger T, were cut for time) and ran
-beside other measurements. MEASUREMENT PENDING: the full sweep, which the
-implementation's identity test (Verification 1) supersedes anyway. The
+beside other measurements. ~~MEASUREMENT PENDING: the full sweep~~
+**Superseded (2026-09-28).** The identity checks that replaced the sweep
+all found identical designs:
+- the Hypothesis property
+  `TestCalibrationDReturnsTodaysDesign::test_design_matches_the_bisection_over_the_legal_space`;
+- `TestCalibrationDReturnsTodaysDesign::test_design_matches_the_bisection_across_the_adr_sweep`;
+- the code reviewer's check of 12 real cells.
+
+The two tests are in `tests/unit/baseline/test_bernoulli_cusum_joint_chain_solver.py`.
+Each asserts the new search returns the same `(h_lo, h_up)` as bisection. The
 per-variant wall times were not separated; the time estimates below scale
 production's measured time by states solved, which **understates** the
 saving slightly (per-state cost rises with chain size, and the dropped
@@ -373,8 +381,26 @@ fraction, plus the dropped `achieved_arl` re-solve):
 | m=1000 f=1 T=1,700 | ≈ 210 s | ≈ 96 s D + 2 disclosures ≈ **120 s** |
 | m=1000 f=5 T=21,634 | ≈ 70 s | ≈ 21.5 s D + 2 disclosures ≈ **24 s** |
 
-MEASUREMENT PENDING: end-to-end fit times with Decision 2 implemented; the
-implementation must measure and record them (Verification 2).
+~~MEASUREMENT PENDING: end-to-end fit times with Decision 2 implemented~~
+**Measured (code review, recorded 2026-09-28).** These are end-to-end
+two-sided fits at the value each refusal reports at the 400,000 cap. The
+platform: Apple M1 Max, 10 cores, 32 GB, macOS 26.6.2; Python 3.13 in the repository's `.venv` with the locked numpy 2.5.3 and scipy 1.18.1; head `573f12b`; a quiet machine. This is the same platform as this ADR's own local measurements.
+
+| fit at the reported 400k maximum (M=2 unless stated) | end-to-end time |
+|---|---|
+| m=300 f=3 | 30.5 s |
+| m=1000 f=10 | 14.6 s |
+| m=1000 f=5 | 7.3 s |
+| m=200 f=20 M=1.001 | 5.6 s |
+| m=1000 f=1 | 13.3 s |
+| m=1000 f=5 M=1.01 | 8.1 s |
+| m=300,000 f=1 | 0.6 s |
+
+Calibration D made **4–7 coupled solves** in these fits, where bisection
+makes 8–13. `261b416`'s ITP projection leaves every pinned solve count
+unchanged (see "Worst-case bound" below), so these figures still hold at
+head. The estimates above were made at the former 1,000,000 cap and are
+superseded by these measurements at 400,000.
 
 **Decision 2: replace calibration D's search, keep its definition.**
 
@@ -491,7 +517,9 @@ reports it relative to `x₀` ("bound").
    ADR-002 / Decision 13.4) plus an LU fallback for every comparison inside
    the bound — i.e. LU's memory is still needed on exactly the hard cells.
 
-MEASUREMENT PENDING: convergence at near-degenerate drift
+~~MEASUREMENT PENDING: convergence at near-degenerate drift~~ **Moot
+(2026-09-28):** Decision 3 rejects the iterative solver, so its convergence
+no longer needs measuring. Convergence at near-degenerate drift
 (`detect_rate_multiple` at its computed floor, e.g. m=200 f=20 M=1.001) and
 the ticket's 5M/10M-state scaling were not run. They cannot rescue the
 option: the unpreconditioned solver already misses the bar at an ordinary
@@ -720,8 +748,7 @@ superseded for f = 0.
 **Measured at the ratified cap (code review R2, added 2026-09-28).** These
 are end-to-end refusal times at the 400,000 joint cap, and the
 `max_two_sided_target_arl` each refusal reports.
-- They were measured on the code reviewer's machine. **The platform is not
-  recorded here and could not be confirmed.**
+- They were measured on the code reviewer's machine. Platform: Apple M1 Max, 10 cores, 32 GB, macOS 26.6.2; Python 3.13 in the repository's `.venv` with the locked numpy 2.5.3 and scipy 1.18.1; head `573f12b`; a quiet machine. This is the same platform as this ADR's own local measurements.
 - Each time includes the fit's own feasibility check, so it bounds C11's
   refusal overhead from above.
 - They are the evidence for code review R2.
