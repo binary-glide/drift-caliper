@@ -785,22 +785,41 @@ def _smallest_meeting_bound(
     Ported from the ADR's own prototype, including its solve of ``B(lo)`` for
     a positive ``lo`` -- the value the first interpolation starts from.
 
-    **Worst case: at most ``ceil(log2(hi - lo)) + _ITP_SLACK_PROBES`` probes**,
-    by the projection step of the ITP method (interpolate, truncate, project):
-    Oliveira, I. F. D. and Takahashi, R. H. C. (2020), "An Enhancement of the
-    Bisection Method Average Performance Preserving Minmax Optimality", *ACM
-    Transactions on Mathematical Software* 47(1), doi:10.1145/3423597. A
-    regula falsi alone has no logarithmic bound -- Illinois step or not, a
-    jump to the ill-conditioned sentinel makes it crawl, one coupled solve per
-    step (code review R1). ITP projects each interpolated probe onto an
-    interval about the midpoint sized so that, after probe ``k``, the bracket
-    is at most ``2 ** (n_max - k - 1)`` wide, with ``n_max`` bisection's probe
-    count plus the slack ``n_0``. On the integer lattice the projection is
-    exact: probe ``k`` is clamped to ``[hi - W, lo + W]`` with ``W = 2 **
-    (n_max - k - 1)``, which is non-empty and strictly inside the bracket
-    while the bracket's width is at least 2. Only the projection is taken
-    from ITP; its truncation step is not, so an unprojected probe is exactly
-    today's Illinois probe.
+    **Worst case: at most ``ceil(log2(hi - lo)) + _ITP_SLACK_PROBES``
+    probes**, using the projection step of the ITP method (interpolate,
+    truncate, project): Oliveira, I. F. D. and Takahashi, R. H. C. (2020), "An
+    Enhancement of the Bisection Method Average Performance Preserving Minmax
+    Optimality", *ACM Transactions on Mathematical Software* 47(1),
+    doi:10.1145/3423597. The bound for this integer form is proven here,
+    below, not taken from the paper. A regula falsi alone has no logarithmic
+    bound -- Illinois step or not, a jump to the ill-conditioned sentinel
+    makes it crawl, one coupled solve per step (code review R1). Only the
+    projection is taken from ITP, not its truncation step, so a probe the
+    projection does not move is exactly the Illinois probe.
+
+    The Illinois step is an average-speed heuristic, and no test pins it: the
+    correctness of the answer rests on the bracket invariant and the bound
+    rests on the projection, so removing the Illinois step would change only
+    how fast the search closes on smooth shapes.
+
+    *Proof of the bound.* Let ``w_k = hi - lo`` before probe ``k`` and
+    ``n = probes_allowed = (w_0 - 1).bit_length() + _ITP_SLACK_PROBES``, so
+    ``w_0 <= 2 ** n``. Suppose ``w_k <= 2 ** (n - k)``.
+
+    - The loop runs only while ``w_k >= 2``, so ``2 <= 2 ** (n - k)`` and
+      ``k <= n - 1``. Hence ``widest = 2 ** (n - k - 1) >= 1``: the shift
+      ``1 << (n - k - 1)`` is never negative.
+    - The clamp ``[max(lo + 1, hi - widest), min(hi - 1, lo + widest)]`` is
+      non-empty: ``lo + 1 <= hi - 1`` (``w_k >= 2``); ``hi - widest <= hi -
+      1`` and ``lo + 1 <= lo + widest`` (``widest >= 1``); and ``hi - widest
+      <= lo + widest`` (``w_k <= 2 * widest``).
+    - It lies strictly inside ``(lo, hi)``, so neither end is probed again.
+    - Whichever side the probe keeps, the new width is at most ``widest = 2 **
+      (n - (k + 1))``, which is the hypothesis for ``k + 1``.
+
+    So the width reaches 1 within ``n`` probes, whatever the interpolation
+    proposes. ``n = ceil(log2(w_0)) + _ITP_SLACK_PROBES``, since
+    ``(w - 1).bit_length() == ceil(log2(w))`` for ``w >= 1``.
     """
     b_lo = bound_at(lo) if lo >= 1 else 1.0
     b_hi = bound_at(hi)
