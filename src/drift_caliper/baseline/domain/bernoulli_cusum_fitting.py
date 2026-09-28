@@ -186,6 +186,15 @@ _DESIGN_POINT_SAFETY_MARGIN = 1e-9
 # p_l * 2**53.
 _UPPER_ARM_CEILING_FACTOR = 2.0**53
 
+# ITP's slack n_0 (Oliveira & Takahashi 2020): the probes calibration D's
+# search may spend beyond bisection's ceil(log2(bracket width)). Measured, not
+# derived: 3 is the smallest value at which the projection never binds on the
+# real B of any pinned cell (so their solve counts and designs are unchanged
+# from the unsafeguarded search), while adversarial step functions stay within
+# 23 probes on a 500,000-wide bracket (bisection: 19; Illinois alone: up to
+# 231). 0-2 each raised a pinned cell's solve count.
+_ITP_SLACK_PROBES = 3
+
 # The exceptions that mean "this linear system has no usable solution in
 # double precision" -- the ill-conditioning the sentinel stands for, and
 # nothing else:
@@ -775,16 +784,39 @@ def _smallest_meeting_bound(
 
     Ported from the ADR's own prototype, including its solve of ``B(lo)`` for
     a positive ``lo`` -- the value the first interpolation starts from.
+
+    **Worst case: at most ``ceil(log2(hi - lo)) + _ITP_SLACK_PROBES`` probes**,
+    by the projection step of the ITP method (interpolate, truncate, project):
+    Oliveira, I. F. D. and Takahashi, R. H. C. (2020), "An Enhancement of the
+    Bisection Method Average Performance Preserving Minmax Optimality", *ACM
+    Transactions on Mathematical Software* 47(1), doi:10.1145/3423597. A
+    regula falsi alone has no logarithmic bound -- Illinois step or not, a
+    jump to the ill-conditioned sentinel makes it crawl, one coupled solve per
+    step (code review R1). ITP projects each interpolated probe onto an
+    interval about the midpoint sized so that, after probe ``k``, the bracket
+    is at most ``2 ** (n_max - k - 1)`` wide, with ``n_max`` bisection's probe
+    count plus the slack ``n_0``. On the integer lattice the projection is
+    exact: probe ``k`` is clamped to ``[hi - W, lo + W]`` with ``W = 2 **
+    (n_max - k - 1)``, which is non-empty and strictly inside the bracket
+    while the bracket's width is at least 2. Only the projection is taken
+    from ITP; its truncation step is not, so an unprojected probe is exactly
+    today's Illinois probe.
     """
     b_lo = bound_at(lo) if lo >= 1 else 1.0
     b_hi = bound_at(hi)
     side = 0
+    probes_allowed = (hi - lo - 1).bit_length() + _ITP_SLACK_PROBES
+    probe = 0
     while hi - lo > 1:
         if b_hi == b_lo:
             guess = (lo + hi) // 2
         else:
             guess = lo + round((target - b_lo) * (hi - lo) / (b_hi - b_lo))
-        guess = min(max(guess, lo + 1), hi - 1)
+        # ITP's projection: the bracket this probe leaves must be no wider
+        # than 2 ** (probes_allowed - probe - 1), whichever side it keeps.
+        widest = 1 << (probes_allowed - probe - 1)
+        guess = min(max(guess, lo + 1, hi - widest), hi - 1, lo + widest)
+        probe += 1
         value = bound_at(guess)
         if value >= target:
             hi, b_hi = guess, value
