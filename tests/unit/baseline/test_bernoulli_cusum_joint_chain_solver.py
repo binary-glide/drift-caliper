@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 from hypothesis import HealthCheck, assume, given, settings
@@ -646,3 +647,126 @@ class TestCalibrationDBracketInvariant:
         assert upper_triplet == (*upper, jump)
         assert jump in probed  # the answer was solved, not assumed
         assert chart.achieved_arl == step(jump, jump, target)
+
+
+# ===========================================================================
+# Code review R1 -- the search's worst case is logarithmic
+# ===========================================================================
+
+_T = 370.0
+# The value an ill-conditioned coupled solve reports (Decision 13.4's
+# sentinel magnitude); a real B can jump to it anywhere in the bracket.
+_SENTINEL = 1e15
+
+_SearchShape = Callable[[int], float]
+
+
+def _jump_to_sentinel(jump: int) -> _SearchShape:
+    return lambda h: 1.0 + h * 1e-6 if h < jump else _SENTINEL
+
+
+def _plateau_then_jump(jump: int) -> _SearchShape:
+    return lambda h: math.nextafter(_T, 0.0) if h < jump else 2.0 * _T
+
+
+def _ramp_then_sentinel(lo: int, jump: int) -> _SearchShape:
+    return lambda h: (
+        1.0 + (_T - 2.0) * (h - lo) / (jump - lo) if h < jump else _SENTINEL
+    )
+
+
+def _sentinel_at_top(lo: int, hi: int) -> _SearchShape:
+    return lambda h: (
+        1.0 + (_T - 2.0) * (h - lo) / (2 * (hi - lo)) if h < hi else _SENTINEL
+    )
+
+
+def _saturating(lo: int, hi: int) -> _SearchShape:
+    scale = (hi - lo) / 20.0
+    return lambda h: 2.0 * _T * (1.0 - math.exp(-(h - lo) / scale))
+
+
+def _adversarial_cases() -> list[Any]:
+    cases: list[Any] = []
+    for lo, hi in ((0, 500_000), (1_000, 51_000)):
+        span = hi - lo
+        for jump in (lo + span // 100, lo + span // 3, hi - 1):
+            cases += [
+                pytest.param(
+                    lo, hi, _jump_to_sentinel(jump), id=f"sentinel_jump@{jump}"
+                ),
+                pytest.param(lo, hi, _plateau_then_jump(jump), id=f"plateau@{jump}"),
+                pytest.param(
+                    lo, hi, _ramp_then_sentinel(lo, jump), id=f"ramp_sentinel@{jump}"
+                ),
+            ]
+        cases += [
+            pytest.param(lo, hi, _sentinel_at_top(lo, hi), id=f"sentinel_at_top_{hi}"),
+            pytest.param(lo, hi, _saturating(lo, hi), id=f"saturating_{hi}"),
+        ]
+    return cases
+
+
+def _smallest_by_bisection(shape: _SearchShape, lo: int, hi: int) -> int:
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if shape(mid) >= _T:
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
+def _probe_budget(lo: int, hi: int) -> int:
+    """``2 * ceil(log2(hi - lo)) + 2``.
+
+    ``2 * ceil(log2(hi - lo))`` is R1's bound for a search that forces a
+    midpoint step whenever an interpolated probe fails to halve the bracket:
+    at worst every halving costs one failed interpolation plus one midpoint.
+    The ``+ 2`` is the search's two end evaluations, ``B(lo)`` and ``B(hi)``,
+    made before its first probe. Measured on these shapes, a search forcing
+    the midpoint after one non-halving probe peaks at exactly
+    ``2 * ceil(log2)`` calls, so the constant is slack, not a fit. A search
+    forcing it only after *two* consecutive non-halving probes can spend
+    three probes per halving, and measured up to 45 calls on the 50,000
+    bracket against this budget's 34.
+    """
+    return 2 * math.ceil(math.log2(hi - lo)) + 2
+
+
+class TestCalibrationDSearchHasALogarithmicWorstCase:
+    """Code review R1 (PR #33): ``_smallest_meeting_bound`` returns bisection's
+    answer, but a regula falsi -- Illinois step or not -- has no logarithmic
+    worst case. Each probe is a coupled solve of up to 400,000 states, and a
+    jump to the ill-conditioned sentinel is exactly the shape that crawls.
+
+    Driven directly, with adversarial monotone shapes over brackets of 500,000
+    and 50,000 (review R1's table): the answer must equal bisection's, no
+    ``h`` may be evaluated twice (a probe on a bracket end re-evaluates a
+    known end), and the calls must stay within :func:`_probe_budget`. The
+    fake raises once the budget is spent, so a search that never finishes
+    fails here instead of hanging.
+    """
+
+    @pytest.mark.parametrize(("lo", "hi", "shape"), _adversarial_cases())
+    # Budget: no chain solves -- a within-budget search is <= 40 float
+    # evaluations, and an over-budget one stops at the budget. Microseconds;
+    # 10 s is a hang guard.
+    @pytest.mark.timeout(10)
+    def test_answer_is_bisections_within_a_logarithmic_probe_count(
+        self, lo: int, hi: int, shape: _SearchShape
+    ) -> None:
+        budget = _probe_budget(lo, hi)
+        probed: list[int] = []
+
+        def bound_at(h: int) -> float:
+            assert lo <= h <= hi, f"probe {h} outside ({lo}, {hi}]"
+            assert h not in probed, f"h = {h} evaluated twice"
+            probed.append(h)
+            assert len(probed) <= budget, f"more than {budget} probes"
+            return shape(h)
+
+        answer = fitting_module._smallest_meeting_bound(bound_at, _T, lo, hi)
+
+        assert answer == _smallest_by_bisection(shape, lo, hi)
+        assert len(probed) <= budget
