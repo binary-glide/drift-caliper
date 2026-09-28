@@ -29,6 +29,11 @@ edited.
 > ✅ *Ruled 2026-09-27 (see Status): the joint cap **is** lowered to 400,000 and
 > the one-sided cap decoupled at 999,999. "The cap stays at 1,000,000" above
 > describes the state before the ruling.*
+>
+> *Added 2026-09-28: calibration D's search now has a logarithmic worst case,
+> at most ⌈log₂(hi − lo)⌉ + 3 probes, from ITP's projection step (Decision 2,
+> "Worst-case bound"). At the 400,000 cap, the refusal path measured 1.1–26.9 s
+> end to end (Q1, "Measured at the ratified cap").*
 
 ---
 
@@ -199,7 +204,9 @@ because they show what the state count alone does *not* bound: at the same
    attainable. m=300 f=3 at its reported maximum did not finish one solve
    in 15 minutes. Locally, `max_two_sided_target_arl` for m=300 f=3 at
    T=10⁶ took **931 s** to compute (`capcost.py`) — C11's refusal budget
-   (≤ 30 s) was measured on a table that did not include this cell.
+   (≤ 30 s) was measured on a table that did not include this cell. At the
+   ratified 400,000 cap the same refusal took 12.0 s (Q1, "Measured at the
+   ratified cap").
 4. **Bytes per state spans 600 to 2,500 across reachable shapes** (12,600
    across constructible ones). The narrow arm's small denominator (N = 27,
    39) with a long upper arm is what drives fill-in: the band the lower
@@ -387,6 +394,46 @@ implementation must measure and record them (Verification 2).
 Nothing reported changes: same intervals, same `B` (the same solve on the
 same matrix), same refusals.
 
+**Worst-case bound (added 2026-09-28, code review R1).** A regula falsi has
+no logarithmic worst case, with or without the Illinois step. Code review R1
+showed the failure: a jump in `B` to the ill-conditioned sentinel makes the
+interpolation crawl, one coupled solve per step. Implemented on
+`perf/BIN-165/joint-chain-solver` at `261b416`
+(`_smallest_meeting_bound` in `bernoulli_cusum_fitting.py`), the search now
+takes the **projection step** of the ITP method:
+
+- **Source.** Oliveira, I. F. D. and Takahashi, R. H. C. (2020), "An
+  Enhancement of the Bisection Method Average Performance Preserving Minmax
+  Optimality", *ACM Transactions on Mathematical Software* 47(1),
+  doi:10.1145/3423597.
+- **What is taken.** Only the projection is taken; ITP's truncation step is
+  not. Each interpolated probe `k` is clamped to `[hi − W, lo + W]`, with
+  `W = 2^(n_max − k − 1)`, `n_max = ⌈log₂(hi − lo)⌉ + n₀`, and slack
+  `n₀ = _ITP_SLACK_PROBES = 3`. A probe the projection does not move is
+  exactly the Illinois probe described above.
+- **The bound.** The search makes at most **⌈log₂(hi − lo)⌉ + 3** probes
+  inside the bracket. This does not count the evaluations of `B(hi)` and,
+  when `lo ≥ 1`, of `B(lo)` that start the interpolation.
+- **What the bound rests on.**
+  - The paper's result (Theorem 2.1: at most `n_{1/2} + n₀` evaluations) is
+    for a continuous bracket and an ε-tolerance. **The paper is paywalled.
+    That theorem was checked through a secondary source**, the Wikipedia
+    article "ITP method", which states Theorem 2.1 and the projection step.
+    It was not checked against the paper's text.
+  - **The integer bound does not rest on the paper.** It rests on the
+    width invariant argued in the code's docstring. After probe `k` the
+    bracket is at most `2^(n_max − k − 1)` wide, whichever side is kept, and
+    on the integer lattice the clamp interval is non-empty and strictly
+    inside the bracket while its width is at least 2.
+- **The slack is measured, not derived.** `n₀ = 3` is the smallest value at
+  which the projection never binds on the real `B` of any pinned cell.
+  Values 0–2 each raised a pinned cell's solve count. With 3, adversarial
+  step functions stay within 23 probes on a 500,000-wide bracket, against 19
+  for bisection and up to 231 for Illinois alone.
+- **Unchanged.** Every fitted answer and every solve-count pin is unchanged.
+  The invariant `B(lo) < T ≤ B(hi)`, and therefore the returned `h_up`, is
+  bisection's, as before.
+
 ---
 
 ## Finding 3 — an iterative solver (ticket items 1–5)
@@ -503,7 +550,8 @@ read. No pull request was opened.**
   the few coupled solves that remain and the two disclosure solves, each
   5–25 s. Only a cheaper *solve* would move that, and neither lever measured
   here provides one.
-- Calibration D becomes a regula-falsi search rather than a textbook
+- Calibration D becomes a regula-falsi search (with ITP's projection
+  bounding its worst case, Decision 2) rather than a textbook
   bisection — more code to review, justified by its bracket invariant, not
   by the interpolation.
 
@@ -668,6 +716,34 @@ Either way, a follow-up is warranted independent of Q1: at today's cap,
 `max_two_sided_target_arl` (C11's ≤ 30 s budget was set on cells that did
 not include it), and ADR-014 Decision 10b's `max_t` table should be marked
 superseded for f = 0.
+
+**Measured at the ratified cap (code review R2, added 2026-09-28).** These
+are end-to-end refusal times at the 400,000 joint cap, and the
+`max_two_sided_target_arl` each refusal reports.
+- They were measured on the code reviewer's machine. **The platform is not
+  recorded here and could not be confirmed.**
+- Each time includes the fit's own feasibility check, so it bounds C11's
+  refusal overhead from above.
+- They are the evidence for code review R2.
+
+| cell (M=2 unless stated) | refusal time | `max_two_sided_target_arl` |
+|---|---|---|
+| m=300 f=3 | 12.0 s | 25,526 |
+| m=1000 f=10 | 8.2 s | 28,134 |
+| m=1000 f=5 | 5.7 s | 4,759 |
+| m=200 f=20 M=1.001 | 4.1 s | 106 |
+| m=1000 f=1 | 7.2 s | 808 |
+| m=1000 f=5 M=1.01 | 26.9 s | 650 |
+| m=300,000 f=1 | 1.1 s | 38,563 |
+
+- **Every cell is inside C11's ≤ 30 s budget.** The worst is 26.9 s, at the
+  M=1.01 corner.
+- **m=300 f=3 falls from 931 s at the 1,000,000 cap to 12.0 s.**
+- The M=2 values agree with the 400,000 column of the table above.
+
+**Not re-measured at 400,000:** C11's 0–31% shortfall against the true
+calibration-D maximum, and its 302-design premise check. The one-solve
+guard keeps the reported value correct regardless.
 
 **Q2 — Decision 2.** Accept the regula-falsi calibration D and the dropped
 re-solve, as a pure performance change with the identity test in
