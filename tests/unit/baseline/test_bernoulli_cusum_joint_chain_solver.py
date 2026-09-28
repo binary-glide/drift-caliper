@@ -717,21 +717,24 @@ def _smallest_by_bisection(shape: _SearchShape, lo: int, hi: int) -> int:
     return hi
 
 
-def _probe_budget(lo: int, hi: int) -> int:
-    """``2 * ceil(log2(hi - lo)) + 2``.
+# ADR-016 Decision 2, "Worst-case bound": the search takes "at most
+# ceil(log2(hi - lo)) + 3 probes" -- ITP's projection with slack n_0 = 3
+# (Oliveira & Takahashi 2020). Pinned here so the documented number and the
+# enforced one cannot drift apart.
+_ITP_SLACK = 3
 
-    ``2 * ceil(log2(hi - lo))`` is R1's bound for a search that forces a
-    midpoint step whenever an interpolated probe fails to halve the bracket:
-    at worst every halving costs one failed interpolation plus one midpoint.
-    The ``+ 2`` is the search's two end evaluations, ``B(lo)`` and ``B(hi)``,
-    made before its first probe. Measured on these shapes, a search forcing
-    the midpoint after one non-halving probe peaks at exactly
-    ``2 * ceil(log2)`` calls, so the constant is slack, not a fit. A search
-    forcing it only after *two* consecutive non-halving probes can spend
-    three probes per halving, and measured up to 45 calls on the 50,000
-    bracket against this budget's 34.
-    """
-    return 2 * math.ceil(math.log2(hi - lo)) + 2
+
+def _interior_probe_budget(lo: int, hi: int) -> int:
+    """``ceil(log2(hi - lo)) + 3``: ADR-016's worst case for the probes strictly
+    inside the starting bracket. It uses the documented slack, not the
+    module's, so a changed slack fails the probe counts as well as the pin."""
+    return math.ceil(math.log2(hi - lo)) + _ITP_SLACK
+
+
+def _probe_budget(lo: int, hi: int) -> int:
+    """Every ``bound_at`` call: the interior budget plus the search's two end
+    evaluations, ``B(lo)`` and ``B(hi)``, made before its first probe."""
+    return _interior_probe_budget(lo, hi) + 2
 
 
 class TestCalibrationDSearchHasALogarithmicWorstCase:
@@ -743,13 +746,22 @@ class TestCalibrationDSearchHasALogarithmicWorstCase:
     Driven directly, with adversarial monotone shapes over brackets of 500,000
     and 50,000 (review R1's table): the answer must equal bisection's, no
     ``h`` may be evaluated twice (a probe on a bracket end re-evaluates a
-    known end), and the calls must stay within :func:`_probe_budget`. The
-    fake raises once the budget is spent, so a search that never finishes
-    fails here instead of hanging.
+    known end), and the probes must stay within ADR-016 Decision 2's
+    worst-case bound, ``ceil(log2(hi - lo)) + 3`` inside the bracket plus the
+    two end evaluations. The fake raises once the budget is spent, so a search
+    that never finishes fails here instead of hanging.
     """
 
+    # Budget: reads one module attribute. 10 s is a hang guard.
+    @pytest.mark.timeout(10)
+    def test_the_projection_slack_is_the_documented_three(self) -> None:
+        """ADR-016 Decision 2, "Worst-case bound", and ``docs/domain-model.md``
+        both state "at most ceil(log2) + 3 probes". The budgets below read the
+        module's slack, so this pins that slack to the documented value."""
+        assert fitting_module._ITP_SLACK_PROBES == _ITP_SLACK
+
     @pytest.mark.parametrize(("lo", "hi", "shape"), _adversarial_cases())
-    # Budget: no chain solves -- a within-budget search is <= 40 float
+    # Budget: no chain solves -- a within-budget search is <= 24 float
     # evaluations, and an over-budget one stops at the budget. Microseconds;
     # 10 s is a hang guard.
     @pytest.mark.timeout(10)
@@ -770,3 +782,5 @@ class TestCalibrationDSearchHasALogarithmicWorstCase:
 
         assert answer == _smallest_by_bisection(shape, lo, hi)
         assert len(probed) <= budget
+        interior = [h for h in probed if lo < h < hi]
+        assert len(interior) <= _interior_probe_budget(lo, hi), len(interior)
